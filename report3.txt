@@ -1,0 +1,33 @@
+From: Koichi Murase <myoga.murase@gmail.com>
+To: bug-bash@gnu.org
+Subject: [PATCH: bash-5.0.0(2)-alpha] fix a bug that "bind -r" sometimes causes a segmentation fault
+
+Bash Version:
+
+  I used the following latest commit from the devel branch.
+
+  commit bf5b8103d466fdbc3bfcdaa5e21a0d0c0dce7cba
+  Author: Chet Ramey <chet.ramey@case.edu>
+  Date:   Mon Mar 12 08:10:29 2018 -0400
+
+      commit bash-20180309 snapshot
+
+Description:
+
+  At the line lib/readline/bind.c:376, an uninitialized variable `ic' is used to assign a value to the variable `prevkey'.
+  This assignment to `prevkey' should be later than the assignment to `ic'.
+  This causes segmentation faults in Bash of the devel branch.
+  There is no such problem in Bash 4.4.
+
+Repeat-By:
+
+  I noticed this bug in the following reduced case causing the segmentation fault, but it should depend on environments because accessing uninitialized variables generally results in undefined behavior.
+
+  $ bash-5.0.0 --norc
+  $ bind -r '\C-j'
+  $ bind -r `\C-m`
+  Segmentation fault
+
+Fix:
+
+  I attach a patch file.
