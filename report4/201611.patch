@@ -1,0 +1,26 @@
+diff --git a/lib/readline/bind.c b/lib/readline/bind.c
+index 32d99d3..711348c 100644
+--- a/lib/readline/bind.c
++++ b/lib/readline/bind.c
+@@ -304,11 +304,20 @@ rl_bind_keyseq_if_unbound_in_map (keyseq, default_func, kmap)
+      rl_command_func_t *default_func;
+      Keymap kmap;
+ {
++  char *keys;
++  int keys_len;
+   rl_command_func_t *func;
+ 
+   if (keyseq)
+     {
+-      func = rl_function_of_keyseq (keyseq, kmap, (int *)NULL);
++      keys = (char *)xmalloc (1 + (2 * strlen (keyseq)));
++      if (rl_translate_keyseq (keyseq, keys, &keys_len))
++        {
++          xfree (keys);
++          return -1;
++        }
++      func = rl_function_of_keyseq_with_length (keys, keys_len, kmap, (int *)NULL);
++      xfree (keys);
+ #if defined (VI_MODE)
+       if (!func || func == rl_do_lowercase_version || func == rl_vi_movement_mode)
+ #else

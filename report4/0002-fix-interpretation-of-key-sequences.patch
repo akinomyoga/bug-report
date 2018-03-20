@@ -1,0 +1,89 @@
+From c57a7b470b289850f18342ff8c41bd6240c657ba Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Wed, 21 Mar 2018 01:12:30 +0900
+Subject: [PATCH 2/2] fix interpretation of key sequences
+
+---
+ lib/readline/bind.c     | 21 ++++++++++++++-------
+ lib/readline/readline.c |  1 -
+ lib/readline/terminal.c |  1 +
+ 3 files changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/lib/readline/bind.c b/lib/readline/bind.c
+index e77a2cd..d785b86 100644
+--- a/lib/readline/bind.c
++++ b/lib/readline/bind.c
+@@ -193,20 +193,18 @@ rl_bind_key_in_map (int key, rl_command_func_t *function, Keymap map)
+ int
+ rl_bind_key_if_unbound_in_map (int key, rl_command_func_t *default_func, Keymap kmap)
+ {
+-  char keyseq[2];
++  char *keyseq;
+ 
+-  keyseq[0] = (unsigned char)key;
+-  keyseq[1] = '\0';
++  keyseq = rl_untranslate_keyseq (key);
+   return (rl_bind_keyseq_if_unbound_in_map (keyseq, default_func, kmap));
+ }
+ 
+ int
+ rl_bind_key_if_unbound (int key, rl_command_func_t *default_func)
+ {
+-  char keyseq[2];
++  char *keyseq;
+ 
+-  keyseq[0] = (unsigned char)key;
+-  keyseq[1] = '\0';
++  keyseq = rl_untranslate_keyseq (key);
+   return (rl_bind_keyseq_if_unbound_in_map (keyseq, default_func, _rl_keymap));
+ }
+ 
+@@ -286,11 +284,20 @@ rl_set_key (const char *keyseq, rl_command_func_t *function, Keymap map)
+ int
+ rl_bind_keyseq_if_unbound_in_map (const char *keyseq, rl_command_func_t *default_func, Keymap kmap)
+ {
++  char *keys;
++  int keys_len;
+   rl_command_func_t *func;
+ 
+   if (keyseq)
+     {
+-      func = rl_function_of_keyseq (keyseq, kmap, (int *)NULL);
++      keys = (char *)xmalloc (1 + (2 * strlen (keyseq)));
++      if (rl_translate_keyseq (keyseq, keys, &keys_len))
++        {
++          xfree (keys);
++          return -1;
++        }
++      func = rl_function_of_keyseq_with_length (keys, keys_len, kmap, (int *)NULL);
++      xfree (keys);
+ #if defined (VI_MODE)
+       if (!func || func == rl_do_lowercase_version || func == rl_vi_movement_mode)
+ #else
+diff --git a/lib/readline/readline.c b/lib/readline/readline.c
+index 4842a02..3fcebf4 100644
+--- a/lib/readline/readline.c
++++ b/lib/readline/readline.c
+@@ -1314,7 +1314,6 @@ bind_arrow_keys_internal (Keymap map)
+   rl_bind_keyseq_if_unbound ("\340S", rl_delete);
+   rl_bind_keyseq_if_unbound ("\340R", rl_overwrite_mode);
+ 
+-  /* These may or may not work because of the embedded NUL. */
+   rl_bind_keyseq_if_unbound ("\\000H", rl_get_previous_history);
+   rl_bind_keyseq_if_unbound ("\\000P", rl_get_next_history);
+   rl_bind_keyseq_if_unbound ("\\000M", rl_forward_char);
+diff --git a/lib/readline/terminal.c b/lib/readline/terminal.c
+index d9a6a99..e6e20bb 100644
+--- a/lib/readline/terminal.c
++++ b/lib/readline/terminal.c
+@@ -586,6 +586,7 @@ bind_termcap_arrow_keys (Keymap map)
+   xkeymap = _rl_keymap;
+   _rl_keymap = map;
+ 
++  /* These may or may not work because of the embedded backslashes. */
+   rl_bind_keyseq_if_unbound (_rl_term_ku, rl_get_previous_history);
+   rl_bind_keyseq_if_unbound (_rl_term_kd, rl_get_next_history);
+   rl_bind_keyseq_if_unbound (_rl_term_kr, rl_forward_char);
+-- 
+2.9.5
+

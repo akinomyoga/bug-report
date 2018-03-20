@@ -1,0 +1,74 @@
+From: Koichi Murase <myoga.murase@gmail.com>
+To: bug-bash@gnu.org
+Subject: [PATCH] fix a bug that bind -x '"\C-@": unix-command' does not work
+
+Hello, I would like to send two patches and raise two suggestions which are related to two different `keyseq' types.
+
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS:  -DPROGRAM='bash' -DCONF_HOSTTYPE='x86_64' -DCONF_OSTYPE='linux-gnu' -DCONF_MACHTYPE='x86_64-redhat-linux-gnu' -DCONF_VENDOR='redhat' -DLOCALEDIR='/usr/share/locale' -DPACKAGE='bash' -DSHELL -DHAVE_CONFIG_H   -I.  -I. -I./include -I./lib  -D_GNU_SOURCE -DRECYCLES_PIDS -DDEFAULT_PATH_VALUE='/usr/local/bin:/usr/bin'  -O2 -g -pipe -Wall -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong --param=ssp-buffer-size=4 -grecord-gcc-switches -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -m64 -mtune=generic -Wno-parentheses -Wno-format-security
+uname output: Linux chatoyancy 4.14.8-300.fc27.x86_64 #1 SMP Wed Dec 20 19:00:18 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-redhat-linux-gnu
+
+Bash Version: 4.4
+Patch Level: 12
+Release Status: release
+
+
+Description:
+
+  In bash-4.3.43, bash-4.4.12, and the latest commit of the devel branch, `bind -x' does not work for key sequences containing `\C-@'.
+
+Repeat-By:
+
+  First setup the following key binding.
+
+    $ bash-4.4 --norc
+    $ bind -x '"\C-@": echo hello'
+    $ 
+
+  Then type C-@ (or C-space), and we will have the following message.
+
+    bash-4.4: bash_execute_unix_command: cannot find keymap for command
+    $ 
+
+  Until bash-4.2, the key binding have worked correctly as follows.
+
+    hello
+    $ 
+
+Fix:
+
+  The error message is raised for the failure of retrieving command strings from `cmd_xmap' in the function `bash_execute_unix_command' at the line 4105 in `bashline.c' (devel branch):
+
+      cmd = (char *)rl_function_of_keyseq (rl_executing_keyseq, cmd_xmap, &type);
+
+  The problem seems to be caused by the design of the function `rl_function_of_keyseq' defined at the line 764 in `lib/readline/bind.c' (devel branch). There are two types of key sequence representation: one is what I call here the `untranslated keyseq' which can contain backslash sequences such as `\C-@' (equivalent to `\0'), and the other is the `translated keyseq' which can be obtained by passing the untranslated keyseq to the function `rl_translate_keyseq'. If a function accepts translated keyseqs as arguments, it should also accept the length argument since otherwise it is impossible to identify the correct end of the translated keyseqs which can contain null characters. Note that the function `rl_translate_keyseq' returns the length, as well as the translated keyseqs, through the output parameter `int *len'. However, the function `rl_function_of_keyseq' only accepts `translated keyseq'.
+
+  In the first patch I attached, `0001-fix-a-bug-that-bind-x-C-unix-command-does-not-work.patch', I added a new function which accepts the translated keyseq and its length as arguments. Here I kept the signature and the behavior of `rl_function_of_keyseq' as it appears to be a part of public interface of Readline library (Maybe the library interface should also be changed in some way). Note: The attached patch files are made for the devel branch (and similar fixes worked for bash-4.4 though I have not checked with bash-4.3).
+
+  --------
+
+  Actually there are several other similar problems. The second patch I attached, `0002-fix-interpretation-of-key-sequences.patch', is for the following problems.
+
+  The function `rl_bind_keyseq_if_unbound_in_map' defined at the line 287 in `lib/readline/bind.c' (devel branch) passes its argument `keyseq' to two functions `rl_function_of_keyseq' and `rl_bind_keyseq_in_map'. However, the first one `rl_function_of_keyseq' accepts translated sequences while the second one `rl_bind_keyseq_in_map' accepts untranslated sequences. To resolve this inconsistency without changing the parameters of `rl_bind_keyseq_if_unbound', `rl_bind_keyseq_if_unbound' should accept untranslated sequences.
+
+  The functions `rl_bind_key_if_unbound_in_map' and `rl_bind_key_if_unbound' accept an argument `key' and construct some null-terminated keyseq to pass it to `rl_bind_keyseq_if_unbound_in_map'. Here if one passes `CTRL('@')' to these functions, empty strings will be passed to `rl_bind_keyseq_if_unbound_in_map`. Here `rl_untranslate_keyseq' should be used to construct an unstranslated keyseq.
+
+  --------
+
+  In the function `bind_termcap_arrow_keys' defined at the line 582 in `lib/readline/terminal.c' (devel branch), `rl_bind_keyseq_if_unbound' which accepts untranslated sequences are called with translated sequences such as `_rl_term_ku', `_rl_term_kd', etc. To correct this, there can be at least two strategies: (a) define a function to untranslate translated keyseqs into untranslated keyseqs and untranslate `_rl_term_ku', etc. before passing it to `rl_bind_keyseq_if_unbound', or (b) define functions, alternative to `rl_bind_keyseq_if_unbound', which accepts translated sequences and its length as arguments and use it. For the strategy (b), we need to also define the translated-keyseq versions of `rl_bind_keyseq_if_unbound_in_map', `rl_bind_keyseq_in_map', and `rl_generic_bind' since the implementation of `rl_bind_keyseq_if_unbound' relies on these functions.
+
+  I did not make patch for this because I felt that discussion is needed to decide which strategy is better (or possibly there are other strategies).
+
+  --------
+
+  In the documentation which can be found, for example, at https://tiswww.case.edu/php/chet/readline/readline.html, there is no distinction between the translated keyseqs and the untranslated keyseqs. However, in fact, each ``keyseq'' appearing in the documents should be one of translated keyseq and untranslated keyseq. Apparently the confusion coming from this ambiguity caused the problems above. I believe in the documentation it should be clarified that which of the two keyseq types each ``keyseq'' represents, or a new terminology (something like `keys' for translated keyseqs contrast to `keyseq' for untranslated keyseqs) should be introduced to distinguish the two types of keyseqs.
+
+
+Thank you,
+
+Koichi
