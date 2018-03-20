@@ -1,0 +1,31 @@
+From: Koichi Murase <myoga.murase@gmail.com>
+To: bug-bash@gnu.org
+Subject: [50 character or so descriptive subject here (for reference)]
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS:  -DPROGRAM='bash' -DCONF_HOSTTYPE='x86_64' -DCONF_OSTYPE='linux-gnu' -DCONF_MACHTYPE='x86_64-redhat-linux-gnu' -DCONF_VENDOR='redhat' -DLOCALEDIR='/usr/share/locale' -DPACKAGE='bash' -DSHELL -DHAVE_CONFIG_H   -I.  -I. -I./include -I./lib  -D_GNU_SOURCE -DRECYCLES_PIDS -DDEFAULT_PATH_VALUE='/usr/local/bin:/usr/bin'  -O2 -g -pipe -Wall -Werror=format-security -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong --param=ssp-buffer-size=4 -grecord-gcc-switches -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -m64 -mtune=generic -Wno-parentheses -Wno-format-security
+uname output: Linux chatoyancy 4.14.8-300.fc27.x86_64 #1 SMP Wed Dec 20 19:00:18 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-redhat-linux-gnu
+
+Bash Version: 4.4
+Patch Level: 12
+Release Status: release
+
+Description:
+	[Detailed description of the problem, suggestion, or complaint.]
+
+Repeat-By:
+	[Describe the sequence of events that causes the problem
+	to occur.]
+
+Fix:
+	[Description of how to fix the problem.  If you don't know a
+	fix for the problem, don't include this section.]
+
+
+Thank you,
+
+Koichi
