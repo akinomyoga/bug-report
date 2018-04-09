@@ -1,0 +1,62 @@
+From 5915233b06d65d9d0e3d1c35fb9bbcb180499ac0 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 9 Apr 2018 14:57:33 +0900
+Subject: [PATCH] change READLINE_POINT to count characters
+
+---
+ bashline.c | 18 +++++++++++++++++-
+ 1 file changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/bashline.c b/bashline.c
+index 60f3499..a8e82c1 100644
+--- a/bashline.c
++++ b/bashline.c
+@@ -66,6 +66,7 @@
+ #include <readline/rlconf.h>
+ #include <readline/readline.h>
+ #include <readline/history.h>
++#include <readline/rlmbutil.h>
+ 
+ #include <glob/glob.h>
+ 
+@@ -4098,6 +4099,7 @@ bash_execute_unix_command (count, key)
+   char *cmd, *value, *ce;
+   SHELL_VAR *v;
+   char ibuf[INT_STRLEN_BOUND(int) + 1];
++  char old_ch;
+ 
+   /* First, we need to find the right command to execute.  This is tricky,
+      because we might have already indirected into another keymap, so we
+@@ -4129,7 +4131,17 @@ bash_execute_unix_command (count, key)
+   v = bind_variable ("READLINE_LINE", rl_line_buffer, 0);
+   if (v)
+     VSETATTR (v, att_exported);
+-  value = inttostr (rl_point, ibuf, sizeof (ibuf));
++  i = rl_point;
++#if defined (HANDLE_MULTIBYTE)
++  if (MB_CUR_MAX > 1)
++    {
++      old_ch = rl_line_buffer[rl_point];
++      rl_line_buffer[rl_point] = '\0';
++      i = MB_STRLEN(rl_line_buffer);
++      rl_line_buffer[rl_point] = old_ch;
++    }
++#endif
++  value = inttostr (i, ibuf, sizeof (ibuf));
+   v = bind_int_variable ("READLINE_POINT", value, 0);
+   if (v)
+     VSETATTR (v, att_exported);
+@@ -4146,6 +4158,10 @@ bash_execute_unix_command (count, key)
+   if (v && legal_number (value_cell (v), &mi))
+     {
+       i = mi;
++#if defined (HANDLE_MULTIBYTE)
++      if (MB_CUR_MAX > 1 && i > 0)
++	i = _rl_find_next_mbchar(rl_line_buffer, 0, i, 0);
++#endif
+       if (i != rl_point)
+ 	{
+ 	  rl_point = i;
+-- 
+2.9.5
+

@@ -1,0 +1,92 @@
+From: Koichi Murase <myoga.murase@gmail.com>
+To: bug-bash@gnu.org
+Subject: READLINE_POINT with multibyte locales
+
+Configuration Information [Automatically generated, do not change]:
+Machine: i686
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS:  -DPROGRAM='bash' -DCONF_HOSTTYPE='i686' -DCONF_OSTYPE='linux-gnu' -DCONF_MACHTYPE='i686-pc-linux-gnu' -DCONF_VENDOR='pc' -DLOCALEDIR='/home/murase/opt/bash-4.4.19/share/locale' -DPACKAGE='bash' -DSHELL -DHAVE_CONFIG_H   -I.  -I. -I./include -I./lib   -O2 -march=native -Wno-parentheses -Wno-format-security
+uname output: Linux padparadscha 4.13.13-100.fc25.i686 #1 SMP Wed Nov 15 18:24:19 UTC 2017 i686 i686 i386 GNU/Linux
+Machine Type: i686-pc-linux-gnu
+
+Bash Version: 4.4
+Patch Level: 19
+Release Status: release
+
+Description:
+
+  Currently `READLINE_POINT' counts the number of bytes but not characters. This makes difficult to properly implement shell functions for `bind -x' that uses `READLINE_POINT'. In fact, almost all the implementations which can be found in the internet is broken in this sense.
+
+
+Repeat-By:
+
+  For example, the following naive implementation of a function inserting strings causes problems with multibyte `LC_CTYPE':
+
+  $ echo $LANG
+  ja_JP.UTF-8         # Here I use Japanese locale for illustration,
+                      # but this problem occurs with every multibyte
+                      # locales.
+  $ rl-insert () { READLINE_LINE=${READLINE_LINE::READLINE_POINT}$1${READLINE_LINE:READLINE_POINT}; ((READLINE_POINT+=${#1})); }
+  $ bind -x '"\C-t": rl-insert AA'
+
+  After the above setup, enter the following string and move the cursor between `あ' and `い' (between the first two multibyte characters).
+
+  $ echo あいうえお
+
+  And then press `C-t' to call the shell function. The result is
+
+  $ echo あいうAAえお       # (expects `echo あAAいうえお' with the
+                            # cursor being just after `AA')
+
+  Next press several `a's and one will find broken characters in the line buffer and also broken position calculations which causes the vanishing prompt and misrendering of the line.
+
+  $ echo あ?a?うAAえお     # (expects echo `あAAaいうえお' with the
+                           # cursor being after `a')
+
+  To properly implement the above function, we have to convert `READLINE_POINT' from bytes to characters, and vice versa:
+
+  rl-insert () {
+    # from bytes to characters
+    LC_ALL=C LC_CTYPE=C eval 'local head=${READLINE_LINE::READLINE_POINT}'
+    READLINE_POINT=${#head}
+
+    READLINE_LINE=${READLINE_LINE::READLINE_POINT}$1${READLINE_LINE:READLINE_POINT}
+    ((READLINE_POINT+=${#1}))
+
+    # from characters to bytes
+    head=${READLINE_LINE::READLINE_POINT}
+    LC_ALL=C LC_CTYPE=C eval 'READLINE_LINE=${#head}'
+  }
+
+
+Fix:
+
+  In all the versions of Bash since 4.0 where the variable `READLINE_POINT' was introduced, the `READLINE_POINT' has been containing the position of cursor counted by the number of bytes, but not by the number of characters. I'm not sure if this is an intended behavior or not, but the problems are:
+
+  1. This behavior to count bytes is not documented. The behavior is counter-intuitive since all the other bash functionalities, such as `${#var}' and `${var:offset:length}', count characters but not bytes, so even if the current behavior is intended one, I believe it should be clearly stated in documents.
+
+  2. It is highly non-trivial to properly implement functions that uses `READLINE_POINT'. In addition, even if test cases are prepared for such functions, it is difficult to find the problem because test cases are usually composed of only single byte characters.
+
+  In fact, many implementations of functions that uses `READLINE_POINT` can be found on the internet, but almost no implementation properly workaround the problem where I searched around GitHub, Stack Overflow, and Qiita (which is a Japanese site). I used following search queries (to reduce noises in GitHub).
+
+  - https://github.com/search?utf8=%E2%9C%93&q=LC_CTYPE+READLINE_POINT+NOT+LC_MESSAGES+NOT+rl_line_buffer&type=Code
+  - https://github.com/search?q=LC_ALL+READLINE_POINT+NOT+LC_MESSAGES+NOT+rl_line_buffer+NOT+READLINE_LINE_BUFFER&type=Code&utf8=%E2%9C%93
+  - https://github.com/search?utf8=%E2%9C%93&q=wc+%22READLINE_POINT%3D%22+NOT+LC_MESSAGES+NOT+rl_line_buffer+NOT+READLINE_LINE_BUFFER&type=Code
+  - https://stackoverflow.com/search?q=%22READLINE_POINT%22
+  - https://qiita.com/search?page=2&q=%22READLINE_POINT%22
+
+  As far as I could find, the only script aware of this problem is `kingbash.script', but it's still broken. I could find three versions of `kingbash.script' on GitHub, as the following links, with workarounds on updating the `READLINE_POINT', but none of them properly determine the insertion position of strings. Also even the workarounds in the first and second version fails with `LC_ALL` being set to multibyte locales (as they only set `LC_CTYPE' which would be overridden by `LC_ALL').
+
+  - https://github.com/eMPee584/kingbash/blob/93560d350a3a8510d2679886300f894db7acf37b/kingbash.script
+  - https://github.com/billinux/dot/blob/986cc0b8df950687ff0b50aced6df5a755a9b9d3/bin/kingbash.script
+  - https://github.com/zeltak/dotfiles/blob/7eac1c354a5369a7a10698bac2f0db214860af5e/LAPTOP/scripts/%24SCRPAS/kingbash.script
+
+  3. If a user improperly implement the function, it causes a broken line buffer and broken position calculations in the terminal resulting in misrendering.
+
+  Also, currently I don't see any benefit to provide the information on byte offset to user.
+
+
+  One way to fix this problem is to keep the current behavior and to explicitly describe the current behavior in the documents, leaving all the existing scripts broken. But IMHO, this is a good chance to change the behavior to count characters on the release of major version Bash-5.0 since now multibyte encoding is converging to UTF-8 and there are no longer reasons to refrain from using multibyte encoding, so the multibyte encoding (UTF-8) will be more and more used. Maybe also the behavior in existing versions of Bash should be fixed since most of existing scripts are broken for this point.
+
+  Attached patch is an example fix made for the current devel branch of Bash.
