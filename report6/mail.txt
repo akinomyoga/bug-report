@@ -1,0 +1,40 @@
+From: Koichi Murase <myoga.murase@gmail.com>
+To: bug-bash@gnu.org
+Subject: [PATCH] `bind -x' inside `bind -x' bindings
+
+Configuration Information [Automatically generated, do not change]:
+Machine: i686
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS:  -DPROGRAM='bash' -DCONF_HOSTTYPE='i686' -DCONF_OSTYPE='linux-gnu' -DCONF_MACHTYPE='i686-pc-linux-gnu' -DCONF_VENDOR='pc' -DLOCALEDIR='/home/murase/opt/bash-4.4.19/share/locale' -DPACKAGE='bash' -DSHELL -DHAVE_CONFIG_H   -I.  -I. -I./include -I./lib   -O2 -march=native -Wno-parentheses -Wno-format-security
+uname output: Linux padparadscha 4.13.13-100.fc25.i686 #1 SMP Wed Nov 15 18:24:19 UTC 2017 i686 i686 i386 GNU/Linux
+Machine Type: i686-pc-linux-gnu
+
+Bash Version: 4.4
+Patch Level: 19
+Release Status: release
+
+Description:
+
+  After calls of `bind -x' inside functions called via `bind -x', random strings are executed as a command.
+
+  This happens in the following way: When the binding is overwritten using `bind -x' inside the function called through `bind -x' bindings, the original string registered for the binding is deallocated although it is still under evaluation. Then the memory block will be allocated for other purposes and the content will be rewritten. Finally the new data written to the memory block is evaluated.
+
+Repeat-By:
+
+  The following example is a minimal example that reproduces the problem.
+
+  $ bash-4.4 --norc
+  $ f1() { bind -x '"\C-t": f1'; }; f1
+
+  After this, on typing `C-t', a random string is exected as a command string and produces the error messages like:
+
+  bash-4.4: $'\317\003': command not found
+
+  At least all the versions from Bash 4.0 to Bash 4.4 have the same problem. I haven't checked for Bash 3.2 or older versions.
+
+Fix:
+
+  Maybe the usage in the above example seems useless to some people, but it's just a reduced example. In my complex scripts I do need to rebind key bindings in `bind -x' functions. I attach a patch for devel branch to allow safe `bind -x' inside the function called through `bind -x' bindings.
+
+  Also the execution of random memory contents can generally be a security issue although I'm not sure if this problem can really be used for attacks. Basically the content written to the deallocated strings is not under control, but it's difficult to ensure that there is no way for other user to control the content. So maybe it's better to apply this fix also to older versions of Bash.

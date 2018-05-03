@@ -1,0 +1,26 @@
+From fb7cc02fc1ca8a096ec6fff0dc0a11b880eabe9f Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 16 Apr 2018 23:50:13 +0900
+Subject: [PATCH] fix a bug that random commands are executed after "bind" in a
+ "bind -x" function
+
+---
+ bashline.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/bashline.c b/bashline.c
+index 91d4446..e800c7c 100644
+--- a/bashline.c
++++ b/bashline.c
+@@ -4147,7 +4147,7 @@ bash_execute_unix_command (count, key)
+   array_needs_making = 1;
+ 
+   save_parser_state (&ps);
+-  r = parse_and_execute (cmd, "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
++  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST);
+   restore_parser_state (&ps);
+ 
+   v = find_variable ("READLINE_LINE");
+-- 
+2.9.5
+
