@@ -1,0 +1,26 @@
+From: murase
+To: bug-bash@gnu.org
+Subject: [50 character or so descriptive subject here (for reference)]
+
+Configuration Information [Automatically generated, do not change]:
+Machine: i686
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -O2 -march=native -Wno-parentheses -Wno-format-security
+uname output: Linux padparadscha 4.13.13-100.fc25.i686 #1 SMP Wed Nov 15 18:24:19 UTC 2017 i686 i686 i386 GNU/Linux
+Machine Type: i686-pc-linux-gnu
+
+Bash Version: 5.0
+Patch Level: 0
+Release Status: release
+
+Description:
+	[Detailed description of the problem, suggestion, or complaint.]
+
+Repeat-By:
+	[Describe the sequence of events that causes the problem
+	to occur.]
+
+Fix:
+	[Description of how to fix the problem.  If you don't know a
+	fix for the problem, don't include this section.]
