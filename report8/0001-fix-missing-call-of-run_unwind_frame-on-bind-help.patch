@@ -1,0 +1,27 @@
+From 52b8efe253dcced42d1af4106da4c4840d1347c3 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 11 Feb 2019 04:54:12 +0900
+Subject: [PATCH] fix missing call of "run_unwind_frame" on "bind --help"
+
+---
+ builtins/bind.def | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/builtins/bind.def b/builtins/bind.def
+index 2b18873..2fb9375 100644
+--- a/builtins/bind.def
++++ b/builtins/bind.def
+@@ -192,7 +192,9 @@ bind_builtin (list)
+ 	case 'X':
+ 	  flags |= XXFLAG;
+ 	  break;
+-	CASE_HELPOPT;
++	case GETOPT_HELP:
++	  builtin_help ();
++	  BIND_RETURN (EX_USAGE);
+ 	default:
+ 	  builtin_usage ();
+ 	  BIND_RETURN (EX_USAGE);
+-- 
+2.9.5
+

@@ -1,0 +1,24 @@
+From: Koichi Murase <myoga.murase@gmail.com>
+To: bug-bash@gnu.org
+Subject: [PATCH] Fix a broken unwind frame on `builtin bind --help'
+
+Configuration Information [Automatically generated, do not change]:
+Machine: i686
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -O2 -march=native -Wno-parentheses -Wno-format-security
+uname output: Linux padparadscha 4.13.13-100.fc25.i686 #1 SMP Wed Nov 15 18:24:19 UTC 2017 i686 i686 i386 GNU/Linux
+Machine Type: i686-pc-linux-gnu
+
+Bash Version: 5.0
+Patch Level: 0
+Release Status: release
+
+Description:
+  When `builtin bind --help' is executed in Bash 4.4 and 5.0, `begin_unwind_frame ("bind_builtin")' is called, but `run_unwind_frame ("bind_builtin")` is not called.
+
+Repeat-By:
+  $ builtin bind --help
+
+Fix:
+  In `builtins/bind.def', the macro `CASE_HELPOPT' is expanded to something like `builtin_help(); return (EX_USAGE);'. However, here `return' should be replaced by `BIND_RETURN`. I attach a patch.
