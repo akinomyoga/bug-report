@@ -1,4 +1,4 @@
-From 4647a302d79e71eeac6ec3857a098c190f911a1c Mon Sep 17 00:00:00 2001
+From 48a3f0ac4f5ddf4a5341b3098cefdbdb7b8f8194 Mon Sep 17 00:00:00 2001
 From: Koichi Murase <myoga.murase@gmail.com>
 Date: Mon, 11 Feb 2019 19:23:09 +0900
 Subject: [PATCH 2/2] do not print unbound bindings in "bind -X"
@@ -9,7 +9,7 @@ Subject: [PATCH 2/2] do not print unbound bindings in "bind -X"
  2 files changed, 68 insertions(+), 7 deletions(-)
 
 diff --git a/bashline.c b/bashline.c
-index ed20b8b..0aa20cd 100644
+index ed20b8b..ca84b1a 100644
 --- a/bashline.c
 +++ b/bashline.c
 @@ -4287,16 +4287,77 @@ bash_execute_unix_command (count, key)
@@ -22,8 +22,8 @@ index ed20b8b..0aa20cd 100644
 +  register int key;
 +  char *keyname, *out;
 +  int prefix_len;
-+  Keymap map2, xmap2;
 +
++  /* XXX - They are private readline functions... */
 +  extern char *_rl_get_keyname (int key);
 +  extern char *_rl_untranslate_macro_value (char *seq, int use_escapes);
 +
