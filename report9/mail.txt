@@ -1,6 +1,6 @@
 From: Koichi Murase <myoga.murase@gmail.com>
 To: bug-bash@gnu.org
-Subject: [PATCH] Switch vi-insert TAB bindings only for the default bindings
+Subject: [PATCH] Fix a bug that `bind -x '"metachar":command'' fails when rl-variable `convert-meta' is `on'
 
 Configuration Information [Automatically generated, do not change]:
 Machine: i686
