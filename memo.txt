@@ -7,215 +7,12 @@
 
 * バグ報告の仕方
 
-  git format-patch HEAD~ 等とする。
+  git format-patch devel 等とする。
 
 
 ------------------------------------------------------------------------------
   Bugs
 ------------------------------------------------------------------------------
-
-2016-11-09
-
-* そもそも keymap に登録されたコマンドを実行しているのはどこだろう。
-
-  色々探しまわってみると ISFUNC で関数を登録し、ISMACR でマクロ文字列を登録している様だ。
-  lib/readline/bind.c の中を探しても呼び出している様な場所は見つからない。
-  よく考えてみたらファイル名が bind である。つまり、ここには登録関係の関数しかない。
-  検索で ISFUNC をしてみると readline に case ISFUNC: というものがある。
-  其処に行ってみると取得した関数を実行している。_rl_dispatch_subseq という関数の中だ。
-
-  cmd_xmap を廃止してデータを同じキーマップにまとめて登録するのだとしたら、
-  この辺りの呼び出し方を調べる必要がある。
-  先ず、現在の設計だと登録されているエントリへのポインタを
-  呼びだされた関数が直接取得するのは難しそうだ。
-
-  a readline 側のサポートが必要になる。しかし、cmd_xmap が readline 側ではなく
-    bash 側で用意されていることなどから考えるに自由に関数を登録できるような仕組みはそもそも readline にはない。
-    readline を拡張して cmd_xmap 埋め込みに対応できる様にするというのは readline の機能を大幅に拡張する事になり大げさである。
-
-  b 従ってやはり bash 側で何とかいい感じに誤魔化して実装する必要がある。
-    例えば現在の kmap と key 等を取得することができれば bash 側で同様に map[key].function から同一の情報を得られる。
-
-    % しかし readline を見る限り _rl_dispatch_subseq で使われる map, key は動的に指定され外部から取得するのは難しいのではないかという気がする。
-    % ちょっと調べてみた。大体の場合は map は _rl_dispatching_keymap に一致している様だ。
-    % しかし _rl_dispatch_callback 経由で _rl_dispatch_subseq が呼び出される場合には予想できない。
-    % やはり bash で独立に同じ kmap を取得するというのには難がある気がする。
-    % それが理由で cmd_xmap という内部用の keymap を管理するという事になっているのであろう。
-    % 
-    % また改めて bash の cmd_xmap の参照の部分を確認してみる。
-    % rl_executing_keyseq というのを参照している。これは何処で公開される物だろうか。
-    % こでは readline.c で定義され readline.c で管理されている。readline.h で公開されている。
-    % この rl_executing_keyseq と一緒に現在の keymap も公開すれば良いのではないだろうか。
-    % うーん。と思って改めて readline.c を見てみると rl_executing_keymap という物がある。
-    % 何だこれはと思って調べてみると丁度正に rl_dispatch_subseq で map を外に公開する為に
-    % rl_executing_keymap = map となっていた。つまり、_rl_dispatch_subseq で使われる
-    % map および key は普通に外部に公開されていたという事である。
-
-    という訳で _rl_dispatch_subseq で使用された map 及び key は、
-    rl_executing_keymap および rl_executing_key で取得することが可能である。
-    つまり rl_executing_keymap[rl_executing_key].function とやれば良い。
-
-  しかし此処でやはり問題が…。ISMACR の場合には登録されている内容は free の対象であったが、
-  ISFUNC の場合には登録されている内容は関数へのポインタであって free の対象ではない。
-  (というか初め ISMACR で関数が登録されているのかと考えて、関数へのポインタへのポインタだと勘違いしていた。)
-  という事は勝手に新しい情報を ISFUNC に紐付けて登録する事はできないという事になる。
-
-  或いは、keymap の entry に新しい項目を追加してしまうというのも手なのかもしれない。
-  keymap は Keymap 型であり、Keymap 型は以下のように定義されている。
-    typedef KEYMAP_ENTRY *Keymap;
-  KEYMAP_ENTRY は struct _keymap_entry の typedef で、_keymap_entry は単純に
-  char type と rl_command_func_t* function の二つのメンバを持つ。
-
-  うーん。この _keymap_entry を改造する位ならば ISMACR, ISFUNC に代わる
-  type を作成する方が見通しが良い気がする。うーん。
-  或いは、cmd_xmap に登録する時に keymap も鍵として使用して登録してしまう?
-  しかし問題が二点ある。
-
-  1 keymap の同一性をどの様に判定するのか。
-    単純にポインタで良いのか。
-    もし realloc されるとポインタの値が変わってしまう事には注意しなければならない。
-    keymap に対応する id 番号の様な物が存在すればそれが良いのであるが…。
-
-    readline の中を grep する限りは keymap は realloc していない様な気がする。
-    もっとちゃんと調べる必要がある。cmd_xmap は rl_make_bare_keymap で生成している。
-    rl_make_bare_keymap は readline/keymaps.c に定義が存在して、
-    rl_make_keymap 及び rl_copy_keymap から使用されている。
-    rl_make_bare_keymap の実装を見る限り keymap の長さは固定であるので realloc はない。
-    また rl_make_keymap 及び rl_copy_keymap は現状では誰も使っていない様だ。
-
-    rl_make_bare_keymap を使っている箇所も特に見当たらない。cmd_xmap と、
-    vi_mode.c の vi_replace_map だけだ。ではその他の keymap はどの様に確保されるのだろうか。
-    様々の名前がついている keymap は何処なのかと思って探してみると、
-    readline/bind.c の中に名前が定義されている。実体は各専用のファイルに定義されている様だ。
-    例えば、"emacs", "emacs-standard" は emacs_standard_keymap という変数に紐付けられ、
-    これは emacs_keymap.c で定義されている。そしてこれは何と静的な配列である。
-    特にこれらの基本的な keymap に関して言うならばアドレスが変化するという事はなさそうだ。
-
-    では複数のキーに紐付いて設定される keymap に関してはどうだろうか。
-    一旦削除されてから再度確保し直されるとしても、
-    前の keymap から新しい keymap への引き継ぎが為されていないのであればそれを追跡する必要はない。
-    偶たま同じアドレスになるとしてもその場合には
-    本体の keymap の方に改めて登録するときに一緒に cmd_xmap の方にも登録するので、
-    その時に上書きされるので変な衝突が起こるという事もないだろう。
-
-  2 keymap が消滅する時や unbind する時にどうやってエントリを削除するのか。
-    しかし、よく考えて見ればこれは現在の実装でも問題になっている筈である。
-    実装を見た感じ登録するコードは存在しても削除するコードが存在していない気がする。
-
-    試してみたところ一度登録した bind -X は二度と解除されない様だ。。
-
-    うーん。やはりこれに対応する為には bind/unbind の時に一緒に開放もしなければならず、
-    その為には readline/bind.c を修正しなければならない。つまり、readline 側での特別な対応が必要である。
-    もし ISFUNC において関数ポインタを格納する場所が動的に確保される領域であったならば、
-    その動的確保される領域を勝手に拡張して後半に引数のデータを保持すれば良かった。
-    しかし実際にはその様な実装にはなっていない様だ。
-    代わりに ISMACR で格納する様にすれば追加のデータと関数ポインタを一緒に記録できるが、
-    ISMACR は単にキーボードマクロとして処理されてしまうのでそのままでは使えない。
-
-  結局 readline を弄らないとまともな対応は不可能に思われる。
-  readline を拡張するとすれば param 付きの関数を登録できる様にするという手がある。
-  param は一個で良い。関数ポインタ単体の時に何が問題かというと動的な機能を登録できないという事である。
-  つまり、関数ポインタは通常は静的な関数からしか取得できないので静的な機能にならざるを得ない。
-
-  要旨: bash_execute_unix_command の内部で元のエントリを取得する事は可能である。
-  グローバル変数 rl_executing_keymap rl_executing_key を使えば良い。
-  しかし一番問題になるのは登録されたデータの解放である。
-  本体 keymap に対する unbind と共に行うのだとすればやはり readline を書き換えるのが易い。
-  「readline 関数の呼び出し全てに介入して readline の処理を模倣して事前に cmd_xmap の更新を行う」
-  という方法もできなくはないが結局 readline/bind.c を再実装しているだけに過ぎない気がする。
-
-  もう readline を拡張する方向で行くしかない気がする。
-  しかしその前に C-@ の原因について調べて置かなければならない。
-
-------------------------------------------------------------------------------
-
-* [bug] bind -x で登録された項目が内部的に残っている。
-  更に bind -X で内部的に残っている項目まで全て出力される。
-
-  $ LANG=C ./bash --norc
-  $ bind -X
-  $ bind -x '"A": echo hello'
-  $ bind -X
-  "A": "echo hello"
-  $ bind '"A": self-insert'
-  $ bind -X
-  "A": "echo hello"  # <-- overwritten keyseq is still remained
-  $ exit
-
-  マクロの場合にはちゃんと消える。
-
-  $ LANG=C ./bash --norc
-  $ bind -s
-  $ bind '"A":"hello"'
-  $ bind -s
-  "A": "hello"
-  $ bind '"A": self-insert'
-  $ bind -s # <-- nothing output, the entry was successfully removed
-  $ exit
-
-* [bug] cmd_xmap が keymap 間で共有されている。
-  複数の異なる keymap に登録すると一方が他方を上書きする。
-
-  $ LANG=C bash-4.4 --norc
-  $ bind -m emacs -x '"A":echo emacs'
-  # ----- type A -----
-  emacs
-  $ bind -m vi -x '"A":echo vi'
-  # ----- type A -----
-  vi
-  $ exit
-
-  $ LANG=C bash-4.4 --norc
-  $ bind -m emacs '"A":"echo emacs"'
-  # ----- type A -----
-  $ echo emacs
-  emacs
-  $ bind -m vi '"A":"iecho vi"'
-  # ----- type A -----
-  $ echo emacs
-  emacs
-  $ set -o vi
-  # ----- type ESC A -----
-  $ echo vi
-  vi
-  $ exit
-
-  $ LANG=C bash-4.4 --norc
-  $ bind -m emacs -x '"A":echo emacs'
-  # ----- type A -----
-  emacs
-  $ bind -m vi -x '"A":echo vi'
-  # ----- type A -----
-  vi
-  $ set -o vi
-  # ----- type A -----
-  vi
-  $ set -o emacs
-  $ exit
-
-* [bug] cmd_xmap には bind 時の文字列が全体の keyseq として登録される。
-  例えば emacs-ctlx には C-x に続いて何かを入力した時の動作を指定する事ができるが、
-  これに対して bind -x しようとしても正しく登録する事ができない。
-  (とはいいつつこれは単に bind -m emacs -x '"\C-x?": ...' とすれば期待通りにできるので回避可能である。)
-
-  $ LANG=C bash-4.4 --norc
-  $ bind -m emacs -x '"A":echo hello'
-  # ----- type A -----
-  hello
-  $ bind -m emacs-ctlx -x '"A":echo world'
-  # ----- type C-x A -----
-  bash-4.4: bash_execute_unix_command: cannot find keymap for command
-  # ----- type A -----
-  world
-  $
-  $ exit
-
-  マクロの場合にはちゃんとできる。
-
-  $ LANG=C ./bash --norc
-  $ bind -m emacs-ctlx '"A":"hello world"'
-  $ exit
-
 
 2016-11-09
 
@@ -235,6 +32,210 @@
 -------------------------------------------------------------------------------
 
 2019-02-11
+
+* report10: 取り敢えず mail を作成する事にする
+
+  | 2016-11-09
+  |
+  | * そもそも keymap に登録されたコマンドを実行しているのはどこだろう。
+  |
+  |   色々探しまわってみると ISFUNC で関数を登録し、ISMACR でマクロ文字列を登録している様だ。
+  |   lib/readline/bind.c の中を探しても呼び出している様な場所は見つからない。
+  |   よく考えてみたらファイル名が bind である。つまり、ここには登録関係の関数しかない。
+  |   検索で ISFUNC をしてみると readline に case ISFUNC: というものがある。
+  |   其処に行ってみると取得した関数を実行している。_rl_dispatch_subseq という関数の中だ。
+  |
+  |   cmd_xmap を廃止してデータを同じキーマップにまとめて登録するのだとしたら、
+  |   この辺りの呼び出し方を調べる必要がある。
+  |   先ず、現在の設計だと登録されているエントリへのポインタを
+  |   呼びだされた関数が直接取得するのは難しそうだ。
+  |
+  |   a readline 側のサポートが必要になる。しかし、cmd_xmap が readline 側ではなく
+  |     bash 側で用意されていることなどから考えるに自由に関数を登録できるような仕組みはそもそも readline にはない。
+  |     readline を拡張して cmd_xmap 埋め込みに対応できる様にするというのは readline の機能を大幅に拡張する事になり大げさである。
+  |
+  |   b 従ってやはり bash 側で何とかいい感じに誤魔化して実装する必要がある。
+  |     例えば現在の kmap と key 等を取得することができれば bash 側で同様に map[key].function から同一の情報を得られる。
+  |
+  |     % しかし readline を見る限り _rl_dispatch_subseq で使われる map, key は動的に指定され外部から取得するのは難しいのではないかという気がする。
+  |     % ちょっと調べてみた。大体の場合は map は _rl_dispatching_keymap に一致している様だ。
+  |     % しかし _rl_dispatch_callback 経由で _rl_dispatch_subseq が呼び出される場合には予想できない。
+  |     % やはり bash で独立に同じ kmap を取得するというのには難がある気がする。
+  |     % それが理由で cmd_xmap という内部用の keymap を管理するという事になっているのであろう。
+  |     %
+  |     % また改めて bash の cmd_xmap の参照の部分を確認してみる。
+  |     % rl_executing_keyseq というのを参照している。これは何処で公開される物だろうか。
+  |     % こでは readline.c で定義され readline.c で管理されている。readline.h で公開されている。
+  |     % この rl_executing_keyseq と一緒に現在の keymap も公開すれば良いのではないだろうか。
+  |     % うーん。と思って改めて readline.c を見てみると rl_executing_keymap という物がある。
+  |     % 何だこれはと思って調べてみると丁度正に rl_dispatch_subseq で map を外に公開する為に
+  |     % rl_executing_keymap = map となっていた。つまり、_rl_dispatch_subseq で使われる
+  |     % map および key は普通に外部に公開されていたという事である。
+  |
+  |     という訳で _rl_dispatch_subseq で使用された map 及び key は、
+  |     rl_executing_keymap および rl_executing_key で取得することが可能である。
+  |     つまり rl_executing_keymap[rl_executing_key].function とやれば良い。
+  |
+  |   しかし此処でやはり問題が…。ISMACR の場合には登録されている内容は free の対象であったが、
+  |   ISFUNC の場合には登録されている内容は関数へのポインタであって free の対象ではない。
+  |   (というか初め ISMACR で関数が登録されているのかと考えて、関数へのポインタへのポインタだと勘違いしていた。)
+  |   という事は勝手に新しい情報を ISFUNC に紐付けて登録する事はできないという事になる。
+  |
+  |   或いは、keymap の entry に新しい項目を追加してしまうというのも手なのかもしれない。
+  |   keymap は Keymap 型であり、Keymap 型は以下のように定義されている。
+  |     typedef KEYMAP_ENTRY *Keymap;
+  |   KEYMAP_ENTRY は struct _keymap_entry の typedef で、_keymap_entry は単純に
+  |   char type と rl_command_func_t* function の二つのメンバを持つ。
+  |
+  |   うーん。この _keymap_entry を改造する位ならば ISMACR, ISFUNC に代わる
+  |   type を作成する方が見通しが良い気がする。うーん。
+  |   或いは、cmd_xmap に登録する時に keymap も鍵として使用して登録してしまう?
+  |   しかし問題が二点ある。
+  |
+  |   1 keymap の同一性をどの様に判定するのか。
+  |     単純にポインタで良いのか。
+  |     もし realloc されるとポインタの値が変わってしまう事には注意しなければならない。
+  |     keymap に対応する id 番号の様な物が存在すればそれが良いのであるが…。
+  |
+  |     readline の中を grep する限りは keymap は realloc していない様な気がする。
+  |     もっとちゃんと調べる必要がある。cmd_xmap は rl_make_bare_keymap で生成している。
+  |     rl_make_bare_keymap は readline/keymaps.c に定義が存在して、
+  |     rl_make_keymap 及び rl_copy_keymap から使用されている。
+  |     rl_make_bare_keymap の実装を見る限り keymap の長さは固定であるので realloc はない。
+  |     また rl_make_keymap 及び rl_copy_keymap は現状では誰も使っていない様だ。
+  |
+  |     rl_make_bare_keymap を使っている箇所も特に見当たらない。cmd_xmap と、
+  |     vi_mode.c の vi_replace_map だけだ。ではその他の keymap はどの様に確保されるのだろうか。
+  |     様々の名前がついている keymap は何処なのかと思って探してみると、
+  |     readline/bind.c の中に名前が定義されている。実体は各専用のファイルに定義されている様だ。
+  |     例えば、"emacs", "emacs-standard" は emacs_standard_keymap という変数に紐付けられ、
+  |     これは emacs_keymap.c で定義されている。そしてこれは何と静的な配列である。
+  |     特にこれらの基本的な keymap に関して言うならばアドレスが変化するという事はなさそうだ。
+  |
+  |     では複数のキーに紐付いて設定される keymap に関してはどうだろうか。
+  |     一旦削除されてから再度確保し直されるとしても、
+  |     前の keymap から新しい keymap への引き継ぎが為されていないのであればそれを追跡する必要はない。
+  |     偶たま同じアドレスになるとしてもその場合には
+  |     本体の keymap の方に改めて登録するときに一緒に cmd_xmap の方にも登録するので、
+  |     その時に上書きされるので変な衝突が起こるという事もないだろう。
+  |
+  |   2 keymap が消滅する時や unbind する時にどうやってエントリを削除するのか。
+  |     しかし、よく考えて見ればこれは現在の実装でも問題になっている筈である。
+  |     実装を見た感じ登録するコードは存在しても削除するコードが存在していない気がする。
+  |
+  |     試してみたところ一度登録した bind -X は二度と解除されない様だ。。
+  |
+  |     うーん。やはりこれに対応する為には bind/unbind の時に一緒に開放もしなければならず、
+  |     その為には readline/bind.c を修正しなければならない。つまり、readline 側での特別な対応が必要である。
+  |     もし ISFUNC において関数ポインタを格納する場所が動的に確保される領域であったならば、
+  |     その動的確保される領域を勝手に拡張して後半に引数のデータを保持すれば良かった。
+  |     しかし実際にはその様な実装にはなっていない様だ。
+  |     代わりに ISMACR で格納する様にすれば追加のデータと関数ポインタを一緒に記録できるが、
+  |     ISMACR は単にキーボードマクロとして処理されてしまうのでそのままでは使えない。
+  |
+  |   結局 readline を弄らないとまともな対応は不可能に思われる。
+  |   readline を拡張するとすれば param 付きの関数を登録できる様にするという手がある。
+  |   param は一個で良い。関数ポインタ単体の時に何が問題かというと動的な機能を登録できないという事である。
+  |   つまり、関数ポインタは通常は静的な関数からしか取得できないので静的な機能にならざるを得ない。
+  |
+  |   要旨: bash_execute_unix_command の内部で元のエントリを取得する事は可能である。
+  |   グローバル変数 rl_executing_keymap rl_executing_key を使えば良い。
+  |   しかし一番問題になるのは登録されたデータの解放である。
+  |   本体 keymap に対する unbind と共に行うのだとすればやはり readline を書き換えるのが易い。
+  |   「readline 関数の呼び出し全てに介入して readline の処理を模倣して事前に cmd_xmap の更新を行う」
+  |   という方法もできなくはないが結局 readline/bind.c を再実装しているだけに過ぎない気がする。
+  |
+  |   もう readline を拡張する方向で行くしかない気がする。
+  |   しかしその前に C-@ の原因について調べて置かなければならない。
+  |
+  | ------------------------------------------------------------------------------
+  |
+  | * [bug] bind -x で登録された項目が内部的に残っている。
+  |   更に bind -X で内部的に残っている項目まで全て出力される。
+  |
+  |   $ LANG=C ./bash --norc
+  |   $ bind -X
+  |   $ bind -x '"A": echo hello'
+  |   $ bind -X
+  |   "A": "echo hello"
+  |   $ bind '"A": self-insert'
+  |   $ bind -X
+  |   "A": "echo hello"  # <-- overwritten keyseq is still remained
+  |   $ exit
+  |
+  |   マクロの場合にはちゃんと消える。
+  |
+  |   $ LANG=C ./bash --norc
+  |   $ bind -s
+  |   $ bind '"A":"hello"'
+  |   $ bind -s
+  |   "A": "hello"
+  |   $ bind '"A": self-insert'
+  |   $ bind -s # <-- nothing output, the entry was successfully removed
+  |   $ exit
+  |
+  | * [bug] cmd_xmap が keymap 間で共有されている。
+  |   複数の異なる keymap に登録すると一方が他方を上書きする。
+  |
+  |   $ LANG=C bash-4.4 --norc
+  |   $ bind -m emacs -x '"A":echo emacs'
+  |   # ----- type A -----
+  |   emacs
+  |   $ bind -m vi -x '"A":echo vi'
+  |   # ----- type A -----
+  |   vi
+  |   $ exit
+  |
+  |   $ LANG=C bash-4.4 --norc
+  |   $ bind -m emacs '"A":"echo emacs"'
+  |   # ----- type A -----
+  |   $ echo emacs
+  |   emacs
+  |   $ bind -m vi '"A":"echo vi"'
+  |   # ----- type A -----
+  |   $ echo emacs
+  |   emacs
+  |   $ set -o vi
+  |   # ----- type ESC A -----
+  |   $ echo vi
+  |   vi
+  |   $ exit
+  |
+  |   $ LANG=C bash-4.4 --norc
+  |   $ bind -m emacs -x '"A":echo emacs'
+  |   # ----- type A -----
+  |   emacs
+  |   $ bind -m vi -x '"A":echo vi'
+  |   # ----- type A -----
+  |   vi
+  |   $ set -o vi
+  |   # ----- type A -----
+  |   vi
+  |   $ set -o emacs
+  |   $ exit
+  |
+  | * [bug] cmd_xmap には bind 時の文字列が全体の keyseq として登録される。
+  |   例えば emacs-ctlx には C-x に続いて何かを入力した時の動作を指定する事ができるが、
+  |   これに対して bind -x しようとしても正しく登録する事ができない。
+  |   (とはいいつつこれは単に bind -m emacs -x '"\C-x?": ...' とすれば期待通りにできるので回避可能である。)
+  |
+  |   $ LANG=C bash-4.4 --norc
+  |   $ bind -m emacs -x '"A":echo hello'
+  |   # ----- type A -----
+  |   hello
+  |   $ bind -m emacs-ctlx -x '"A":echo world'
+  |   # ----- type C-x A -----
+  |   bash-4.4: bash_execute_unix_command: cannot find keymap for command
+  |   # ----- type A -----
+  |   world
+  |   $
+  |   $ exit
+  |
+  |   マクロの場合にはちゃんとできる。
+  |
+  |   $ LANG=C ./bash --norc
+  |   $ bind -m emacs-ctlx '"A":"hello world"'
+  |   $ exit
 
 * report9: convert-meta と unmeta について
 
@@ -346,10 +347,10 @@
   | 正しく実装する一つの方法は LC_CTYPE を設定してから文字列の長さを測るという物である。
   | [Search](https://github.com/search?utf8=%E2%9C%93&amp;q=LC_CTYPE+READLINE_POINT+NOT+LC_MESSAGES+NOT+rl_line_buffer&amp;type=Code)
   | →[dot/kingbash.script](https://github.com/billinux/dot/blob/986cc0b8df950687ff0b50aced6df5a755a9b9d3/bin/kingbash.script)
-  | 
+  |
   | もう一つの方法は LC_ALL を設定するという物。
   | [Search](https://github.com/search?q=LC_ALL+READLINE_POINT+NOT+LC_MESSAGES+NOT+rl_line_buffer+NOT+READLINE_LINE_BUFFER&amp;type=Code&amp;utf8=%E2%9C%93)
-  | 
+  |
   | 或いは wc -c でも数えられるかもしれない。
   | [Search](https://github.com/search?utf8=%E2%9C%93&amp;q=wc+%22READLINE_POINT%3D%22+NOT+LC_MESSAGES+NOT+rl_line_buffer+NOT+READLINE_LINE_BUFFER&amp;type=Code)
 
@@ -435,7 +436,7 @@
   | From: murase
   | To: bug-bash@gnu.org
   | Subject: [50 character or so descriptive subject here (for reference)]
-  | 
+  |
   | Configuration Information [Automatically generated, do not change]:
   | Machine: i686
   | OS: linux-gnu
@@ -444,16 +445,16 @@
   | ocale' -DPACKAGE='bash' -DSHELL -DHAVE_CONFIG_H   -I.  -I. -I./include -I./lib   -O2 -march=native -Wno-parentheses -Wno-format-security
   | uname output: Linux padparadscha 4.7.2-101.fc23.i686 #1 SMP Fri Aug 26 16:39:46 UTC 2016 i686 i686 i386 GNU/Linux
   | Machine Type: i686-pc-linux-gnu
-  | 
+  |
   | Bash Version: 4.4
   | Patch Level: 0
   | Release Status: release
-  | 
+  |
   | Description:
   |   [Detailed description of the problem, suggestion, or complaint.]
-  | 
+  |
   | Repeat-By:
-  | 
+  |
   |   $ LANG=C bash-4.4 --norc
   |   $ bind -x '"\C-@":echo hello'
   |   $
@@ -474,7 +475,7 @@
   |   # ----- type C-@ or C-space -----
   |   hello
   |   $ exit
-  | 
+  |
   | Fix:
   |   [Description of how to fix the problem.  If you don't know a
   |   fix for the problem, don't include this section.]
@@ -490,13 +491,13 @@
   | | これだと登録時と読み取り時で異なるシーケンスになるのが普通だがこれで良いのか?
   | | 試しに C-a で試してみると両者が異なっていてもちゃんと機能する様だ。
   | | というか、登録時の kseq と読み取り時の kseq は意味合いが異なるのだろう。
-  | | 
+  | |
   | | と、ここで読み取り時に実際に入力したキーの列が格納されているのはヌル終端文字列である。
   | | ヌル終端文字列に C-@ を含ませる事は不可能である。
   | | これだと長さ 0 になってしまうのではないだろうか。
   | | そしてこの推測が正しければ、そもそも C-@ を一文字でも含む様なキーシーケンスは全然登録できない。
   | | 試してみることにする。
-  | | 
+  | |
   | | C-@A で試してみた所やはり同様に
   | |   bash: bash_execute_unix_command: cannot find keymap for command
   | | のエラーが発生する様だ。(C-@ set-mark が残っているので、

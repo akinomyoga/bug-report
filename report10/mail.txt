@@ -1,0 +1,72 @@
+From: Koichi Murase <myoga.murase@gmail.com>
+To: bug-bash@gnu.org
+Subject: [PATCH] Support `bind -x' for different keymaps
+
+Configuration Information [Automatically generated, do not change]:
+Machine: i686
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -O2 -march=native -Wno-parentheses -Wno-format-security
+uname output: Linux padparadscha 4.13.13-100.fc25.i686 #1 SMP Wed Nov 15 18:24:19 UTC 2017 i686 i686 i386 GNU/Linux
+Machine Type: i686-pc-linux-gnu
+
+Bash Version: 5.0
+Patch Level: 0
+Release Status: release
+
+Description:
+
+  There are two problems: (1) The keymap `cmd_xmap' used to store the command strings by `bind -x' is shared with all the keymaps. This makes problem when one defines `bind -x' key bindings for multiple different keymaps. (2) `bind -X' dumps all the command strings stored in `cmd_xmap' including strings which are already unbound.
+
+Repeat-By:
+
+  Example 1: The binding `bind -m vi -x keys:cmd' overwrites `bind -m emacs -x keys:cmd':
+
+    $ LANG=C bash-5.0 --norc
+    $ bind -m emacs -x '"A": echo emacs'
+    emacs               # <-- `echo emacs' is executed by typing `A'
+    $ bind -m emacs -X
+    "A": "echo emacs"   # <-- the command is correctly registered.
+    $ bind -m vi -x '"A": echo vi'
+    vi                  # <-- `echo vi' is executed by typing `A' even in emacs mode
+    $ bind -m emacs -X
+    "A": "echo vi"      # <-- the command string is overwritten
+    $ bind -m vi -X
+    "A": "echo vi"
+
+
+  Example 2: The binding `bind -m emacs-ctlx -x keys:cmd' always fails and overwrite other bindings.
+
+    $ LANG=C bash-5.0 --norc
+    $ bind -m emacs -x '"A": echo emacs'
+    emacs
+    $ bind -m emacs-ctlx -x '"A": echo emacs-ctlx'
+    emacs-ctlx
+    $
+    bash-5.0: bash_execute_unix_command: cannot find keymap for command
+    $ bind -X
+    "A": "echo emacs-ctlx"
+
+  Example 3: Unbound `bind -x' is not removed from `bind -X':
+
+    $ LANG=C bash-5.0 --norc
+    $ bind -X
+    $ bind -x '"A": echo hello'
+    hello                 # <-- `echo hello' is executed by typing `A'
+    $ bind -X
+    "A": "echo hello"
+    $ bind '"A": "hello"' # <-- overwrite the binding
+    $ hello               # <-- now `hello' is inserted by typing `A'
+    $ bind -X
+    "A": "echo hello"     # <-- overwritten binding still shows
+    $ 
+
+  Note that all the examples above work fine for usual macros (without -x).
+
+Fix:
+
+  In the first patch `0001-support-bind-x-for-different-keymaps.patch', I replicated the global variable `cmd_xmap' to `cmd_xmap_emacs', `cmd_xmap_vi_insertion' and `cmd_xmap_vi_movement'. In the second patch `0002-do-not-print-unbound-bindings-in-bind-X.patch', to correctly dump `bind -x' bindings, I created a new function `_print_unix_command_map_internal' by modifying `_rl_macro_dumper_internal' (lib/readline/bind.c). However, the implementation of `_print_unix_command_map_internal' uses private readline functions `_rl_get_keyname' and `_rl_untranslate_macro_value', so the implementation should be modified somehow or maybe these private functions can be made public.
+
+----
+Best regards,
+Koichi
