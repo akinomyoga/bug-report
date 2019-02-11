@@ -1,0 +1,65 @@
+From: Koichi Murase <myoga.murase@gmail.com>
+To: bug-bash@gnu.org
+Subject: [PATCH] Switch vi-insert TAB bindings only for the default bindings
+
+Configuration Information [Automatically generated, do not change]:
+Machine: i686
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -O2 -march=native -Wno-parentheses -Wno-format-security
+uname output: Linux padparadscha 4.13.13-100.fc25.i686 #1 SMP Wed Nov 15 18:24:19 UTC 2017 i686 i686 i386 GNU/Linux
+Machine Type: i686-pc-linux-gnu
+
+Bash Version: 5.0
+Patch Level: 0
+Release Status: release
+
+Description:
+  In vi editing mode, I bind TAB to a shell command using `bind -x'. However, when I use the POSIX mode locally in functions something like
+
+    f() {
+      local POSIXLY_CORRECT=y
+      # do something
+    }
+
+  the binding is reset every time the function is called. It is annoying to rebind TAB after every calls of such functions. This behavior is caused by `int posix_readline_initialize (int on_or_off)' defined in `bashline.c'. The reason of the current behavior is explained in
+
+    http://lists.gnu.org/archive/html/bug-bash/2014-06/msg00049.html
+
+Repeat-By:
+
+  Defaultly TAB is bound to the rl function `complete'.
+
+    $ set -o vi
+    $ bind -q complete
+    complete can be invoked via "\C-i".
+
+  With `bind -x' one can bind TAB to another operation. When one type TAB, the user-defined binding works.
+
+    $ bind -x '"\t": echo hello'
+    $ bind -q complete
+    complete is not bound to any keys.
+    hello # <-- `echo hello' is executed by TAB
+    $
+
+  However, after using local POSIX mode, the binding does not work.
+
+    $ f() { local POSIXLY_CORRECT=y; }; f
+    $ # <-- nothing happens with TAB
+
+  The binding is turned back to the default.
+
+    $ bind -q complete
+    complete can be invoked via "\C-i".
+
+Fix:
+  There may be several choices to fix this.
+
+  a. One is to introduce a new variable that memorizes whether the binding has been defined by users or not. Or, maybe there are other ways to manage the information. Then, only when the binding is not defined by users, switch the binding. However the code to update the variable would become dirty (i.e., maybe one needs to add codes to readline).
+
+  b. Another way is to switch the binding only when the current binding is the same with the default one. The implementation is simple, but not complete: when the user-defined binding is the same with the default one, the binding will be switched unexpectedly. Nevertheless this is far better than the current behavior.
+
+  I made a patch for the choice `b'. I attach the patch.
+
+Best regards,
+Koichi

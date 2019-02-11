@@ -1,0 +1,27 @@
+From ed966527773c91dc0047b4d6496f170251549d81 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 11 Feb 2019 03:43:28 +0900
+Subject: [PATCH] keep user key bindings of TAB on switching POSIX mode
+
+---
+ bashline.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/bashline.c b/bashline.c
+index 489be69..f17ec09 100644
+--- a/bashline.c
++++ b/bashline.c
+@@ -319,7 +319,9 @@ posix_readline_initialize (on_or_off)
+   if (on_or_off)
+     rl_variable_bind ("comment-begin", "#");
+ #if defined (VI_MODE)
+-  rl_bind_key_in_map (CTRL ('I'), on_or_off ? rl_insert : rl_complete, vi_insertion_keymap);
++  if (vi_insertion_keymap[CTRL ('I')].type == ISFUNC &&
++      vi_insertion_keymap[CTRL ('I')].function == (on_or_off ? rl_complete : rl_insert))
++    rl_bind_key_in_map (CTRL ('I'), on_or_off ? rl_insert : rl_complete, vi_insertion_keymap);
+ #endif
+ }
+ 
+-- 
+2.9.5
+
