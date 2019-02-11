@@ -1,0 +1,37 @@
+From b0d0b5a61be1e22d018e6242687619ab87dbd859 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 11 Feb 2019 15:40:48 +0900
+Subject: [PATCH 3/3] use keyseq length to check the end of keyseq
+
+---
+ lib/readline/bind.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/lib/readline/bind.c b/lib/readline/bind.c
+index 50f3109..8961bad 100644
+--- a/lib/readline/bind.c
++++ b/lib/readline/bind.c
+@@ -813,7 +813,7 @@ _rl_function_of_keyseq_internal (const char *keyseq, size_t len, Keymap map, int
+ 	{
+ 	  /* If this is the last key in the key sequence, return the
+ 	     map. */
+-	  if (keyseq[i + 1] == '\0')
++	  if (i + 1 == len)
+ 	    {
+ 	      if (type)
+ 		*type = ISKMAP;
+@@ -826,9 +826,9 @@ _rl_function_of_keyseq_internal (const char *keyseq, size_t len, Keymap map, int
+       /* If we're not at the end of the key sequence, and the current key
+ 	 is bound to something other than a keymap, then the entire key
+ 	 sequence is not bound. */
+-      else if (map[ic].type != ISKMAP && keyseq[i+1])
++      else if (map[ic].type != ISKMAP && i + 1 < len)
+ 	return ((rl_command_func_t *)NULL);
+-      else	/* map[ic].type != ISKMAP && keyseq[i+1] == 0 */
++      else	/* map[ic].type != ISKMAP && i + 1 >= len */
+ 	{
+ 	  if (type)
+ 	    *type = map[ic].type;
+-- 
+2.9.5
+

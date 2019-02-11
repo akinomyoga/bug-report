@@ -1,0 +1,79 @@
+From: Koichi Murase <myoga.murase@gmail.com>
+To: bug-bash@gnu.org
+Subject: [PATCH] Switch vi-insert TAB bindings only for the default bindings
+
+Configuration Information [Automatically generated, do not change]:
+Machine: i686
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -O2 -march=native -Wno-parentheses -Wno-format-security
+uname output: Linux padparadscha 4.13.13-100.fc25.i686 #1 SMP Wed Nov 15 18:24:19 UTC 2017 i686 i686 i386 GNU/Linux
+Machine Type: i686-pc-linux-gnu
+
+Bash Version: 5.0
+Patch Level: 0
+Release Status: release
+
+Description:
+
+  When readline variable `convert-meta' is set to `on', `bind -x' including meta characters in its keyseq fails to bind.
+
+  For an actual example, see the next `Repeat-By' section. An inconsistency comes from the condition whether to contain ESC (from meta chars) in the keyseq stored in keymaps. For example, in `rl_generic_bind' (lib/readline/bind.c), ESC is only contained when the keymap already has a child ISKMAP entry at ESC as quoted below.
+
+    if (META_CHAR (ic) && _rl_convert_meta_chars_to_ascii)
+      {
+        ic = UNMETA (ic);
+        if (map[ESC].type == ISKMAP) /* <-- this condition */
+          {
+            prevmap = map;
+            map = FUNCTION_TO_KEYMAP (map, ESC);
+          }
+      }
+
+  In addition, the condition in `rl_translate_keyseq' (lib/readline/bind.c) always refers to the current top-level keymap `_rl_keymap' rather than the corresponding keymap entry in the target keymap tree, which appears to be unreasonable.
+
+    if (_rl_convert_meta_chars_to_ascii && _rl_keymap[ESC].type == ISKMAP)
+        array[l++] = ESC; /* ESC is meta-prefix */
+
+  `bind -x' stores data in two different keymaps: the selected keymap and the keymap `cmd_xmap' defined in `bashline.c'. When one has a child ISKMAP entry at ESC and the other doesn't have, the inconsisty arises.
+
+Repeat-By:
+
+  The readline variable `convert-meta' is enabled by default when Bash starts with `LANG=C'.
+
+    $ LANG=C bash-5.0 --norc
+    $ bind -v | grep convert-meta
+    set convert-meta on
+
+  `bind -x' whose keyseq contains meta characters stores the command string to wrong places in `cmd_xmap'. In the following example, the command string for `\M-c' is stored to the placeholder for `c'.
+
+    $ bind -x '"c": "echo hello"'
+    $ bind -x $'"\xE3": "echo world"'
+    world # <-- somehow the binding for `\M-c' is invoked by typing `c'
+    $
+    bash-5.0: bash_execute_unix_command: cannot find keymap for command # <-- error is produced by typing `\M-c'
+    $ bind -X
+    "c": "echo world"
+    $ 
+
+  For reference, usual macro key bindings work as expected.
+
+    $ bind '"c": "hello"'
+    $ bind $'"\xE3": "world"'
+    $ echo helloworld # <-- `hello' and `world' is inserted by typing `c' and `\M-c'
+    helloworld
+    $ bind -s
+    "\ec": "world"
+    "c": "hello"
+
+Fix:
+
+  Actually I'm not sure if there is a reason why stored keyseqs contains ESC only when there is already ESC entry, but a possible solution would be to create a new ISKMAP entry when there is no ISKMAP entry at ESC. I attach a patch `0001-translate-meta-characters-when-convert-meta-is-set.patch'. I have changed `rl_bind_key' (lib/readeline/bind.c) so that the ISKMAP entry is explicitly created. I have changed `rl_translate_keyseq' (lib/readeline/bind.c) so that meta characters `c' are always translated to `ESC' + `UNMETA (c)' when `convert-meta' is set. In this way, the array `keys' in `rl_generic_bind' (lib/readeline/bind.c) would never contain meta characters when `convert-meta' is set, so the codes to check meta characters have been removed from `rl_generic_bind'.
+
+  By the way, in `rl_bind_key' (lib/readline/bind.c), isn't the range condition for the argument `key' incomplete? I'm not confident, but could you check the second patch `0002-add-a-range-condition-to-rl_bind_key.patch'?
+
+  Also, in `_rl_function_of_keyseq_internal' (lib/readline/bind.c), shouldn't the end of the keyseq be detected using the keyseq length `len'? The current implementation sees if the next key is '\0' or not, but it misbehaves when the keyseq contains `\C-@' (NUL). Note that it is possible to contain `\C-@' in the keyseq by using the interface `rl_function_of_keyseq_len'. See the third patch `0003-use-keyseq-length-to-check-the-end-of-keyseq.patch'.
+
+----
+Best regards,
+Koichi

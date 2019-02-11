@@ -247,6 +247,89 @@
 
 2019-02-11
 
+* report9: convert-meta と unmeta について
+
+  まとめ初めたが何だか分からなくなった。
+  というか unmeta を if の中に入れるだけでは治らない。
+  cmd_xmap と現在の kmap で map[ESC].type == ISKMAP の
+  状態が異なる為に不一致が起こっている。
+
+  _rl_convert_meta_chars_to_ascii を参照している箇所を確認して、
+  全体としての一貫性がどうなっているのかを改めて確認する必要がある。
+
+  bind.c:144: rl_bind_key に関しては、そもそも meta char を受け取って、
+  現在の kmap[ESC] が存在していない場合には "out of range" の扱いだそうだ。
+
+  bind.c:400: rl_generic_bind については、
+  そもそも keys, keys_len を翻訳する時に工夫すれば良いのでは?
+
+    →rl_translate_keyseq を修正したので変更不要の気がするが、
+    使わないコードを残しておく理由もないので削除する。
+
+  bind.c:523: rl_translate_keyseq は \M- の形式だけ \e に変換している。
+  他の場所で meta chars を分解するぐらいであればそもそもこの場所で
+  \e に分けて置いた方が良いのではないだろうか。
+
+    →強制的に ESC と UNMETA (c) に分ける様に書き換えた。
+    実装を見てみても最大バッファ長さは strlen(str)*2 + 1 で変わらないと思う。
+
+  bind.c:799: _rl_function_of_keyseq_internal は書き換えかけたが…
+  よく考えたらこれは読み取りのコードなのでこのままで良い気がする。
+  書きかけて削除したコードは以下に残しておく。
+
+    | char* keys;
+    | int keys_len;
+    |
+    | keys = keyseq;
+    | keys_len = len;
+    |
+    | if (_rl_convert_meta_chars_to_ascii)
+    |   {
+    |     keys = (char *)xmalloc(len * 2 + 1);
+    |     keys_len = 0;
+    |     for (i = 0; keyseq && i < len; i++)
+    |       {
+    |         unsigned char ic = keyseq[i];
+    |         if (META_CHAR (ic))
+    |           {
+    |             keys[keys_len++] = ESC;
+    |             keys[keys_len++] = UNMETA (ic);
+    |           }
+    |         else
+    |           keys[keys_len++] = ic;
+    |       }
+    |     keys[keys_len] = '\0';
+    |   }
+
+  bind.c:2588: rl_invoking_keyseqs_in_map
+  これは正直 \M-? と出力しようが \e? と出力しようがどちらでも良い。
+  \e が kmap に存在するかどうかで動作を分けるのも妙な気がするが。
+  と思ったが、この構造を追うと map[ESC].type == ISKMAP は恒真ではないか。なので気にしない。
+
+    | for (key = 0; key < KEYMAP_SIZE; key++)
+    |   {
+    |     switch (map[key].type)
+    |       case ISKMAP:
+    |         {
+    |           for (i = 0; seqs[i]; i++)
+    |             {
+    |               if (key == ESC)
+    |                   if (_rl_convert_meta_chars_to_ascii && map[ESC].type == ISKMAP)
+    |                     sprintf (keyname, "\\M-");
+    |                   else
+    |                     sprintf (keyname, "\\e");
+
+  readline.c:817: _rl_dispatch_subseq
+  うーん。これは一体何をやっているか分からない。meta char が指定された時は、
+  map に ESC がなければ rl_ding というのを実行している。
+  これは実装を確認すると単にベルを鳴らすだけの話である。
+  これは受け取った文字を使って kmap を辿る操作である。
+  meta char は ESC と UNMETA (c) に分解して辿る。
+  これはこのままで問題ない。
+
+  取り敢えず patch を作った。
+
+
 * report7: 序でなのでこれも報告する事にする。
   ref ble.sh/memo.txt#D0920
 
