@@ -1,0 +1,34 @@
+From 4e0e727a59ff4bbf6e50b506a02067f537f57527 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 11 Feb 2019 17:41:34 +0900
+Subject: [PATCH 4/4] free macro definitions in rl_bind_key
+
+---
+ lib/readline/bind.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/lib/readline/bind.c b/lib/readline/bind.c
+index e1c0a30..b1372bb 100644
+--- a/lib/readline/bind.c
++++ b/lib/readline/bind.c
+@@ -160,6 +160,8 @@ rl_bind_key (int key, rl_command_func_t *function)
+ 	escmap = FUNCTION_TO_KEYMAP (_rl_keymap, ESC);
+ 
+       key = UNMETA (key);
++      if (escmap[key].type == ISMACR)
++	xfree ((char *)escmap[key].function);
+       escmap[key].type = ISFUNC;
+       escmap[key].function = function;
+       return (0);
+@@ -171,6 +173,8 @@ rl_bind_key (int key, rl_command_func_t *function)
+      through the call to rl_translate_keyseq. */
+   if (_rl_keymap[key].type != ISKMAP)
+     {
++      if (_rl_keymap[key].type == ISMACR)
++	xfree ((char *)_rl_keymap[key].function);
+       _rl_keymap[key].type = ISFUNC;
+       _rl_keymap[key].function = function;
+     }
+-- 
+2.9.5
+
