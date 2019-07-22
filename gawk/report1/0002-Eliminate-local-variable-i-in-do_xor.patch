@@ -1,0 +1,44 @@
+From 1d6af1c9ec66d5ba72b32118a6e89a29c503a965 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Tue, 23 Jul 2019 06:33:52 +0900
+Subject: [PATCH 2/3] Eliminate local variable `i' in `do_xor'
+
+---
+ builtin.c | 10 +++-------
+ 1 file changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/builtin.c b/builtin.c
+index 2f379689..5f62426d 100644
+--- a/builtin.c
++++ b/builtin.c
+@@ -3529,13 +3529,12 @@ do_xor(int nargs)
+ 	NODE *s1;
+ 	uintmax_t res, uval;
+ 	AWKNUM val;
+-	int i;
+ 
+ 	if (nargs < 2)
+ 		fatal(_("xor: called with less than two arguments"));
+ 
+-	res = 0;	/* silence compiler warning */
+-	for (i = 1; nargs > 0; nargs--, i++) {
++	res = 0;	/* start with all zeroes */
++	for (; nargs > 0; nargs--) {
+ 		s1 = POP_SCALAR();
+ 		if (do_lint && (fixtype(s1)->flags & NUMBER) == 0)
+ 			lintwarn(_("xor: argument %d is non-numeric"), nargs);
+@@ -3545,10 +3544,7 @@ do_xor(int nargs)
+ 			fatal(_("xor: argument %d negative value %g is not allowed"), nargs, val);
+ 
+ 		uval = (uintmax_t) val;
+-		if (i == 1)
+-			res = uval;
+-		else
+-			res ^= uval;
++		res ^= uval;
+ 
+ 		DEREF(s1);
+ 	}
+-- 
+2.21.0
+
