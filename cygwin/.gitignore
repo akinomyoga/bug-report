@@ -1,0 +1,6 @@
+# gitignore
+
+*.o
+*.exe
+*.lnk
+/test

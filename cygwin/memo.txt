@@ -1,0 +1,287 @@
+
+
+------------------------------------------------------------------------------
+  Memo
+------------------------------------------------------------------------------
+
+2019-07-23
+
+* Cygwin 3.1.0 以降では Takashi Yano によって 2019-04-01 に
+  押し込まれた変更により、cygwin console の機能は使えなくなり、
+  基本的に Windows のコマンドプロンプトによってエスケープシーケンスが処理される。
+  古い Windows で動かした時にのみ fallback として cygwin console が起動する。
+
+------------------------------------------------------------------------------
+  ToDo
+------------------------------------------------------------------------------
+
+2019-07-23
+
+* 気になるのは今まで cygwin console で対応していた全ての機能が
+  Windows のコマンドプロンプトによって提供されているのか、という事である。
+  或いは最早 cygwin コンソールではないので気にしなくても良いという事なのだろうか。
+  まあその様な考え方もあるにはあると思われる。
+
+  - 実際に試してみた所 DECSCUSR が使えなくなっている。
+
+  - set scrolling region は OK
+
+  - REP は cygwin も cmd も両方共変な実装になっている。
+    元からそういう物だったのか? xterm がそうなのかもしれない。
+    と思って xterm で試してみたがそんな事はなかった。
+    xterm はちゃんと最後に入力された文字を繰り返している。
+
+2019-07-22
+
+* console: 観察していて気づいたのだが 24bit color 対応の箇所における
+  con.nargs の使い方がまるで誤っている気がする。
+  これだと単体の色設定の SGR しか使えない…。
+
+* console: 新しい cygwin の console は fhandler_console とは独立に思われる。
+  一方で fhandler_console は今も未だ変更の対象である。
+  fhandler_console の振る舞いを今はテストできていないが、
+  以下の問題が解決したとは思われない。
+
+  - Cygwin は ED(2) "ESC [ 2 J" が駄目
+  - Cygwin は RI の振る舞いがおかしい
+  - Cygwin は最終行での DL "ESC [ M" が駄目
+  - Cygwin は CUF() の行き先が行末 $ の時に何処にも移動しない。
+
+
+------------------------------------------------------------------------------
+  Done
+------------------------------------------------------------------------------
+
+2019-07-23
+
+* Cygwin console を起動させる方法?
+
+  * うーん分からない。少なくとも Takashi Yano は fhandler_console
+    で動く端末でテストできていた筈なのである。
+    それが何故今できないのだろうか…。
+
+  | 元々の cygwin1.dll を使うとちゃんと
+  | fhandler_console 由来の端末で起動している。
+  |
+  | a 今度は自分でコンパイルしたバイナリを使ってみる事にした。
+  |   然し、それでも矢張り謎のターミナルで起動する。
+  |   取り敢えず terminfo や cyggcc に対する依存性はなくす事ができた。
+  |
+  | b どういう事だろう。或いは最近の更新で変更されたのだろうか。
+  |   3.0.7 をビルドしてみる事にする。
+  |   →何と自前で3.0.7をビルドした場合にはちゃんと cygwin console になった。
+  |
+  | c 或いは ./configure で適切なフラグを設定する必要があるのだろうか。
+  |   ./configure --help で中を見てみたがそれっぽい物は見つからない。
+  |   winsup の中の ./configure や winsup/cygwin の中の ./configure も確認してみたが、
+  |   やはり関係のありそうな物は見つからない。
+  |
+  | d それとも cygwin の中でビルドすると色々と変な物を引っ掛けるという事なのだろうか。
+  |   一応 cygwin1.dll について cygcheck で調べてみるとちゃんと kernel32 にだけに依存している。
+
+  結局 b でちゃんと cygwin console になる事が確認できた。
+  つまりビルドの仕方の問題というよりかは実際に変更が行われたのである。
+
+  | うーん。二分法で何処から xterm-256color 的な変なターミナルになるのか調べる…。
+  | checkout してビルドするだけかと期待したが駄目だった。
+  | ./configure からやり直さなければならなかった。つまり、物凄く時間がかかる。
+  | $ m clean; m; m -C i686-pc-cygwin/newlib/doc makedoc.exe; m
+  | うーん。実は cygwin dll だけをコンパイルするという様にはできないだろうか。
+  | 
+  |   6b7723a83 xterm-256color
+  |   40b947e7d xterm-256color
+  |   f527171a9 コンパイル失敗
+  |     滅茶苦茶沢山のエラーが出ているので何か include が抜けているという事の気がする
+  |   513f050cb xterm-256color
+  |   6a06c6bc8 xterm-256color
+  |     % コンパイル失敗 @ new-cygwin
+  |     % うーん。また失敗した…。もしかするとこのリポジトリのファイル自体が壊れている?
+  |     % 何と、空の winsup/cygwin/globals.h ファイルができていて、
+  |     % これを削除してみたらちゃんと動き始めた。
+  |     結局 Yano 氏の段階ではmasterは既にcygwin consoleではなくなっていたという事なのか。
+  |   d1be0a59d cygwin
+  |     うーん。もしかして bump が原因なのか?
+  |     Bump するだけでバージョンの整合・不整合などの理由によって変化する?
+  | 
+  |   あー。どうも分かった気がする。
+  |   bd627864a で導入されたのは 24bit color ではない。
+  |   ENABLE_VIRTUAL_TERMINAL_PROCESSING で検索してみると
+  |   https://qiita.com/zetamatta/items/0c6130bd631491b97844 という記事が見つかった。
+  |   結局既存の cygwin console のコードは使わなくなって、
+  |   代わりにコマンドプロンプトのコードを使う事になったという事なのだろう…。
+  |   つまり "24bit color に対応する" とか嘯いて実際は "cygwin console を捨てさせた" のである。
+  |   これは分かりにくい。というかこれで良いのだろうか…。
+  | 
+  |   更に言うと 256 色 / 24bit 色に対応している様に見えた部分は、fallback コードである。
+
+  問題は結局 Takashi Yano によって導入された 24bit 対応だった。
+  結局 "24bit 対応" と称してコマンドプロンプトに全部のシーケンスを横流ししているだけなのだ。
+  問題の箇所は fhandler_console::write_normal の中にある while ループである。
+  何れにしてもこれで cygwin console の端末としての機能はほぼ死んだという事。
+  今後使われる事もないし今後メンテナンスされる事もない。
+
+  | * [保留] Linux 上でクロスコンパイルできないか?
+  |   うーん。linux 上でクロスコンパイルできないかと思って
+  |   sudo dnf search cygwin 等としてみたが当たらない。
+  |   というかそもそも cygwin をコンパイルするのに target が cygwin で良いのかも不明である。
+  |   a 以下に macOS で i686-pc-cygwin-gcc を生成する方法が書かれている。
+  |     http://fd0.hatenablog.jp/entry/20090204/p1
+  |   b sudo dnf search で cross-compile で検索すると MinGW が色々出てくる。
+  |     mingw32-gcc を入れてコンパイルしたらできたりするんだろうか。
+  |     取り敢えず入れてみる。
+  |     $ sudo dnf search install mingw32-{gcc,gcc-c++,binutils,headers,crt}
+  |     然し、cygwin をクローンして ./configure して make すると何も起きない。
+  |     ./configure の段階ではクロスコンパイラを認識している気がする。
+  |     ./configure の出力を見ると何故か "checking whether we are cross compiling... no" になっている。
+  |     どうも分かった。--target ではなくて --host を指定しなければならないのだ。
+  |     うーん。気になるので追加で cross-compile 関係を入れる。
+  |     $ sudo dnf install mingw32-{xz,gmp,gcc-gfortran,gcc-objc}
+  |     $ sudo dnf install flex expect isl isl-devel
+  |     駄目だ…結局何もコンパイルされない。
+  | 
+  |     普通に linux 上で使う為にコンパイルでもしてみるかと思ったがそれも駄目だった。
+  |     もうよく分からないので諦める事にした。削除した。
+
+  Linux 上でのクロスコンパイルは難しそうである。
+
+  * winsup/cygwin/how-to-debug-cygwin.txt というファイルを見つけた。
+    中を覗いてみたがビルドの仕方については載っていない。単にデバッガを使う方法とか諸々。
+
+2019-07-21
+
+* 最新版における cygwin console の振る舞いのテスト
+
+  | 取り敢えず printf で制御シーケンスを出力して変な振る舞いがないか見る。
+  | と思ったら色々と直ってしまっている気がする。
+  | これは本当に cygwin コンソールなのだろうか。
+  | DA2 応答を見ようとしたら返事がない。変だ。
+  |
+  | 分からないので現状の cygwin1.dll をコピーしてみて同じ様に振る舞うのかを調べる。
+  | 成る程…現行の cygwin1.dll だとやはり問題は再現する。DA2 応答もちゃんと帰ってくる。
+  | 然し、自前でビルドした cygwin1.dll だと問題は発生していない。代わりにDA2が来ない。
+  | 大幅に修正されたという事なのだろう…。
+  | 或いはもしかすると完全に別の実装に切り替わってしまった?
+  |
+  | 何れにしても前にあった問題が全て解決したかどうかを確認したい。
+  | 再び自前でビルドした cygwin1.dll に変えて試してみる。
+  | - 念の為また DA2 応答を調べてみる。やはり全く何も返信していない様だ。
+  | - RI は普通に戻っていた。CUF の問題も解決していた。
+  | - \e[100H として物凄くスクロールする問題も解決していた。
+  | - ED(2) が何も動かないという問題は解決している?
+  |   然し、ED(2) で (0,0) に移動してしまうという振る舞いは変である。
+  | - DL(n) が最終行まで削除する時に全然削除されないという問題も解決している。
+  |
+  | うーん。git blame してみても 2014 年ごろに幾らか振る舞いが変更されている以外は
+  | 全然変更されていない。ED のコードもちゃんとカーソル位置を復元している様に見える。
+  | うーん。これを思うと実は現在コンソールを表示しているコードは別にある?
+  |
+  | DA2 に対する応答は全然ないが DA1 に対する応答は存在している。
+  | 確認してみると CSI ? 1 ; 0 c を返している。
+  | これは cygwin console の CSI ? 6 c とは異なっている。
+  | - 検索してみても怪しい所は見つからない。
+  |   うーん。完全に異なるコードベースの上で動いているのだろうか。
+  |   或いは ConPty を使う様になったという事なのかもしれない。
+  | - conpty で検索しても何も見つからない。
+  | - xterm-256color で検索してみると見つかった。
+  |   cygwin/environ.cc にある win32env_to_cygenv (PWCHAR rawenv, bool posify) という関数。
+  |   wincap.has_con_24bit_colors () という関数を呼び出して判定している。
+  |   関数呼び出しだがこれは wincap.h で実装されていて実際には
+  |   中に持っている構造体の同名のビットフィールドを返す様になっている。
+  |   何れにしてもこれも判定は Windows のバージョンに従って行われている様子である。
+  |   wincap.cc に各 Windows に対するフラグがそのまま記録されている。
+  |
+  | 実は Cygwin 3.0 branch は物凄く古いコードの上で動いているんだろうか。
+  | と思ったがそんな事もなかった。現在見ている最新版と大差ないコードである。
+  | というよりも DA2 応答を見る限りは今見ているコードはやはり cygwin の方である。
+  | 最新版で動いているのはやはり謎ターミナルのきがする。
+  | というか DA1 応答も今見ているコードは \e[?6c である。
+  | そして他に terminal の様なコードは見当たらない。
+
+  結論としては最新版でビルドされる cygwin1.dll を使って
+  bash を直接起動すると cygwin console ではない謎の console で起動される。
+  TERM=xterm-256color であり DA1 応答は \e[?1;0c である。DA2応答はない。
+  実は他の端末が起動しているとしたらどの端末だろうか。
+  - mintty は DA1R として \e[64;1;2;4;6;9;15;21;22;28;29c を返すので違う。
+    そもそも mintty は ED(2) でちゃんとその場に留まる。
+  - ConPTY の可能性…。検索したら以下に ConPTY のサンプルコードがある。
+    https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/
+    CreatePseudoConsole という API が存在する様だ。
+    然しこの関数は cygwin の中では呼び出されていない。謎だ。
+
+* 自前でビルドした Cygwin の上で bash を動かしてみるテスト。
+  というか bash は単体で起動するんだろうか。
+
+  $ cygcheck /usr/bin/bash
+  C:\cygwin\bin\bash.exe
+    C:\cygwin\bin\cygwin1.dll
+      C:\WINDOWS\system32\KERNEL32.dll
+        C:\WINDOWS\system32\ntdll.dll
+        C:\WINDOWS\system32\KERNELBASE.dll
+    C:\cygwin\bin\cygiconv-2.dll
+    C:\cygwin\bin\cygintl-8.dll
+    C:\cygwin\bin\cygreadline7.dll
+      C:\cygwin\bin\cygncursesw-10.dll
+    C:\cygwin\bin\cyggcc_s-1.dll
+
+  駄目だ色々な物に依存している。
+  これらをごっそりとコピーして試してみる…。
+  $ mkdir test
+  $ cd test
+  $ mkdir bin
+  $ cp /bin/cygなんとか.dll bin/
+
+  と思ったが駄目だった。
+  一応 bash は立ち上がる物のコマンド類が全く使えないのでまともに動かない。
+  うーん。どうした物か。というか先ず terminfo が見つからない…。
+
+  無理やり terminfo をコピーする。
+  $ cd test
+  $ mkdir -p usr/share
+  $ cp -r /usr/share/terminfo usr/share/terminfo
+
+  一応これで bash の行編集はまともに動く様になった。
+  然し、echo $TERM を実行してみると xterm-256color を名乗っている…。
+  さて、今から試したい事は先ず初めにこれが cygwin console である事の確認。
+  うーん。分からない。
+
+* Cygwin のビルド
+
+  取り敢えず最新の cygwin をビルドする所から始める。
+
+  * サブディレクトリに入ってから Cygwin のコンパイルを試すが通らない。
+    gendef: command not found となる。
+    検索すると MinGW 関連のバイナリの様である。
+    Cygwin の setup.exe で探してみるが mingw-w64-tools 的な物はない。
+    分からないと思って setup.exe の窓に gendef と入れてみたら
+    gendef 単体で見つかった。入れる事にした。
+
+    然し入れてから実行してみるとエラーになって動かない。
+    gendef がファイルを開くのに失敗しましたと言っている。
+    というか gendef に渡されている様々のオプション引数が
+    全てファイル名として解釈されている様だ。gendef のバージョン等が違うのだろうか。
+
+  全然分からない。以前 cygwin をデバグした時の記録を探してみる事にする。
+  どうやら前回は色々と追加で入れる必要があった物のちゃんとコンパイルできていた様である。
+
+  * うーん。改めて全体で configure した物を確認してみる。
+    No rule to make target 'makedoc', needed by 'all-am'
+    というエラーメッセージが発生している。うーん。これを無視する様に編集しようか。
+    Makefile を覗いてみたらどうも makedoc.c なるファイルが存在する事になっている。
+    と思って makedoc.c をコピーしてみても状況は変化しない。
+    結局 make makedoc.exe を実行したら動いた。拡張子を指定しなければならなかったのである。
+    もっと詳しく見ると all-am は $(DATA) を要求し $(DATA) は $(noinst_DATA) に展開される。
+    一方でルールは $(MKDOC) に対してしか定義されていない。
+    以下の部分が問題になっている様だ。"automake will add $(EXEEXT)" という部分が気になる。
+
+      # We can't use noinst_PROGRAMS, because automake will add $(EXEEXT).
+      noinst_DATA = makedoc
+      MKDOC = makedoc$(EXEEXT_FOR_BUILD)
+
+    うーん。元の Makefile.am を見てみても同様に書かれている。
+    git blame Makefile.am として見たが 2000年からこの部分は全く変化していない様だ。
+    また前にビルドした時(2017年3月)以降には変更はない様でもある。うーん。
+    環境によって .exe をつけたりつけなかったりが色々なのだろうか。
+
+  取り敢えず先に進む事にする。ビルドに結構時間がかかっている様だ。
+  というより Build the listings... というメッセージの所でずっと固まっている。
+  psforest がまたエラーになっていたのでそれを直したら new-cygwin1.dll が完成していた。
