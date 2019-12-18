@@ -1,0 +1,62 @@
+From: murase
+To: bug-bash@gnu.org
+Subject: [PATCH] Fix a problem `rl_bind_key' cannot create shadow binding for `C-@'
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -g -O2 -Wno-parentheses -Wno-format-security
+uname output: Linux hp2019 5.2.13-200.fc30.x86_64 #1 SMP Fri Sep 6 14:30:40 UTC 2019 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-pc-linux-gnu
+
+Bash Version: 5.0
+Patch Level: 11
+Release Status: maint
+
+Description:
+
+  One of the public interface of readline, the function
+  `rl_bind_key (key, function)' does not work with key = 0 (C-@) when
+  there are already bindings of keyseqs starting from "\C-@".
+  This is because when `rl_bind_key' calls `rl_generic_bind',
+  it fails to construct an appropriate untranslated keyseq for "\C-@".
+
+Repeat-By:
+
+  The function `rl_bind_key' is not widely used by current Bash codes,
+  but to see the problem caused by this bug, one can use an older form
+  of bind 'C-SPC:...' to register a shadow binding.
+
+  $ LANG=C ./bash-3a7c642e --norc
+  $ bind '"\C-@\C-@":"hello"'
+  $ bind 'C-SPC:backward-char'
+  $ echo* #<-- <C-@> (* is the cursor position)
+
+  In the above example, the expected result is `ech*o' with `*' being
+  the cursor position after the timeout, but the cursor does not move.
+  But with the following newer form, we can get the expected result:
+
+  $ LANG=C ./bash-3a7c642e --norc
+  $ bind '"\C-@\C-@":"hello"'
+  $ bind '"\C-@":backward-char'
+
+Fix:
+
+  I attach a patch `0001-....patch'. In the patch, the key '\0' is
+  treated specially similarly to the key '\\'.
+
+  By the way I think there is a memory leak in the same
+  function. Could you check the second attached patch
+  `0002-....patch'? I think if the original binding is a macro the
+  memory block should be released before the pointer is overwritten.
+  At least in a similar function `rl_generic_bind', the memory block
+  is released.
+
+  However, I think there is a memory leak also in the
+  `rl_generic_bind' when the shadow macro which is stored in
+  `map[ANYOTHERKEY].function' is not released before the
+  overwrite. See the third patch `0003-....patch'.
+
+Thank you,
+Koichi

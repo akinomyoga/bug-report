@@ -1,0 +1,25 @@
+From decdfaf236871708bcaf2777aa7f15651be850cf Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Tue, 19 Feb 2019 11:51:14 +0900
+Subject: [PATCH 2/3] rl_bind_key: free macro strings
+
+---
+ lib/readline/bind.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/lib/readline/bind.c b/lib/readline/bind.c
+index 90e5c0dd..c430d79f 100644
+--- a/lib/readline/bind.c
++++ b/lib/readline/bind.c
+@@ -170,6 +170,8 @@ rl_bind_key (int key, rl_command_func_t *function)
+      through the call to rl_translate_keyseq. */
+   if (_rl_keymap[key].type != ISKMAP)
+     {
++      if (_rl_keymap[key].type == ISMACR)
++	xfree ((char *)_rl_keymap[key].function);
+       _rl_keymap[key].type = ISFUNC;
+       _rl_keymap[key].function = function;
+     }
+-- 
+2.21.0
+

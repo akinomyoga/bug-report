@@ -1,0 +1,45 @@
+From 9845bf669ac7c7baf4cc636aa6db0a1a560cdb9a Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Tue, 19 Feb 2019 11:44:31 +0900
+Subject: [PATCH 1/3] rl_bind_key: support C-@
+
+---
+ lib/readline/bind.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/lib/readline/bind.c b/lib/readline/bind.c
+index b6970df6..90e5c0dd 100644
+--- a/lib/readline/bind.c
++++ b/lib/readline/bind.c
+@@ -166,7 +166,7 @@ rl_bind_key (int key, rl_command_func_t *function)
+ 
+   /* If it's bound to a function or macro, just overwrite.  Otherwise we have
+      to treat it as a key sequence so rl_generic_bind handles shadow keymaps
+-     for us.  If we are binding '\' make sure to escape it so it makes it
++     for us.  If we are binding '\' or \C-@ make sure to escape it so it makes it
+      through the call to rl_translate_keyseq. */
+   if (_rl_keymap[key].type != ISKMAP)
+     {
+@@ -178,8 +178,17 @@ rl_bind_key (int key, rl_command_func_t *function)
+       l = 0;
+ bind_keyseq:
+       if (key == '\\')
+-	keyseq[l++] = '\\';
+-      keyseq[l++] = key;
++	{
++	  keyseq[l++] = '\\';
++	  keyseq[l++] = '\\';
++	}
++      else if (key == '\0')
++	{
++	  keyseq[l++] = '\\';
++	  keyseq[l++] = '0';
++	}
++      else
++	keyseq[l++] = key;
+       keyseq[l] = '\0';
+       rl_bind_keyseq (keyseq, function);
+     }
+-- 
+2.21.0
+

@@ -1,0 +1,42 @@
+From 856d96dbca61e1b8178c85b650ddbb2eb2b92165 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Wed, 18 Dec 2019 19:36:39 +0800
+Subject: [PATCH 3/3] rl_generic_bind: fix memleak
+
+---
+ lib/readline/bind.c | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/lib/readline/bind.c b/lib/readline/bind.c
+index c430d79f..475cff4c 100644
+--- a/lib/readline/bind.c
++++ b/lib/readline/bind.c
+@@ -462,9 +462,7 @@ rl_generic_bind (int type, const char *keyseq, char *data, Keymap map)
+ 	}
+       else
+ 	{
+-	  if (map[ic].type == ISMACR)
+-	    xfree ((char *)map[ic].function);
+-	  else if (map[ic].type == ISKMAP)
++	  if (map[ic].type == ISKMAP)
+ 	    {
+ 	      prevmap = map;
+ 	      map = FUNCTION_TO_KEYMAP (map, ic);
+@@ -478,12 +476,13 @@ rl_generic_bind (int type, const char *keyseq, char *data, Keymap map)
+ 		data = (char *)_rl_null_function;
+ 	    }
+ 
++	  if (map[ic].type == ISMACR)
++	    xfree ((char *)map[ic].function);
+ 	  map[ic].function = KEYMAP_TO_FUNCTION (data);
+ 	  map[ic].type = type;
+ 	}
+ 
+       rl_binding_keymap = map;
+-
+     }
+ 
+   /* If we unbound a key (type == ISFUNC, data == 0), and the prev keymap
+-- 
+2.21.0
+
