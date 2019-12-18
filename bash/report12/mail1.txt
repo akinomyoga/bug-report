@@ -50,13 +50,12 @@ Fix:
   function. Could you check the second attached patch
   `0002-....patch'? I think if the original binding is a macro the
   memory block should be released before the pointer is overwritten.
-  At least in a similar function `rl_generic_bind', the memory block
-  is released.
+  Actually I'm not quite sure, but at least in a similar function
+  `rl_generic_bind', the macro string is released.
 
-  However, I think there is a memory leak also in the
-  `rl_generic_bind' when the shadow macro which is stored in
-  `map[ANYOTHERKEY].function' is not released before the
-  overwrite. See the third patch `0003-....patch'.
+  I think there is a memory leak also in the `rl_generic_bind'.  The
+  shadow macro which is stored in `map[ANYOTHERKEY].function' is not
+  released before the overwrite. See the third patch `0003-....patch'.
 
 Thank you,
 Koichi
