@@ -1,0 +1,34 @@
+
+
+
+I also would like to see this problem fixed.  In this February, I
+actually posted to this mailing list a patch fixing this problem (with
+another patch):
+
+https://lists.gnu.org/archive/html/bug-bash/2019-02/msg00038.html
+
+Although the first patch was applied to the devel branch, the second
+one which fixes this problem seems not to have been reviewed yet.  I
+updated the patch to fit the current devel branch.  I attach the
+updated patch.  Here is the description of the patch quoted from the
+previous mail:
+
+> In the second patch
+> `0002-do-not-print-unbound-bindings-in-bind-X.patch', to correctly
+> dump `bind -x' bindings, I created a new function
+> `_print_unix_command_map_internal' by modifying
+> `_rl_macro_dumper_internal' (lib/readline/bind.c).  However, the
+> implementation of `_print_unix_command_map_internal' uses private
+> readline functions `_rl_get_keyname' and
+> `_rl_untranslate_macro_value', so the implementation should be
+> modified somehow or maybe these private functions can be made
+> public.
+
+Note that in the attached patch the functions in Readline library,
+`_rl_get_keyname' and `_rl_untranslate_macro_value', were made public
+and used from Bash codes.  I think it is worth to make them a part of
+public interface of Readline library.
+
+Even if Chet does not use my patch and instead write a new code with
+another approach for this, I am anyway happy as far as the problem is
+fixed.

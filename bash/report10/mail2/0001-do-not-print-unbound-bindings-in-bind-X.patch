@@ -1,0 +1,114 @@
+From 9eddd581f385712238bdbd146eeca261960592a2 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 11 Feb 2019 19:23:09 +0900
+Subject: [PATCH] do not print unbound bindings in "bind -X"
+
+---
+ bashline.c          | 73 +++++++++++++++++++++++++++++++++++++++++----
+ lib/readline/bind.c |  2 +-
+ 2 files changed, 68 insertions(+), 7 deletions(-)
+
+diff --git a/bashline.c b/bashline.c
+index e992c64b..040946e2 100644
+--- a/bashline.c
++++ b/bashline.c
+@@ -4368,16 +4368,77 @@ bash_execute_unix_command (count, key)
+   return 0;
+ }
+ 
++static void
++_print_unix_command_map_internal (Keymap map, Keymap xmap, char *prefix)
++{
++  register int key;
++  char *keyname, *out;
++  int prefix_len;
++
++  /* XXX - They are private readline functions... */
++  extern char *_rl_get_keyname (int key);
++  extern char *_rl_untranslate_macro_value (char *seq, int use_escapes);
++
++  for (key = 0; key < KEYMAP_SIZE; key++)
++    {
++      switch (map[key].type)
++	{
++	case ISMACR:
++	  break;
++	case ISFUNC:
++	  if (map[key].function != bash_execute_unix_command || xmap[key].type != ISMACR)
++	    continue;
++
++	  keyname = _rl_get_keyname (key);
++	  out = _rl_untranslate_macro_value ((char *)xmap[key].function, 0);
++	  fprintf (rl_outstream, "\"%s%s\": \"%s\"\n", prefix ? prefix : "",
++						       keyname,
++						       out ? out : "");
++	  xfree (keyname);
++	  xfree (out);
++	  break;
++	case ISKMAP:
++	  if (xmap[key].type != ISKMAP)
++	    continue;
++
++	  prefix_len = prefix ? strlen (prefix) : 0;
++	  if (key == ESC)
++	    {
++	      keyname = (char *)xmalloc (3 + prefix_len);
++	      if (prefix)
++		strcpy (keyname, prefix);
++	      keyname[prefix_len] = '\\';
++	      keyname[prefix_len + 1] = 'e';
++	      keyname[prefix_len + 2] = '\0';
++	    }
++	  else
++	    {
++	      keyname = _rl_get_keyname (key);
++	      if (prefix)
++		{
++		  out = (char *)xmalloc (strlen (keyname) + prefix_len + 1);
++		  strcpy (out, prefix);
++		  strcpy (out + prefix_len, keyname);
++		  xfree (keyname);
++		  keyname = out;
++		}
++	    }
++
++	  _print_unix_command_map_internal (FUNCTION_TO_KEYMAP (map, key), FUNCTION_TO_KEYMAP (xmap, key), keyname);
++	  xfree (keyname);
++	  break;
++	}
++    }
++}
++
+ int
+ print_unix_command_map ()
+ {
+-  Keymap save, cmd_xmap;
++  Keymap kmap, cmd_xmap;
+ 
+-  save = rl_get_keymap ();
+-  cmd_xmap = get_cmd_xmap_from_keymap (save);
+-  rl_set_keymap (cmd_xmap);
+-  rl_macro_dumper (1);
+-  rl_set_keymap (save);
++  kmap = rl_get_keymap ();
++  cmd_xmap = get_cmd_xmap_from_keymap (kmap);
++  _print_unix_command_map_internal (kmap, cmd_xmap, (char *)NULL);
+   return 0;
+ }
+ 
+diff --git a/lib/readline/bind.c b/lib/readline/bind.c
+index b6970df6..87b0a31a 100644
+--- a/lib/readline/bind.c
++++ b/lib/readline/bind.c
+@@ -2483,7 +2483,7 @@ rl_list_funmap_names (void)
+   xfree (funmap_names);
+ }
+ 
+-static char *
++char *
+ _rl_get_keyname (int key)
+ {
+   char *keyname;
+-- 
+2.21.0
+
