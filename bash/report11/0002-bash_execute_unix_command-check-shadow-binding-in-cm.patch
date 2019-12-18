@@ -1,0 +1,28 @@
+From c8463c3f275dd154d2617b6a09e6efb431992c3a Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Wed, 18 Dec 2019 18:15:25 +0800
+Subject: [PATCH 2/2] bash_execute_unix_command: check shadow binding in
+ cmd_xmap
+
+---
+ bashline.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/bashline.c b/bashline.c
+index 419986eb..911cfc0e 100644
+--- a/bashline.c
++++ b/bashline.c
+@@ -4284,7 +4284,9 @@ bash_execute_unix_command (count, key)
+      have to walk cmd_xmap using the entire key sequence. */
+   cmd_xmap = get_cmd_xmap_from_keymap (rl_get_keymap ());
+   cmd = (char *)rl_function_of_keyseq_len (rl_executing_keyseq, rl_key_sequence_length, cmd_xmap, &type);
+-    
++  if (type == ISKMAP && (type = ((Keymap) cmd)[ANYOTHERKEY].type) == ISMACR)
++    cmd = (char*)((Keymap) cmd)[ANYOTHERKEY].function;
++
+   if (cmd == 0 || type != ISMACR)
+     {
+       rl_crlf ();
+-- 
+2.21.0
+
