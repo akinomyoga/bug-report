@@ -68,6 +68,139 @@
   Done
 -------------------------------------------------------------------------------
 
+* report11: また新しいバグを見つけてしまった。
+
+  $ LANG=C ./bash-3a7c642e --norc
+  $ bind -s '"\C-t\C-t":"hello"'
+  $ bind -x '"\C-t":echo world'
+  $ <-- <C-t>
+  bash-3a7c642e: bash_execute_unix_command: cannot find keymap for command
+
+  bash-4.0 -- 4.2 は segfault
+  bash-4.3 は動く
+  bash-4.4 から上記の振る舞い
+
+  これは何による物だろうか。
+  削除されてしまっている?
+
+  調べてみると timeout したとしても実際に受信している入力が受け取られる?
+  否、何だか変だ。C-t しか入力していないのに C-t C-t が受信された事になっている。
+  少なくとも rl_executing_keyseq の中身はそういう事になっている。
+
+  そして以下の様にしてみると C-t しか入力していなくても
+  C-t C-t を入力したかの様に振る舞っている。
+
+  $ LANG=C ./bash --norc
+  $ bind -x '"\C-t\C-t":echo hello'
+  $ bind -x '"\C-t":echo world'
+  $ <-- <C-t>
+  hello
+
+  何かが変である。どうも調べてみると timeout の時には、
+  これまでに入力された内容をそのままにして
+  改めて dispatch を呼び出している?
+  その事によって同じ文字が二重に書き込まれている?
+  試してみる事にする。
+
+  $ bind -s '"\C-t\C-u":"hello"'
+  $ bind -x '"\C-t":echo world'
+  $ <-- <C-t>
+  <C-t> <C-t> に対して一致が試みられている。
+
+  うーん。具体的にどの様な構造になっているのか
+  ちゃんと確認してからでないと書き換えられない。
+  然し、chatoyancy は遅いのでなかなか確認するのが難しい。
+  結局どの様な処理の流れになっているのだろうか。
+  ユーザが入力をすると一番最初に呼び出されるのはどの関数か。
+
+  うーん。readline -> readline_internal -> readline_internal_charloop
+  -> readline_internal_char になっている?
+  更に _rl_dispatch(c, _rl_keymap) を呼び出している。
+  其処から _rl_dispatch_subseq を呼び出している。
+  其処で色々 dispatch していて、通常であれば末尾まで来て、
+  其処で _rl_subseq_getchar で新しいキーを読み取って、
+  それに基づいて再帰的に _rl_dispatch_subseq を呼び出している?
+
+  _rl_subseq_result は何れにしても呼び出される様だ?
+  _rl_subseq_result に -2 を渡した時が何も対応する物に一致しなかった時。
+  そしてその時は一旦短くして再一致を確かめるという事の様だ。
+
+  ? _rl_subseq_result に -2 が渡されるのは何処だろうか。
+
+    | rl_executing_keyseq に文字を追加した直後に二箇所明示的に渡している箇所がある。
+    | それ以外の場合は dispatch_subseq の戻り値をそのまま渡している。
+    |
+    | _rl_dispatch_subseq の戻り値は別の _rl_dispatch 呼び出しの戻り値か、
+    | - 成功した時は 0 で
+    | - ANYOTHERKEY が見つかった時に -2 を返している。
+    | - got_subseq がある時には -1 を返す事になっている。
+    | - 或いはそうでなくても何も見つからなかった時に
+    |   状態をクリア (_rl_abort_internal) して -1 を返している。
+    |   _rl_abort_internal の中を確認してみるとこれは緊急用だろうか?
+    |   何れにしても -1 は何らかのエラーがあった時用に見える。
+    | - 或いは _rl_subseq_result の戻り値をそのまま返している箇所もある。
+    | - r = RL_ISSTATE (RL_STATE_MULTIKEY) ? -3 : 0; で決めた物を
+    |   返している箇所もある。-3 は今回関係なさそうなので無視する。
+    |
+    | _rl_subseq_result に関しては、
+    | _rl_dispatch, _rl_dispatch_subseq の戻り値を返しているか、
+    | 或いは ANYOTHERKEY なら -2 で失敗なら -1 を返している。
+    |
+    | 取り敢えず ANYOTHERKEY または timeout の時に -2 になる。
+    | うーん。何故 ANYOTHERKEY を要求しているのだろうか。
+    | というか ANYOTHERKEY が設定されるのはどういう時だろうか。
+    |
+    | うーん。調べてみると確かに ANYOTHERKEY が設定されている。
+    | ANYOTHERKEY が設定されている理由は何だろうか。
+    | もし常に設定されている物だとすれば
+    | それをチェックする理由は何だろうか。
+    |
+    | 或いは ANYOTHERKEY の場所に
+    | subseq 一致の時の binding を格納している?
+    | 調べてみるとそれっぽい。ANYOTHERKEY の場所に入っているのは
+    | bash_execute_unix_command だった。bind -s にしてみると、
+    | また別の値が入っていた。
+    |
+    | OK。つまり ANYOTHERKEY を実行するというので良い。
+
+    -2 が渡されるのは対応する binding が見つからなかった時で、
+    然し ANYOTHERKEY に対応する binding が設定されている時である。
+    ANYOTHERKEY には timeout の時の設定が格納されている。
+    そして timeout の時には見つからなかったとして処理される。
+    結果として部分一致の結果を実行するという動作になっている。
+
+  * ここでどの様に修正したら良いだろうか。
+    timeout の時には rl_executing_keyseq を短くする必要がある気がする。
+    然し、そうでない場合には短くするのは変な気がする。
+    例えば本当に対応するキーがなかったとしたら
+    その時はそのキーを保持するべきなのでは。
+
+    うーん。呼び出し元の ungetc と一緒に短くするべき?
+    試してみたが何だか動作が分からない。
+
+    | そもそも 3 文字の時に timeout にならない…。
+    | 実装を見ると ANYOTHERKEY をチェックしているので
+    | n-1 文字の設定がない限りは n 文字は timeout しないのだ。
+    | これは元々特殊キーと ESC を区別する為の timeout と思えば、
+    | 確かに中途半端なキー状態で timeout するのは変である。
+    | これに関しては備考として残しておくことにする。
+
+  ここで問題は timeout の時ばかりではない事が判明した。
+  上に追記した。新しく来た文字に対応する binding がない時に。
+  どの様に処理が進むのかという事を確認する必要がある。
+
+    うーん。新しく来た文字に対応する binding がない時に
+    どういう分岐をするのか。どうも ISFUNC が設定されている様だ。
+    その上で func が 0 になっている。調べると #define ISFUNC 0 である。
+    やはり初期状態は全て {ISFUNC, 0} が設定されているのだろう。
+
+  ? cmd_xmap から bind を削除する時にカウントをチェックしている。
+    ANYOTHERKEY はちゃんとカウントされているのだろうか。
+
+    例えば tt と t に bind して t を unbind したらちゃんと削除される?
+    更に tt と t に bind して tt を unbind したら t に対して
+    ちゃんと timeout なしで反応するか?
+
 2019-02-11
 
 * report10: 取り敢えず mail を作成する事にする
@@ -276,7 +409,7 @@
 
 * report9: convert-meta と unmeta について
 
-  まとめ初めたが何だか分からなくなった。
+  まとめ始めたが何だか分からなくなった。
   というか unmeta を if の中に入れるだけでは治らない。
   cmd_xmap と現在の kmap で map[ESC].type == ISKMAP の
   状態が異なる為に不一致が起こっている。

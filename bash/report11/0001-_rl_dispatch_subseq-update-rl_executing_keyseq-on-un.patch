@@ -1,0 +1,66 @@
+From 68a54ab54f8452b1a285e89a2d0eced2230a0559 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Wed, 18 Dec 2019 14:41:23 +0800
+Subject: [PATCH] _rl_dispatch_subseq: update rl_executing_keyseq on unmatched
+ keyseq or timeout
+
+---
+ lib/readline/readline.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/lib/readline/readline.c b/lib/readline/readline.c
+index 0805fd4b..c9a34def 100644
+--- a/lib/readline/readline.c
++++ b/lib/readline/readline.c
+@@ -870,6 +870,8 @@ _rl_dispatch_subseq (register int key, Keymap map, int got_subseq)
+ 	    _rl_prev_macro_key ();
+ 	  else
+ 	    _rl_unget_char  (key);
++	  if (rl_key_sequence_length > 0)
++	    rl_executing_keyseq[--rl_key_sequence_length] = '\0';
+ 	  return -2;
+ 	}
+       else if (got_subseq)
+@@ -882,6 +884,8 @@ _rl_dispatch_subseq (register int key, Keymap map, int got_subseq)
+ 	    _rl_prev_macro_key ();
+ 	  else
+ 	    _rl_unget_char (key);
++	  if (rl_key_sequence_length > 0)
++	    rl_executing_keyseq[--rl_key_sequence_length] = '\0';
+ 	  return -1;
+ 	}
+       else
+@@ -974,7 +978,11 @@ _rl_dispatch_subseq (register int key, Keymap map, int got_subseq)
+ 	  	_rl_pushed_input_available () == 0 &&
+ 		_rl_dispatching_keymap[ANYOTHERKEY].function &&
+ 		_rl_input_queued (_rl_keyseq_timeout*1000) == 0)
+-	    return (_rl_subseq_result (-2, map, key, got_subseq));
++	    {
++	      if (rl_key_sequence_length > 0)
++		rl_executing_keyseq[--rl_key_sequence_length] = '\0';
++	      return (_rl_subseq_result (-2, map, key, got_subseq));
++	    }
+ 
+ 	  newkey = _rl_subseq_getchar (key);
+ 	  if (newkey < 0)
+@@ -1065,6 +1073,8 @@ _rl_subseq_result (int r, Keymap map, int key, int got_subseq)
+ 	_rl_prev_macro_key ();
+       else
+ 	_rl_unget_char (key);
++      if (rl_key_sequence_length > 0)
++	rl_executing_keyseq[--rl_key_sequence_length] = '\0';
+       _rl_dispatching_keymap = map;
+       return -2;
+     }
+@@ -1075,6 +1085,8 @@ _rl_subseq_result (int r, Keymap map, int key, int got_subseq)
+ 	_rl_prev_macro_key ();
+       else
+ 	_rl_unget_char (key);
++      if (rl_key_sequence_length > 0)
++	rl_executing_keyseq[--rl_key_sequence_length] = '\0';
+       _rl_dispatching_keymap = map;
+       return -1;
+     }
+-- 
+2.21.0
+

@@ -1,0 +1,109 @@
+From: murase
+To: bug-bash@gnu.org
+Subject: [PATCH] Fix a problem that shadow `bind -x' does not work
+
+Hi, I have still several patches related to `bind'. My previous
+patches are processed now so let me post them.
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -g -O2 -Wno-parentheses -Wno-format-security
+uname output: Linux hp2019 5.2.13-200.fc30.x86_64 #1 SMP Fri Sep 6 14:30:40 UTC 2019 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-pc-linux-gnu
+
+Bash Version: 5.0
+Patch Level: 11
+Release Status: maint
+
+Description:
+
+  When the key sequence of a binding is a prefix of other bindings
+  (let me call it a shadow binding in this report), the shadow binding
+  is triggered when the user input does not match any of the other
+  bindings or there is no input within timeout specified by the
+  readline variable `keyseq-timeout'. When such a shadow binding is
+  the one by `bind -x', Bash fails to find the appropriate unix
+  command and produces error message or triggers a wrong command.
+
+  This is reproduced in Bash 4.4, 5.0 and current devel branch. Bash
+  4.3 works properly in simple cases, but it still fails in complex
+  test cases. In Bash from 3.0 to 4.2, it causes segmentation
+  fault.
+
+  The problem is internally caused by the unupdated content of the array
+  `rl_executing_keyseq' on unmatched user inputs or timeout. This array
+  is used as a key sequence to find the unix command in `cmd_xmap'.
+
+Repeat-By:
+
+  Test case 1:
+
+  With the following settings, after typing `C-t' the command `echo
+  world' is expected to be executed after the 500ms delay specified by
+  the default value of the readline variable `keyseq-timeout'. However
+  we get an error message "bash_execute_unix_command: ..." instead:
+
+  $ LANG=C bash --norc
+  $ bind -v | grep keyseq-timeout
+  set keyseq-timeout 500
+  $ bind '"\C-t\C-t":"hello"'
+  $ bind -x '"\C-t":echo world'
+  $ <-- <C-t><wait 500ms>
+  bash: bash_execute_unix_command: cannot find keymap for command
+
+
+  Test case 2:
+
+  When the keyseq `\C-t\C-t' binds to `bind -x', `\C-t' + delay
+  invokes the command for `\C-t\C-t' instead fo the one for `\C-t'.
+
+  $ LANG=C bash --norc
+  $ bind -x '"\C-t\C-t":echo hello'
+  $ bind -x '"\C-t":echo world'
+  $ <-- <C-t><wait 500ms>
+  hello     #<-- expected result is "world"
+
+
+  Test case 3:
+
+  Similar results can also be obtained by inputting some unexpected
+  key before the timeout comes.
+
+  $ LANG=C bash --norc
+  $ bind '"\C-t\C-t":"hello"'
+  $ bind -x '"\C-t":echo world'
+  $ <-- <C-t>a
+  bash: bash_execute_unix_command: cannot find keymap for command
+  $ a
+
+  Test case 4:
+
+  This is just a test case for code coverage. Internally the following
+  three errors are produced by different control paths so we need to
+  fix all of these control paths.
+
+  $ LANG=C bash --norc
+  $ bind '"\C-t\C-t\C-t\C-t":"hello"'
+  $ bind -x '"\C-t":echo world'
+  $ <-- <C-t><C-t><C-t>a
+  bash: bash_execute_unix_command: cannot find keymap for command
+  $
+  bash: bash_execute_unix_command: cannot find keymap for command
+  $
+  bash: bash_execute_unix_command: cannot find keymap for command
+  $ a
+
+
+Fix:
+
+  I attach a patch. In the patch the following lines are inserted to
+  needed places. I think in principle just `rl_key_sequence_length--'
+  should work, but I have written as in the patch for safety.
+
+    if (rl_key_sequence_length > 0)
+      rl_executing_keyseq[--rl_key_sequence_length] = '\0';
+
+Best regards,
+Koichi
