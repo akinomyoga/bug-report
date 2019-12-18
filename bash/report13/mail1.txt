@@ -1,0 +1,44 @@
+From: murase
+To: bug-bash@gnu.org
+Subject: [PATCH] Fix a problem that shadow `bind -x' is not removed from `bind -X'
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -g -O2 -Wno-parentheses -Wno-format-security
+uname output: Linux hp2019 5.2.13-200.fc30.x86_64 #1 SMP Fri Sep 6 14:30:40 UTC 2019 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-pc-linux-gnu
+
+Bash Version: 5.0
+Patch Level: 11
+Release Status: maint
+
+Description:
+
+  The command string for shadow `bind -x' key binding is not removed
+  from corresponding cmd_xmap and therefore remains in the list of
+  `bind -X'.
+
+Repeat-By:
+
+  With the following command, one can create shadow binding for `\C-t'
+  and remove the binding. The binding is in fact removed and inactive
+  after the unbind, but remains in the output of `bind -X'.
+
+  $ bind '"\C-t\C-t\C-t\C-t":"hello"'
+  $ bind -x '"\C-t":echo world'
+  $ bind -r '\C-t'
+  $ bind -X
+  "\C-t": "echo world"
+
+Fix:
+
+  I attach a patch. In the patch, if the original binding
+  corresponding to removed keyseq is `ISKMAP', its shadow entry
+  `map[ANYOTHERKEY].function' is also checked if it is
+  `bash_execute_unix_command'.
+
+
+Best regards,
+Koichi
