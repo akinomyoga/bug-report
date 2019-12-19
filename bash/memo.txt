@@ -30,24 +30,6 @@
 
 2019-12-17
 
-* report11: 何と test case 2 が直っていないではないか。
-  何が問題かというと→これについては緊急で直した。
-  後で追加パッチとして送る必要がある。
-
-  * ok: うーん。要するに ANYOTHERKEY に移動した時にちゃんと -x も移動するのかという問題?
-    以下も後でチェックする必要がある。
-
-    $ bind -x '"\C-t": echo world'
-    $ bind '"\C-t\C-t":"hello"'
-    →これはちゃんと動いていた。
-
-    $ bind -x '"\C-t": echo world'
-    $ bind -x '"\C-t\C-t": echo hello'
-    →これは動かないが上の項目と同じ問題であろう。
-    →これは上を直したらちゃんと動く様になった事を確認した。OK
-
-  パッチは用意した。メールの準備をする。
-
 * shadow がそのままになってしまう。
   というかこれについては既にコメントが書かれている。
 
@@ -58,7 +40,175 @@
 
   ■これは保留
 
-* ble.sh #D1078 についても
+* report14: ble.sh #D1078 についても。
+
+  | 症状は何だったか。
+  |
+  | $ bash-5.0 --norc
+  | $ bind -p | grep '"\\C-\\'
+  | $ bind '"\C-\\": self-insert'
+  | $ bind -p | grep '"\\C-\\'
+  | "\C-\\\": self-insert
+  |
+  | $ bash-5.0 --norc
+  | $ set -o vi
+  | $ bind -p | grep '"\\C-\\'
+  | "\C-\\": self-insert
+  | $ bind '"\C-\\": self-insert'
+  | $ bind -p | grep '"\\C-\\'
+  | "\C-\\\": self-insert
+  | "\C-\": self-insert
+  |
+  | これである。中々謎である。ちゃんと \C-\\ と出力される事もあるから、
+  | これは何か記録のされ方が変な事になっているのだろうという気がする。
+  | 取り敢えず bind -p の処理を何処でやっているかを特定する。
+  |
+  | rl_function_dumper から rl_invoking_keyseqs_in_map を呼び出している。
+  | その中で文字列を構築している。中を確認してみると何だか怪しい。
+  | \C-\ が出力されてしまう気がする。しかし blame するとここ8年間ここは動いていない。
+  | うーん。ここも怪しいかもしれないが今回の事はここが原因ではない。
+  |
+  | うーん。実際に出力してみると何故かちゃんと \C-\\ になっている。
+  | 一方で bind '"\C-\\a"' が <C-\><C-g> と解釈されていると分かった。
+  | 更に bind "\C-\a" は <C-\><a> と解釈されている。
+  | この振る舞いは bash 4.3 でも同様であった。つまり自分の所為ではない。
+  |
+  | 一方で Bash 4.3 では bind "\C-\" の " はエスケープされた物として取り扱われる。
+  |
+  | うーん。どうやら bind -s や bind -X は大丈夫の様だ。
+  |
+  | まとめ。
+  |
+  | bind '"\C-\":"..."' の解釈について、
+  | 最初の ".." の切り出しの時には \C-\ を認識せずに単に \ だけを見て ".." を切り出す。
+  | 次の解釈の時に \C-\ の単位で解釈を行う。したがって "\C-\\" は \C-\ + \ と解釈される。
+  | また出力に関しては bind -sX は \C-\\ を出力するが bind -pP は \C-\ を出力する。
+
+  状況を整理すると Bash では \C-\ と \C-\\ が混ざっている。
+  単一文字の束縛に対しては bind -spPX は全て \C-\\ を出力する。
+
+    $ ./bash-3a7c642e --norc
+    $ bind '"\x1c":"hello"'
+    $ bind -s
+    "\C-\\": "hello"
+    $ bind '"\x1c":self-insert'
+    $ bind -p | grep '\\C-\\'
+    "\C-\\": self-insert
+    $ bind -P | grep '\\C-\\'
+    self-insert can be found on "\C-\\", " ", "!", "\"", "#", ...
+    $ bind -x '"\x1c":"echo hello"'
+    $ bind -X
+    "\C-\\": "echo hello"
+
+  複数文字の束縛に対しては bind -pP は最後の文字以外について \C-\ を出力する。
+  また shadow binding の場合は最後の文字以外の場合でも \C-\ になる。
+
+    $ ./bash-3a7c642e --norc
+    $ bind '"\x1c\x1c":"hello"'
+    $ bind -s
+    "\C-\\\C-\\": "hello"
+    $ bind '"\x1c\x1c":self-insert'
+    $ bind -p | grep '\\C-\\'
+    "\C-\\C-\\": self-insert
+    $ bind -P | grep '\\C-\\'
+    self-insert can be found on "\C-\\C-\\", " ", "!", "\"", "#", ...
+    $ bind -x '"\x1c\x1c":echo hello'
+    $ bind -X
+    "\C-\\\C-\\": "echo hello"
+
+  束縛の解釈については "..." を切り出す時には \C-\" は " をエスケープする。
+  然し中身を解釈する時には \C-\ が一つのまとまりと解釈される。
+
+  % どちらが採用されるべきだろうか。
+  % 
+  % a \C-\\ に統一する案。既存のコードに対する影響はどれほどだろうか。
+  %   つまり \C-\ 前提で扱っているコードはあるだろうか。
+  %   "\C-\" は使えない。何故なら \" をエスケープする為。
+  %   "\C-\a" 等はどうだろうか。これは従来通りの解釈になる様にすればOK
+  %   "\C-\\" はどうだろうか。従来は C-\ + \ だったのが今後は C-\ という意味に変わる。
+  %   "\C-\\C-a" は C-\ C-a から "C-\ C - a" に意味が変わる。
+  % 
+  % b 逆に \C-\ に統一する案。"\C-\" を accept する様に書き換えが必要である。
+  %   また出力の際に \\ ではなく \ を出力する様に変更する必要がある。
+
+  古い Bash での振る舞いはどうだったか。
+  調べてみると出力の inconsistency は Bash 3.0 の時から変わっていない。
+
+  | 解釈の inconsistency についてはどうだろうか。
+  | というか何故古い Bash で問題が発生していなかったのか。
+  | 
+  | どうも解釈に関しては \C-\\ から \C-\ になったのは Bash 5 からの様だ。
+  | どの瞬間から変化したのだろうか。もしかして自分が噛んでいたりする?
+  | 動作を確認すると rl_parse_and_bind が呼び出されてその中で
+  | "..." の中身が抽出されて、それから rl_bind_seq 及び rl_macro_bind に渡される。
+  | これらの関数は rl_translate_keyseq を使っている。
+  | 
+  | うーん。不思議だ rl_translate_keyseq の中は確かに最近変更されているが、
+  | 該当部分は変更されていない様に見える。だとすれば渡す側に何か変更がある?
+  | 切り出し部分を確認したが全く変更はない。という事はやはり rl_translate_keyseq である。
+  | うーん。昔の状態を checkout して何時からこれになったのか調べる。
+  | 20190207 の時点でもう変化していた。20180309 の時点でもう変化していた。
+  |   20170804 の時点では変化していた。20170601 では変化。
+  |     20170505 変化。これが犯人である。
+  |   20170407 の時点では未だ。20170421 未変化。20170428 未変化。
+  | 20170106 の時点ででは未だ変化していない。
+  | 
+  | commit af2a77f
+  | | diff --git a/CWRU/CWRU.chlog b/CWRU/CWRU.chlog
+  | | index 51e95ae3..7892ce94 100644
+  | | --- a/CWRU/CWRU.chlog
+  | | +++ b/CWRU/CWRU.chlog
+  | | @@ -13767,3 +13767,76 @@ lib/glob/sm_loop.c
+  | |            matches beyond it.  Look at https://research.swtch.com/glob for a
+  | |            longer explanation. This results in a significant speedup for globs
+  | |            with multiple instances of `*', especially with more than 4.
+  | | +
+  | | +                                    5/2
+  | | +                                    ---
+  | | +lib/readline/bind.c
+  | | +        - rl_translate_keyseq: make sure a trailing backslash in the key
+  | | +          sequence is preserved. Report from Eduardo Bustamante
+  | | +          <dualbus@gmail.com>
+  | | +
+  | | diff --git a/lib/readline/bind.c b/lib/readline/bind.c
+  | | index 117f3427..fef538b1 100644
+  | | --- a/lib/readline/bind.c
+  | | +++ b/lib/readline/bind.c
+  | | @@ -441,7 +441,10 @@ rl_translate_keyseq (const char *seq, char *array, int *len)
+  | |            c = seq[++i];
+  | | 
+  | |            if (c == 0)
+  | | +            {
+  | | +              array[l++] = '\\';        /* preserve trailing backslash */
+  | |                break;
+  | | +            }
+  | | 
+  | |            /* Handle \C- and \M- prefixes. */
+  | |            if ((c == 'C' || c == 'M') && seq[i + 1] == '-')
+  | 
+  | 不思議だこれで振る舞いが変わるのは不思議だ。
+  | あ。分かった。テストケースが悪いんだ。
+  | 前から \C-\ だったのが、中途半端な \ を無視する事によって
+  | \C-\\ がたまたま \C-\ になっていただけなのだ。
+
+  →結局、Bash 3.0 からずっとこの様な取扱いになっていたのだった。
+  偶々 \C-\\ が \C-\ + \ になって \ が消滅していたから動いている様に見えたのが、
+  commit af2a77f によって顕在化したという事なのである。
+  この修正の元になった議論を確認したが恐らく以下のものである。
+  https://lists.gnu.org/archive/html/bug-bash/2017-04/msg00139.html
+  振る舞い自体については議論に上っていない。何だかよく分からない。
+  或いはこの後で ML に関係なく議論が進んだのかもしれない。
+
+  取り敢えず inconsistency は昔からあったので昔の状態に戻すという方針は使えない。
+
+  どう修正されるべきか。
+
+  * これは確実に \C-\\ に変更されるべきである。
+    それは今まで動いていた物が動かなくなったから。
+    さらに bind -sSX の出力をそのまま使えないから。
+    逆に bind -pP の出力が使えなくなるかもだけれども、
+    それに関しては同時に対応すればよい。
+    他の version の bash の出力を使用する事は考えにくいのだから。
 
 2016-11-09
 
@@ -79,7 +229,27 @@
 
 2019-12-18
 
-* shadow `bind -X' が削除されない
+* report11: 何と test case 2 が直っていないではないか。
+  何が問題かというと→これについては緊急で直した。
+  後で追加パッチとして送る必要がある。
+
+  * ok: うーん。要するに ANYOTHERKEY に移動した時にちゃんと -x も移動するのかという問題?
+    以下も後でチェックする必要がある。
+
+    $ bind -x '"\C-t": echo world'
+    $ bind '"\C-t\C-t":"hello"'
+    →これはちゃんと動いていた。
+
+    $ bind -x '"\C-t": echo world'
+    $ bind -x '"\C-t\C-t": echo hello'
+    →これは動かないが上の項目と同じ問題であろう。
+    →これは上を直したらちゃんと動く様になった事を確認した。OK
+
+  パッチは用意した。メールの準備をする。mail2.txt に書いた。
+  後は送信するだけである。
+  Done: 送信
+
+* report13: shadow `bind -X' が削除されない
 
   $ bind '"\C-t\C-t\C-t\C-t":"hello"'
   $ bind -x '"\C-t":echo world'
@@ -101,7 +271,7 @@
 
   →これは何が悪いか分かった。修正した。
 
-  ■送信
+  Done: 送信
 
 * report12: 以前に作った patch を送るにあたって再現する方法はないか考える。
 
@@ -133,7 +303,7 @@
   $ bind 'C-SPC:backward-char'
 
   結果を作文した。
-  ■送信
+  Done: 送信
 
 * 2019-02-19 OK: rl_generic_bind に "" を渡した時の振る舞いが気になる。
   変な事にはならないのだろうか…。printf して見る事にする。
