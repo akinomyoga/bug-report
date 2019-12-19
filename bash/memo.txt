@@ -210,6 +210,23 @@
     それに関しては同時に対応すればよい。
     他の version の bash の出力を使用する事は考えにくいのだから。
 
+  Note: _rl_convert_meta_chars_to_ascii の時
+    \M-\C-x は必ず <\e><\><C><-><x> と解釈されてしまう。
+    実際に再現する事ができる。
+    	 $ bind 'set convert-meta on'
+    	 $ bind '"\M-\C-t":"hello"'
+    	 $ bind -s
+    	 "\e\\C-t": "hello"
+    然し　!_rl_convert_meta_chars_to_ascii の時には
+    \M-\C-x は <\M-\C-x> にちゃんと解釈される。
+  Note: 従来の実装では _rl_convert_meta_chars_to_ascii の設定に関わらず
+    \C-\M-x は必ず <ESC><\C-x> と解釈されてしまう。これは変だ。
+    \M の時と同様に振る舞うべきなのである。
+  Note: "\C-" や "\M-\C-" の従来の振る舞いについて確認しておく。
+  Note: "\" の振る舞いに関しても確認。
+  Note: This doesn't yet handle things like \M-\a と書かれていたが、
+    この修正によって取り扱う様になった。
+
 2016-11-09
 
 * sv_isrchterm

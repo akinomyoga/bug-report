@@ -1,0 +1,243 @@
+From: murase
+To: bug-bash@gnu.org
+Subject: [PATCH] Resolve inconsisteny of keyseq representation of \C-\\ (0x5c)
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -g -O2 -Wno-parentheses -Wno-format-security
+uname output: Linux hp2019 5.2.13-200.fc30.x86_64 #1 SMP Fri Sep 6 14:30:40 UTC 2019 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-pc-linux-gnu
+
+Bash Version: 5.0
+Patch Level: 11
+Release Status: maint
+
+Description:
+
+  The output of `bind -psX' for the bindings with the keyseq contaning
+  <0x5c> is not reusable for bind/inputrc.  There are also other
+  problems.
+
+  This is related to two inconsistent representations of <0x5c>.  In
+  several places of in the current Bash codes, one can find two
+  different assumptions on the reprensentation of <0x5c> in
+  untranslated keyseqs, `\C-\' and `\C-\\':
+
+  * rl_parse_and_execute: When the bind command extracts KEYSEQ from
+    the argument of the form '"KEYSEQ":...', it skips the combination
+    `\ + (any character)'.  This implies that the form `\C-\' is
+    not compatible with `rl_parse_and_execute' because the keyseq
+    cannot be properly extracted from, e.g., '"\C-\":...'. So this
+    function prefers the representation `\C-\\'.
+
+  * rl_translate_keyseq: However, the current implementation of
+    `rl_translate_keyseq' interprets `\C-\' as <0x5c>.  If the input
+    `\C-\\` is given, it will be translated to two bytes `<0x5c> +
+    <\>'.
+
+  * rl_function_dumper: `bind -p' outputs `"\C-\\"' for the keyseq
+    "\x5c".  However, if the keyseq contains more than one byte,
+    `bind -p' prints `\C-\\' only for the last <0x5c> and `\C-\' for
+    the other <0x5c>. Also if the binding is a shadow binding, `bind
+    -p' prints `\C-\' for all the <0x5c>.
+
+  * rl_macro_dumper: While, `bind -sX' consistently prints `\C-\\' for
+    all the cases of <0x5c>.
+
+  This inconsistency has actually existed from Bash 3.0, but it caused
+  problems in very limited cases because in Bash 4.4 and before,
+  trailing backslashes in untranslated keyseq was just ignored in
+  `rl_translate_keyseq'.  Because of this behavior, the untranslated
+  keyseq '\C-\\' is interpreted as <C-\> (+ <ignored \>) by
+  `rl_translate_keyseq', i.e, it apparently behaved as if it supports
+  the representation `\C-\\'.  Also, `bind -p' only outputs `\C-\' for
+  shadow bindings or multibyte keyseqs.  Nevertheless there are still
+  cases where multibyte keyseqs cause unexpected results if one
+  assumes the representation `\C-\\': For example the keyseq '\C-\\a'
+  is translated to <C-\> + <C-g (\a)> rather than the expected one
+  <C-\> + <a>.
+
+  The situation has changed after a fix in Bash 5.0 where the trailing
+  backslashes become to be preserved by `rl_translate_keyseq'.  The
+  fix was introduced in the commit af2a77fb (commit bash-20170505
+  snapshot).  After this fix, `\C-\\' becomes to be translated to
+  `<0x5c> + <\>' by `rl_translate_keyseq'.  This breaks the codes
+  which assumes the representation `\C-\\' and also the codes that
+  reuse the output of `bind -psX'.  It should be noted that the codes
+  assuming `\C-\' neither works because `bind '"\C-\":...'' will not
+  be parsed as expected since \" is treated as a group in
+  `rl_parse_and_bind'.  In fact, my Bash configuration were broken in
+  Bash 5.0 since I thought `\C-\\' from the output of `bind -psX' is
+  the correct way to write (later I switched to `\x5c' for a
+  workaround).  This is the reason why I noticed this inconsistency.
+
+  Related to the handling of the escape sequences in
+  `rl_translate_keyseq', there are also other problems: the
+  interaction of \C-\M-x and \M-\C-x with the readline setting
+  `convert-meta' is not properly implemented.
+
+Repeat-By:
+
+  Details are described in the above "Description" section.  If that
+  description is enough, please skip this section.
+
+  Example 1: `bind -psX'
+
+    In the following example, `bind -psX' is called for a single byte
+    case and a double byte case.  The behavior is the same for all of
+    the Bash versions from 3.0 to 5.0 and for the devel branch (except
+    that `bind -X' is only supported from Bash 4.3).
+
+    $ cat test1a.sh
+    bind '"\x1c":self-insert'
+    bind -p | grep '\\C-\\'
+    bind '"\x1c":"hello"'
+    bind -s
+    bind -x '"\x1c":echo world'
+    bind -X
+    exit
+    $ cat test1b.sh
+    bind '"\x1c\x1c":self-insert'
+    bind -p | grep '\\C-\\'
+    bind '"\x1c\x1c":"hello"'
+    bind -s
+    bind -x '"\x1c\x1c":echo world'
+    bind -X
+    exit
+    $ LANG=C bash --rcfile test1.sh
+    "\C-\\": self-insert
+    "\C-\\": "hello"
+    "\C-\\": "echo world" <-- all of `bind -psX' prints \C-\\
+    $ LANG=C bash --rcfile test2.sh
+    "\C-\\C-\\": self-insert    <-- `bind -p' prints *\C-\* + \C-\\
+    "\C-\\\C-\\": "hello"
+    "\C-\\\C-\\": "echo world"  <-- `bind -sX' prints \C-\\ + \C-\\
+
+  Example 2: bind '"\C-\...":...'
+
+    In the following, the behavior of `rl_translate_keyseq' is tested.
+    The behavior is the same from Bash 3.0 to 4.4 but changed from
+    Bash 5.0.
+
+    $ cat test2.sh
+    bind '"\C-\\":"hello"'
+    bind '"\C-\a":"bash"'
+    bind '"\C-\\a":"world"'
+    bind -s
+    exit
+    $ LANG=C bash-4.4 --rcfile test2.sh
+    "\C-\\\C-g": "world" <-- '\C-\\a' is treated as <0x5c><C-g>
+    "\C-\\a": "bash"     <-- `\C-\a' is treated as <0x5c><a>
+    "\C-\\": "hello"     <-- `\C-\\' is treated as <0x5c>
+    $ LANG=C bash-5.0 --rcfile test2.sh
+    "\C-\\\C-g": "world"
+    "\C-\\\\": "hello"  <-- The treatment of trailing backslash changed
+    "\C-\\a": "bash"
+
+  Example 3: bind '"\C-\":...'
+
+    In the following, the behavior of `rl_parse_and_execute' is
+    tested.  The behavior is essentially the same from Bash 3.0 to 5.0
+    and devel branch (except that an error message is printed from
+    Bash 4.4).
+
+    $ cat test3.sh
+    bind '"\C-\":"hello"'
+    bind -s
+    exit
+    $ LANG=C bash-4.3 --rcfile test3.sh
+    $ LANG=C bash-4.4 --rcfile test3.sh
+    readline: "\C-\":"hello": no key sequence terminator
+
+  There are still other problems of `rl_translate_keyseq' as follows:
+
+  Example 4: bind '"\M-\C-t":...'
+
+    When the readline variable `convert-meta' is set to `on',
+    `\M-\C-t' is not properly handled in the current devel branch
+    as commented in the source code:
+
+      lib/readline/bind.c:547: /* XXX - doesn't yet handle \M-\C-n if
+      convert-meta is on */
+
+    It works fine with release versions of Bash from 3.2 to 5.0
+    (actually Bash 3.1 and 3.2 seem to have bugs for this).
+
+    $ cat test4.sh
+    bind 'set convert-meta off'
+    bind '"\M-\C-t":"hello"'
+    bind 'set convert-meta on'
+    bind '"\M-\C-t":"world"'
+    bind -s
+    exit
+    $ LANG=C ./bash-5.0 --rcfile test4.sh
+    "\e\C-t": "world"
+    "\224": "hello"
+    $ LANG=C ./bash-3a7c642e --rcfile test4.sh
+    "\e\\C-t": "world" <-- `\M-\C-t' becomes 5 keys <ESC><\><C><-><t>
+    "\224": "hello"
+
+  Example 5: bind '"\C-\M-t":...'
+
+    Meta of `\C-\M-t' is always converted to ESC regardless of the
+    setting `convert-meta'.  This is reproduced in all of the Bash
+    from 3.0 to 5.0 and the current devel branch.
+
+    $ cat test4.sh
+    bind 'set convert-meta off'
+    bind '"\C-\M-t":"hello"'
+    bind 'set convert-meta on'
+    bind '"\C-\M-t":"world"'
+    bind -s
+    exit
+    $ LANG=C ./bash-5.0 --rcfile test5.sh
+    "\e\C-t": "world"
+    $ LANG=C ./bash-3a7c642e --rcfile test5.sh
+    "\e\C-t": "world" <-- "hello" is also bound to \e\C-t so it is
+                          overwritten
+
+Fix:
+
+  If one fixes this inconsistensy, there are two options.  One is to
+  normalize them to `\C-\' and the other is to `\C-\\'.  I think it
+  should be normalized to `\C-\\' for the following reasons:
+
+  * Because `\C-\M-x' and `\M-\C-x' are valid untranslated sequences
+    representing one key, it is natural and consistent to accept
+    another backslash escape sequence after `\C-' or `\M-' rather than
+    just accept one backslash character.
+
+  * Bash 4.4 and before behaved as if it supports the representation
+    `\C-\\' for the simple cases, so it will not much break existing
+    codes.
+
+  * If one normalize them to `\C-\', the code to extract KEYSEQ from
+    '"KEYSEQ":...' (rl_parse_and_bind) becomes complicated.  The
+    multibyte sequences \C-\M-\, \M-\C-\, \C-\, \M-\ have to be
+    explicitly checked to avoid that the closing double quotes are
+    mistakenly quoted by the ending backslashes of these multibyte
+    sequences.
+
+  To normalize them to `\C-\\', `rl_translate_keyseq' and
+  `rl_function_dumper' should be modified.  I noticed that
+  `rl_translate_keyseq' have still other problems (see Example 4 and 5
+  in `Repeat-By' section above).  In the patch, I modified two
+  functions.  In particular I simplified the loop structure of
+  `rl_translate_keyseq'.  The following are the other consequences of
+  the behavior:
+
+  * \M-\a is now treated as a single key <M-C-g>, which is related to
+    the following comment in the original `rl_translate_keyseq'
+
+    /* This doesn't yet handle things like \M-\a, which may
+       or may not have any reasonable meaning.  You're
+       probably better off using straight octal or hex. */
+
+  * Duplicate prefixes such as \C-\C-\M-\M-t are allowed and treated
+    as if each is specified once, i.e., \C-\C-t is <C-t>, \M-\M-t is
+    <M-t>, \C-\M-\M-\C is <C-M-t>.
+
+Best regards,
+Koichi
