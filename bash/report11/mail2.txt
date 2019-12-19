@@ -1,0 +1,5 @@
+I'm sorry. I found that "Test case 2" has not yet fixed in the previous
+patch. This is the patch for the additional fix for "Test case 2".
+
+Best regards,
+Koichi

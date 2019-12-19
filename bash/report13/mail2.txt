@@ -1,4 +1,0 @@
-This is the patch for the additional fix for "Test case 2".
-
-Best regards,
-Koichi
