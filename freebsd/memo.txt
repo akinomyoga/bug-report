@@ -1,0 +1,154 @@
+
+
+2020-01-10
+
+* freebsd: 途中でシェルがクラッシュする
+
+  始め ble.sh でクラッシュしていたので ble.sh の問題と思って調べていたが
+  どうも FreeBSD の標準ライブラリの問題だった様だ。
+
+  | 何かメッセージが表示されるが端末が閉じてしまうので見えない。
+  | screen で :zombie kr としておけばクラッシュした後もウィンドウが残ってくれる。
+  | 実際にそれでメッセージを確かめてみたところ "emacs.d/ac-comphist.dat"
+  | という内容が出力されている。これは emacs が出力した物だろうか。
+  | suspend している job があるとクラッシュするのだろうか。
+  |
+  | うーん。今度は job に関係なく突然終了した。139 で終了した。
+  | SIGSEGV である。うーん。freebsd 特有の問題だろうか。
+  | 何れにしても bash に穴があるのは確実で、
+  | 一方で ble.sh の方も何か変なことをしている可能性はある。
+  | 問題は突発的に起こっている様子だという事。再現が難しい。
+  |
+  | gdb の中で動かしてみる。引っ掛かった。
+  | dispose_used_env_vars() で発生している。
+  | ということは LC_* または LANG を書き換えている前後で発生している。
+  |
+  | | Program received signal SIGSEGV, Segmentation fault.
+  | | 0x283206eb in strncmp () from /lib/libc.so.7
+  | | (gdb) bt
+  | | #0  0x283206eb in strncmp () from /lib/libc.so.7
+  | | #1  0x28313a47 in ?? () from /lib/libc.so.7
+  | | #2  0x28313bde in ?? () from /lib/libc.so.7
+  | | #3  0x28312c3a in ?? () from /lib/libc.so.7
+  | | #4  0x28312862 in setlocale () from /lib/libc.so.7
+  | | #5  0x080c0acc in ?? ()
+  | | #6  0x080c076a in set_locale_var ()
+  | | #7  0x0808ac7b in sv_locale ()
+  | | #8  0x08088d22 in ?? ()
+  | | #9  0x08088c06 in dispose_used_env_vars ()
+  | | #10 0xffbfc9c0 in ?? ()
+  | | #11 0x0807d8a5 in execute_command_internal ()
+  | | (中略)
+  | | #43 0x0807b82d in execute_command_internal ()
+  | | #44 0x080cc6b6 in parse_and_execute ()
+  | | #45 0x080beac5 in ?? ()
+  | | #46 0x080ed1c8 in _rl_dispatch_subseq ()
+  | | #47 0x080ecbfa in readline_internal_char ()
+  | | #48 0x080ec505 in readline ()
+  | | #49 0x0806b385 in ?? ()
+  | | #50 0x08070536 in ?? ()
+  | | #51 0x0806dada in ?? ()
+  | | #52 0x08069749 in yyparse ()
+  | | #53 0x080694cd in parse_command ()
+  | | #54 0x080692fa in read_command ()
+  | | #55 0x080690fd in reader_loop ()
+  | | #56 0x08068354 in main ()
+  |
+  | もしそうだとすると LC_* の復元時に問題が発生している。
+  |
+  | | #0  0x283206eb in strncmp () from /lib/libc.so.7
+  | | #1  0x28313a47 in ?? () from /lib/libc.so.7
+  | | #2  0x28313bde in ?? () from /lib/libc.so.7
+  | | #3  0x28312c3a in ?? () from /lib/libc.so.7
+  | | #4  0x080c08b4 in set_locale_var ()
+  | | #5  0x0808ac7b in sv_locale ()
+  | | #6  0x0808c047 in ?? ()
+  | | #7  0x080aaf5e in hash_flush ()
+  | | #8  0x08089b96 in pop_var_context ()
+  | | #9  0x0808a105 in pop_context ()
+  | | #10 0x080ae754 in ?? ()
+  | | #11 0x080ae707 in run_unwind_frame ()
+  | | #12 0x286a1c60 in ?? ()
+  | | #13 0x0807fecf in ?? ()
+  | | #14 0x0807dc92 in execute_command_internal ()
+  | | #15 0x0807be35 in execute_command_internal ()
+  |
+  | やはり set_locale_var で問題が発生している。
+  | 自分で bash-5.0.11 をビルドして試してみる。
+  | どうやら LC_ALL null を設定した時にこれが起こっている。
+  | 特に reset_locale_vars だろうか? でも必ずしもそうとは限らない様に見える。
+  |
+  | | #0  0x2843e6eb in strncmp () from /lib/libc.so.7
+  | | #1  0x28431a47 in ?? () from /lib/libc.so.7
+  | | #2  0x28431bde in ?? () from /lib/libc.so.7
+  | | #3  0x28430c3a in ?? () from /lib/libc.so.7
+  | | #4  0x28430862 in setlocale () from /lib/libc.so.7
+  | | #5  0x080a7f15 in reset_locale_vars () at locale.c:353
+  | | #6  0x080a8404 in set_locale_var_impl (var=0x93baec8 "LC_ALL", value=0x0) at locale.c:209
+  | | #7  0x080a85ee in set_locale_var (var=0x93baec8 "LC_ALL", value=0x0) at locale.c:168
+  | | #8  0x0806b2b6 in sv_locale (name=0x93baec8 "LC_ALL") at variables.c:6141
+  |
+  | うーん。必ずしも setlocale 経由とは限らない様だ。
+  |
+  | | #0  0x2843f6eb in strncmp () from /lib/libc.so.7
+  | | #1  0x28432a47 in ?? () from /lib/libc.so.7
+  | | #2  0x28432bde in ?? () from /lib/libc.so.7
+  | | #3  0x28431c3a in ?? () from /lib/libc.so.7
+  | | #4  0x080a8509 in set_locale_var_impl (var=0x93ca808 "LC_COLLATE", value=0x0) at locale.c:251
+  | | #5  0x080a864e in set_locale_var (var=0x93ca808 "LC_COLLATE", value=0x0) at locale.c:168
+  | |
+  | | #0  0x2843f6eb in strncmp () from /lib/libc.so.7
+  | | #1  0x28432a47 in ?? () from /lib/libc.so.7
+  | | #2  0x28432bde in ?? () from /lib/libc.so.7
+  | | #3  0x28431c3a in ?? () from /lib/libc.so.7
+  | | #4  0x28431862 in setlocale () from /lib/libc.so.7
+  | | #5  0x080a7b0a in setlocaleD (cat=cat@entry=0, locale=0x8a74088 "ja_JP.UTF-8") at locale.c:353
+  | |
+  | | #0  0x2843f6eb in strncmp () from /lib/libc.so.7
+  | | #1  0x28432a47 in ?? () from /lib/libc.so.7
+  | | #2  0x28432bde in ?? () from /lib/libc.so.7
+  | | #3  0x28431c3a in ?? () from /lib/libc.so.7
+  | | #4  0x28431862 in setlocale () from /lib/libc.so.7
+  | | #5  0x080a7b0a in setlocaleD (cat=cat@entry=0, locale=0x93cd328 "ja_JP.UTF-8") at locale.c:355
+  | | #6  0x080a7f72 in reset_locale_vars () at locale.c:365
+  | |
+  | | #0  0x2843f6eb in strncmp () from /lib/libc.so.7
+  | | #1  0x28432a47 in ?? () from /lib/libc.so.7
+  | | #2  0x28432bde in ?? () from /lib/libc.so.7
+  | | #3  0x28431c3a in ?? () from /lib/libc.so.7
+  | | #4  0x28431862 in setlocale () from /lib/libc.so.7
+  | | #5  0x080a7b0a in setlocaleD (cat=cat@entry=0, locale=0x8180928 "ja_JP.UTF-8") at locale.c:355
+  | | #6  0x080a7f72 in reset_locale_vars () at locale.c:365
+  |
+  | うーん。調べてみても特に変な呼び出し方をしている訳でもない様な気がする。
+  | 何が悪いのだろうか。FreeBSD の方が悪いのだろうか。試しに検索してみる。
+  | https://www.google.co.jp/search?q=freebsd+setlocale+sigsegv
+  |
+  | 他の locale でも再現するのかどうか確かめる事にする。
+  | 何と en_US.UTF-8 にしていると再現しないようだ。
+  | 改めて ja_JP.UTF-8 にしてみたら再現した。
+  |
+  | 更に普通に setlocale だけを呼び出すプログラムを作成しても再現した。
+  | また、sigsegv するまでの呼び出し回数は毎回同じ?
+  | i=6562 の trial でクラッシュする。
+  | 更に ja_JP -> en_US -> C を繰り返す場合には i=5698 の trial でクラッシュする。
+  | 何が起こっているのだろうか。
+  |
+  | うーん。実は en_US でももっと沢山繰り返し呼ぶとクラッシュする様だ。
+  | もしかしてこれはメモリを使い果たしている?
+  | メモリリークでメモリー不足になっているのではなかろうか。
+  | メモリの増えていく様子を調べることは可能だろうか。
+  | うーん。面倒である。
+
+  ソースコードを見つけた。
+  https://github.com/freebsd/freebsd/blob/master/lib/libc/locale/setlocale.c
+  うーん。LC_ALL を呼び出すと loadlocale を各 category について呼び出す様だ。
+  LC_CTYPE の場合には問題は怒らなかった。LC_COLLATE で segfault が起こる。
+  LC_NUMERIC LC_TIME LC_MONETARY LC_MESSAGES でも問題は起こらなかった。
+
+  LC_COLLATE は __collate_load_tables という関数を呼び出している。
+  ja_JP.eucJP でも同様に問題が発生したので UTF-8 の問題ではない。
+
+  うーん。やはり以下の場所で munmap を呼び出すのを忘れている気がする。
+  https://github.com/freebsd/freebsd/blob/master/lib/libc/locale/collate.c#L184
+
