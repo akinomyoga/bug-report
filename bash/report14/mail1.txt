@@ -21,9 +21,9 @@ Description:
   problems.
 
   This is related to two inconsistent representations of <0x5c>.  In
-  several places of in the current Bash codes, one can find two
-  different assumptions on the reprensentation of <0x5c> in
-  untranslated keyseqs, `\C-\' and `\C-\\':
+  several places in the current Bash codes, one can find two different
+  assumptions on the reprensentation of <0x5c> in untranslated
+  keyseqs, `\C-\' and `\C-\\':
 
   * rl_parse_and_execute: When the bind command extracts KEYSEQ from
     the argument of the form '"KEYSEQ":...', it skips the combination
@@ -35,7 +35,7 @@ Description:
   * rl_translate_keyseq: However, the current implementation of
     `rl_translate_keyseq' interprets `\C-\' as <0x5c>.  If the input
     `\C-\\` is given, it will be translated to two bytes `<0x5c> +
-    <\>'.
+    <\>' (from Bash 5.0).
 
   * rl_function_dumper: `bind -p' outputs `"\C-\\"' for the keyseq
     "\x5c".  However, if the keyseq contains more than one byte,
@@ -207,11 +207,15 @@ Fix:
   * Because `\C-\M-x' and `\M-\C-x' are valid untranslated sequences
     representing one key, it is natural and consistent to accept
     another backslash escape sequence after `\C-' or `\M-' rather than
-    just accept one backslash character.
+    just accept one backslash character.  In addition if one adopted
+    the option `\C-\', <C-M-x> (1 byte keyseq) and <C-\ M - x> (4 byte
+    keyseq) would be in principle indistinguishable as both are
+    represented as `\C-\M-x'.
 
   * Bash 4.4 and before behaved as if it supports the representation
-    `\C-\\' for the simple cases, so it will not much break existing
-    codes.
+    `\C-\\' for the simple cases, so it will not break much existing
+    codes if we choose the option `\C-\\'.  If the option `\C-\' is
+    used it can break existing codes written for Bash 4.4 and before.
 
   * If one normalize them to `\C-\', the code to extract KEYSEQ from
     '"KEYSEQ":...' (rl_parse_and_bind) becomes complicated.  The
@@ -220,13 +224,14 @@ Fix:
     mistakenly quoted by the ending backslashes of these multibyte
     sequences.
 
-  To normalize them to `\C-\\', `rl_translate_keyseq' and
-  `rl_function_dumper' should be modified.  I noticed that
-  `rl_translate_keyseq' have still other problems (see Example 4 and 5
-  in `Repeat-By' section above).  In the patch, I modified two
-  functions.  In particular I simplified the loop structure of
-  `rl_translate_keyseq'.  The following are the other consequences of
-  the behavior:
+  I attach a patch for the option to normalize the representation to
+  `\C-\\'.  In the patch functions `rl_translate_keyseq' and
+  `rl_function_dumper' are modified.  Modifying the functions, I
+  noticed that `rl_translate_keyseq' have still other problems (see
+  Example 4 and 5 in `Repeat-By' section above), so I decided to clean
+  up the loop structure of `rl_translate_keyseq' to fix all the
+  problems.  The following are the additional consequences of the
+  change:
 
   * \M-\a is now treated as a single key <M-C-g>, which is related to
     the following comment in the original `rl_translate_keyseq'
@@ -237,7 +242,8 @@ Fix:
 
   * Duplicate prefixes such as \C-\C-\M-\M-t are allowed and treated
     as if each is specified once, i.e., \C-\C-t is <C-t>, \M-\M-t is
-    <M-t>, \C-\M-\M-\C is <C-M-t>.
+    <M-t>, \C-\M-\M-\C is <C-M-t>.  Even if this behavior is not
+    preferable, it is easy to add codes checking duplicate prefixes.
 
 Best regards,
 Koichi
