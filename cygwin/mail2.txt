@@ -1,0 +1,92 @@
+
+Subject: Cygwin 3.1.2: Every call of exec(2) in the session starts to
+create a console window after some TTY outputs from programs compiled
+with "-mwindows"
+
+Hi, I updated Cygwin from 3.0.7 to 3.1.2 and have two problems.  This
+is the report for one of them.  (For the other one, read(2)
+occasionally fails on the new cygwin console for some settings, but
+I'm still trying to pin down the issue.)
+
+
+Cygwin Version:
+
+  Cygwin 3.1.2 x86_64 on Windows 10.  I also confirmed that the
+  problem is not fixed with the latest commit 85aff2830 of
+  newlib-cygwin.  Note that Cygwin 3.0.7 doesn't have this problem.
+
+
+Brief Description:
+
+  As in the subject, this problem is caused after some TTY outputs from
+  programs compiled with "-mwindows".  For example, after running the
+  command "mintty.exe --version" in a terminal, every "exec" called in
+  the processes in the same session starts to create a console window
+  which will be closed instantaneously.  As results, the display is
+  always flashing when some scripts are running, the shell scripts
+  becomes very slow, some of user inputs to the terminal go to the
+  created window and get lost, and CPU usage extremely increases.
+  This problem was not present in Cygwin 3.0.7.
+
+
+Repeat-By:
+
+  The following is one example to reproduce it:
+
+  1. Open Cygwin Terminal (mintty)
+  2. Run "mintty --version"
+  3. Run some shell scripts, e.g., "for i in {0..99}; do date; done | uniq -c"
+
+
+Details:
+
+* The terminal
+
+  This phenomena is not reproduced with every terminal.  For example,
+  it is reproduced with xterm, lxterminal and mintty, but not with the
+  cygwin console (which can be started, e.g., by directly calling
+  C:\cygwin64\bin\bash.exe from Windows) and GNU Screen.  It appears
+  that it is caused when the terminal process that holds the PTY
+  master also has GUI windows.
+
+* The trigger command
+
+  This phenomena is started when a program with
+  IMAGE_SUBSYSTEM_WINDOWS_GUI in its PE header (which can be created,
+  for example, by passing the option "-mwindows" to "gcc") outputs
+  something to TTY.  One example for such a program is "mintty
+  --version".  But this is not a specific problem to "mintty".  The
+  simplest example "test1.exe" that causes the phenomena can be
+  created by the following command:
+
+  $ echo 'main(){puts("A");}' | gcc -xc - -mwindows -o test1.exe
+
+  The above program looks useless, but of course it is a reduced case
+  just to reproduce the phenomena.  Actually, in one of my programs, I
+  need to output something to TTY in some case, and need to create a
+  GUI window (based on Windows API) in the other cases.  Specifically,
+  my program is basically a GUI program (terminal emulator) and does
+  not want to show a console window when it is launched from, e.g.,
+  Explorer, so I need to specify "-mwindows" to tell Windows not to
+  create a console.  But when my program is called inside terminal
+  with a special option, it runs in a TUI mode, so still I want to
+  output something to TTY when some conditions are satisfied.
+
+* exec?
+
+  A new console window appears to be created when a new program is
+  loaded with "exec".  A console window is not generated when a
+  subshell is created in the shell (which implies "fork" does not create
+  a console window) while the command "exec some-command" in the shell
+  creates a new console window.
+
+
+Takashi: Thank you very much for your hard work on recent PTY issues!
+Today I checked cygwin-patches mailing list to check possible related
+fixes and found your recent patch on "disable_pcon", which is the very
+feature I wanted for testing my terminal application with the legacy
+console mode.  Thank you!
+
+Best regards,
+
+Koichi
