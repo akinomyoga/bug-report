@@ -1,0 +1,107 @@
+
+Thank you for the information.  I found that the locale also matters.
+The problem is not yet fixed in the snapshot and also the latest
+commit of the git repository.
+
+
+Repeat-By:
+
+  I update the steps to reproduce the problem:
+
+  1. Open Cygwin Terminal
+  2. Run the following commands
+
+    $ LANG=ja_JP.UTF-8
+    $ mintty --version
+    $ for a in {0..99}; do date; done | uniq -c
+
+
+Locale:
+
+  I found that the problem is reproduced when LANG=ja_JP.UTF-8.  I
+  tried LANG=C and LANG=en_US.UTF-8, but the problem was not present
+  with these locales.  I tried several locales as follows.  It appears
+  it is related to multi-byte character sets, and also the problem
+  does not occur if UTF-8 is not specified.
+
+  * Not reproduced with: en_US.UTF-8, en_GB.UTF-8, de_DE.UTF-8,
+    fr_FR.UTF-8, ru_RU.UTF-8, ja_JP
+
+  * Reproduced with: ja_JP.UTF-8, ja_JP.utf8, zh_CN.UTF-8,
+    zh_TW.UTF-8, ko_KR.UTF-8
+
+  Next I tried to find out which locale category causes the problem,
+  but the problem is not reproduced by just specifying a locale for
+  one locale category.  I tried the following, but none reproduced the
+  problem.
+
+    $ LANG=en_US.UTF-8 LC_CTYPE=ja_JP.UTF-8; mintty --version
+    $ for a in {0..99}; do date; done | uniq -c
+    $ LANG=en_US.UTF-8 LC_COLLATE=ja_JP.UTF-8; mintty --version
+    $ for a in {0..99}; do date; done | uniq -c
+    $ LANG=en_US.UTF-8 LC_MESSAGES=ja_JP.UTF-8; mintty --version
+    $ for a in {0..99}; do date; done | uniq -c
+    $ LANG=en_US.UTF-8 LC_NUMERIC=ja_JP.UTF-8; mintty --version
+    $ for a in {0..99}; do date; done | uniq -c
+    $ LANG=en_US.UTF-8 LC_TIME=ja_JP.UTF-8; mintty --version
+    $ for a in {0..99}; do date; done | uniq -c
+    $ LANG=en_US.UTF-8 LC_MONETARY=ja_JP.UTF-8; mintty --version
+    $ for a in {0..99}; do date; done | uniq -c
+
+  Other interesting observations are
+
+  1. To reproduce the problem, LANG needs not to be set to
+    ja_JP.UTF-8 when "mintty --version" runs, i.e., it can be
+    reproduced with:
+
+    $ mintty --version
+    $ LANG=ja_JP.UTF-8
+    $ for a in {0..99}; do date; done | uniq -c
+
+  2. Once the exec starts to create a console window, the problem
+    persists even after resetting LANG to a non-problematic one:
+
+    $ mintty --version
+    $ LANG=en_US.UTF-8
+    $ for a in {0..99}; do date; done | uniq -c
+    <No problems>
+    $ LANG=ja_JP.UTF-8
+    $ for a in {0..99}; do date; done | uniq -c
+    <Many flashing console windows>
+    $ LANG=en_US.UTF-8
+    $ for a in {0..99}; do date; done | uniq -c
+    <Still there are many console windows>
+
+Cygwin Versions:
+
+  In my environments, it is reproduced with the latest snapshot as
+  well.  I also tried the latest version of the git repository, but
+  the problem has not yet fixed.  I tried the following versions, but
+  with all the versions the same problem occurs:
+
+  1. Cygwin 3.1.2
+
+  $ uname -a
+  CYGWIN_NT-10.0 letsnote2019 3.1.2(0.340/5/3) 2019-12-21 15:25 x86_64
+  Cygwin
+
+  2. Snapshot 2020-01-14 from https://cygwin.com/snapshots/
+
+  $ uname -a
+  CYGWIN_NT-10.0 letsnote2019 3.1.2s(0.340/5/3) 2020-01-14 16:33 x86_64
+  Cygwin
+
+  3. Commit 85aff2830 from git://sourceware.org/git/newlib-cygwin.git
+
+  $ uname -a
+  CYGWIN_NT-10.0 letsnote2019 3.1.2(0.340/5/3) 2020-01-19 15:12 x86_64
+  Cygwin
+
+  4. Commit 4261a8f5c from git://sourceware.org/git/newlib-cygwin.git
+
+  $ uname -a
+  CYGWIN_NT-10.0 letsnote2019 3.1.2(0.340/5/3) 2020-01-21 00:57 x86_64
+  Cygwin
+
+  Also, this is not a specific problem of one computer because I tried
+  with two laptops and both reproduce the same problem.
