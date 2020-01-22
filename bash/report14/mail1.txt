@@ -2,6 +2,9 @@ From: murase
 To: bug-bash@gnu.org
 Subject: [PATCH] Resolve inconsisteny of keyseq representation of \C-\\ (0x5c)
 
+Thank you for reviewing a number of patches related to `bind'.  This
+is the final report related to `bind' that I currently have.
+
 Configuration Information [Automatically generated, do not change]:
 Machine: x86_64
 OS: linux-gnu
@@ -17,7 +20,7 @@ Release Status: maint
 Description:
 
   The output of `bind -psX' for the bindings with the keyseq contaning
-  <0x5c> is not reusable for bind/inputrc.  There are also other
+  <0x5c> (C-\) is not reusable for bind/inputrc.  There are also other
   problems.
 
   This is related to two inconsistent representations of <0x5c>.  In
@@ -245,5 +248,7 @@ Fix:
     <M-t>, \C-\M-\M-\C is <C-M-t>.  Even if this behavior is not
     preferable, it is easy to add codes checking duplicate prefixes.
 
-Best regards,
+
+Thank you,
+
 Koichi
