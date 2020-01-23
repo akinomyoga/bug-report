@@ -80,3 +80,24 @@ should have made this reply to the original version of the patch.
 Sorry for the confusion.
 
 Koichi
+
+-----------------------------------------------------------------------
+
+2020年1月23日(木) 22:00 Takashi Yano <***@***>:
+> Is there any process alived using diffrent version of cygwin1.dll?
+
+Ah, you were right.  Actually there were no *real* processes remained
+(Otherwise I could not have overwritten cygwin1.dll, I think), but I
+remembered that there is a remaining *fake entry* in the result of
+`ps' as follows (for which `kill' produces error `No such process' and
+also I cannot find any corresponding process in Windows Task Manager).
+
+  $ ps uaxf
+      PID    PPID    PGID     WINPID   TTY         UID    STIME COMMAND
+
+     1416       1    1416      11160  ?         197610   Jan 20
+  /home/murase/opt/screen/4.7.0m/bin/screen-4.7.0
+
+After a reboot of Windows, the problem has resolved!  Thank you!
+
+Koichi
