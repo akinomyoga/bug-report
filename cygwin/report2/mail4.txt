@@ -1,0 +1,42 @@
+
+
+
+Details:
+
+  I use the commit 5377a8477 and cherry-picked the patch da4ee7d60.
+
+-----------------------------------------------------------------------
+
+By the way, I have a question on the way how to try the latest version
+of `cygwin1.dll'.  I am currently just replacing
+`C:\cygwin64\bin\cygwin1.dll' with the version I built from recent
+commits as explained in the description on trying Snapshots.
+
+  https://cygwin.com/faq.html#faq.setup.snapshots
+
+
+  But after the following commit, I cannot use this naive
+approach.
+
+  6cc299f0e - (2 days ago) Cygwin: pty: Revise code waiting for
+  forwarding by master_fwd_thread. - Takashi Yano
+
+If I replace the file with the latest one, any cygwin program fails to
+start with the following error message.
+
+  shared_info::initialize: size of shared memory region changed from
+  XXXXX to XXXXX
+
+I would appreciate it if you could provide me the correct way to test
+the latest cygwin1.dll.  (If one would need to rebuild all the
+toolchain for each small change of `cygwin1.dll', it would be too
+inconvenient, so I guess there would be a smart way.)
+
+
+Best,
+
+Koichi
+
+
+  shared_info::initialize: size of shared memory region changed from
+  XXXXX to XXXXX

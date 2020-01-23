@@ -1,0 +1,42 @@
+2020年1月21日(火) 10:47 Takashi Yano <***@***>:
+> Thanks for the report. I could reproduce the problem under LANG=ja_JP.UTF-8.
+> I have almost caught the culprit. Please wait for a while.
+
+Thank you for the patch fixing the problem. I cherry-picked the patch
+and tried, but there is another problem.
+
+Description:
+
+  The programs compiled with "-mwindows" cannot read more than one
+  character from PTY in a non-canonical mode.  There was no
+  problem before the patch "Cygwin: pty: Fix reopening slave in
+  push_to_pcon_screenbuffer().".
+
+Repeat-By:
+
+  1. Open Cygwin Terminal (mintty)
+
+  2. Compile the attached program with the following commands.
+
+    $ g++ -o minimal2-con.exe minimal2.cpp
+    $ g++ -mwindows -o minimal2-win.exe minimal2.cpp
+
+  3. The expected behavior can be checked with `minimal2-con'.  After
+    executing the command, please type some five characters.  The
+    string `[RECV]' will be printed five times, and then the program
+    will exit.
+
+    $ ./minimal2-con
+    [RECV][RECV][RECV][RECV][RECV]
+    $
+
+  4. However, with the compile option "-mwindows", we can only see one
+    `[RECV]', and the program will hang.
+
+    $ ./minimal2-win
+    [RECV]
+
+
+Best,
+
+Koichi
