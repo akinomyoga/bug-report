@@ -1,42 +1,82 @@
+2020年1月23日(木) 20:52 Corinna Vinschen <***@***>:
+> On Jan 23 13:30, Takashi Yano wrote:
+> > - After commit 6cc299f0e20e4b76f7dbab5ea8c296ffa4859b62, outputs of
+> >   cygwin programs which call both printf() and WriteConsole() are
+> >   frequently distorted. This patch reverts waiting function to dumb
+> >   Sleep().
 
+    Hi, I have a question related to this patch. (When I have a
+question on a specific patch like this, which mailing list should I
+come?  If I should not make a reply to the original cygwin-patch
+mailing list, let me apologize in advance.  If so, I'll move to
+cygwin mailing list.)
 
+    When I try to use the recent commit 6d79e0a58 (tag: newlib-3.3.0),
+any Cygwin program fails to start leaving the following message:
 
-Details:
+      0 [main] XXXX (YYYY) shared_info::initialize: size of shared
+      memory region changed from 50104 to 49080
 
-  I use the commit 5377a8477 and cherry-picked the patch da4ee7d60.
-
------------------------------------------------------------------------
-
-By the way, I have a question on the way how to try the latest version
-of `cygwin1.dll'.  I am currently just replacing
-`C:\cygwin64\bin\cygwin1.dll' with the version I built from recent
-commits as explained in the description on trying Snapshots.
-
-  https://cygwin.com/faq.html#faq.setup.snapshots
-
-
-  But after the following commit, I cannot use this naive
-approach.
+where XXXX and YYYY are the program name and PID.  I also tried with
+the current master branch 8f502bd33, and the result was the same.  I
+tested each commit one by one, and found that this problem is caused
+after this patch:
 
   6cc299f0e - (2 days ago) Cygwin: pty: Revise code waiting for
   forwarding by master_fwd_thread. - Takashi Yano
 
-If I replace the file with the latest one, any cygwin program fails to
-start with the following error message.
-
-  shared_info::initialize: size of shared memory region changed from
-  XXXXX to XXXXX
-
-I would appreciate it if you could provide me the correct way to test
-the latest cygwin1.dll.  (If one would need to rebuild all the
-toolchain for each small change of `cygwin1.dll', it would be too
-inconvenient, so I guess there would be a smart way.)
+In fact, if I drop this commit from the master branch, the problem
+disappears.
 
 
-Best,
+    But, as there are no related reports here, I suspect this is the
+problem specific to my environment.  In particular, I suspect that
+this is caused by the compatibility of different versions of
+`cygwin1.dll'.  Currently, when I try to use the new `cygwin1.dll', I
+just replace `C:\cygwin64\bin\cygwin1.dll' with the version I built
+from recent a commit (`new-cygwin1.dll') following the instruction for
+snapshots which is found at
+
+  https://cygwin.com/faq.html#faq.setup.snapshots
+
+Here my question is, if this is caused by the way I try the new
+version, what is the correct way to try the latest version built from
+a commit in the git repository (do I need to rebuild all the
+toolchain)?  Or, is this problem caused by other conditions?  I would
+appreciate it if you could provide me some hints.
+
+
+    Here is some trials in command prompt:
+
+  C:\cygwin64\bin>bash
+        0 [main] bash (18936) shared_info::initialize: size of shared
+  memory region changed from 50104 to 49080
+
+  C:\cygwin64\bin>dash
+        0 [main] dash (7900) shared_info::initialize: size of shared
+  memory region changed from 50104 to 49080
+
+  C:\cygwin64\bin>stty
+        0 [main] stty (2920) shared_info::initialize: size of shared
+  memory region changed from 50104 to 49080
+
+  C:\cygwin64\bin>cat
+        0 [main] cat (21340) shared_info::initialize: size of shared
+  memory region changed from 50104 to 49080
+
+  C:\cygwin64\bin>mintty
+
+mintty fails without any messages.
+
+
+Thank you,
 
 Koichi
 
+-----------------------------------------------------------------------
 
-  shared_info::initialize: size of shared memory region changed from
-  XXXXX to XXXXX
+I'm sorry, I made a reply to a wrong mail (with a similar subject).  I
+should have made this reply to the original version of the patch.
+Sorry for the confusion.
+
+Koichi
