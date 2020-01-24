@@ -1,4 +1,4 @@
-/*-- BEGIN min1.cpp ---------------------------------------------------------*/
+/*-- BEGIN min1.cpp -------------------------------------------------*/
 #include <unistd.h>
 #include <termios.h>
 #include <fcntl.h>
@@ -49,13 +49,13 @@ void redirect() {
 int main() {
   struct termios oldTermios = setup_tty(); // stty -icanon ...
 
-  // Request DSR(6)
+  // DSR(6) Request
   write(STDOUT_FILENO, "\033[6n", 4);
 
   check_input(STDIN_FILENO);  // read -t 0
   redirect();                 // : < /dev/null
 
-  // Read DSR(6) Response
+  // Read CPR Response
   for (;;) {
     char c;
     ssize_t result = read(STDIN_FILENO, &c, 1);
@@ -71,4 +71,4 @@ int main() {
   write(STDOUT_FILENO, "\n", 1);
   return 0;
 }
-/*-- END min1.cpp -----------------------------------------------------------*/
+/*-- END min1.cpp ---------------------------------------------------*/
