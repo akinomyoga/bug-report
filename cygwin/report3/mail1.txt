@@ -1,0 +1,77 @@
+
+Cygwin-3.3.0: read(2) from /dev/consN returns unexpected EOF after select(2) and redirection
+
+Description:
+
+  In a noncanonical mode of console (where tty is /dev/consN), if
+  there is some unprocessed inputs from the user side (i.e., terminal
+  side), the combination of select(2) (for read) and redirection
+  causes the next attempt of read(2) to return EOF [i.e., read(0, buf,
+  sz) = 0] even though the tty is still alive.  Because of this
+  behavior, the shell session unexpectedly closes because the shell
+  considers the tty has been closed.
+
+  This only affects the first attempt of read(2) (in each process)
+  after the redirection.
+
+Repeat-By:
+
+  This is a reduced test case to reproduce the problem:
+
+  1. Open cygwin console (pseudo console mode) with Bash
+
+    This can be done by, for example, opening Run dialog with "Win +
+    R", typing "C:\cygwin64\bin\bash" and finally pressing "Enter".
+
+  2. Run the following command
+
+    $ stty -icanon; printf '\e[6n'; read -t 0; : < /dev/null; stty sane
+
+    The expected result is the response of the terminal is entered in
+    the command line.  It should look like the following:
+
+    $ 7;1R
+
+    However, in the console, the Bash session closes because it
+    receives EOF from PTY and considers the PTY session has been
+    closed.
+
+
+  Note: Only the first attempt of read(2) after the redirection
+  returns EOF.  This can be confirmed by the following command where
+  the Bash session does not close.
+
+    $ stty -icanon; printf '\e[6n'; read -t 0; : < /dev/null; read;
+    stty sane
+
+  Note: Also the first read(2) fails for each forked process in the
+  session:
+
+    $ stty -icanon; printf '\e[6n'; read -t 0; : < /dev/null; wc -c;
+    (read||echo fail;read||echo fail2); read; stty sane
+    0
+    fail
+
+    success
+    $
+
+Repeat-By (2):
+
+  This demonstrates the problem more explicitly by system calls.
+
+  1. Open cygwin console (pseudo console mode)
+
+  2. Compile and run the attached program `min1.cpp'.
+
+    $ g++ -o min1.exe min1.cpp
+    $ ./min1
+
+    The expected result is something like
+    $ ./min1
+    CHR CHR CHR CHR CHR CHR CHR 
+    $
+
+    However, in the console, it prints EOF and exit.
+    $ ./min1
+    EOF
+    $

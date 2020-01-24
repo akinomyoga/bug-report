@@ -1,0 +1,28 @@
+# test
+
+
+# 以下の設定の場合 --noinputrc を指定すると終了しなくなる
+#   --noinputrc を外すと終了してしまう。
+#   これはまた別の問題の様に思われるので後で検証する。
+# bleopt_internal_suppress_bash_output=
+# bleopt_default_keymap=safe
+# source blesh/ble.sh --attach=attach --noinputrc --rcfile blerc.1
+
+# 先に bleopt_internal_suppress_bash_output=1 でも再現する問題について。
+#bleopt_internal_suppress_bash_output=1
+#bleopt_default_keymap=safe
+#source blesh/ble.sh --attach=attach --noinputrc --rcfile blerc.1
+#source blesh/ble.sh --attach=none --rcfile blerc.1
+
+# printf '\e[6n'
+# stty -icanon
+# read -t 0
+# : < /dev/null
+# read || echo fail
+
+stty -icanon
+printf '\e[6n'
+read -t 0
+: < /dev/null
+read -N 1
+
