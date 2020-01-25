@@ -1,0 +1,149 @@
+From f082203ecc6c7e8e1d152c0d4caeccc0555d0f22 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 06:50:39 +0800
+Subject: [PATCH 1/8] remove idle
+
+---
+ ble.sh | 126 +--------------------------------------------------------
+ 1 file changed, 1 insertion(+), 125 deletions(-)
+
+diff --git a/ble.sh b/ble.sh
+index a5caf48..c0f4245 100644
+--- a/ble.sh
++++ b/ble.sh
+@@ -2535,131 +2535,7 @@ if ((_ble_bash>=40000)); then
+   fi
+   _ble_util_idle_task=()
+   _ble_util_idle_SEP='\'
+-  function ble/util/idle.do {
+-    local IFS=$' \t\n'
+-    ble/util/idle/IS_IDLE || return 1
+-    ((${#_ble_util_idle_task[@]}==0)) && return 1
+-    ble/util/buffer.flush >&2
+-    ble/util/idle.clock/.initialize
+-    ble/util/idle.clock/.restart
+-    local _idle_start=$_ble_util_idle_sclock
+-    local _idle_is_first=1
+-    local _idle_processed=
+-    while :; do
+-      local _idle_key
+-      local _idle_next_time= _idle_next_itime= _idle_running= _idle_waiting=
+-      for _idle_key in "${!_ble_util_idle_task[@]}"; do
+-        ble/util/idle/IS_IDLE || { [[ $_idle_processed ]]; return; }
+-        local _idle_to_process=
+-        local _idle_status=${_ble_util_idle_task[_idle_key]%%"$_ble_util_idle_SEP"*}
+-        case ${_idle_status::1} in
+-        (R) _idle_to_process=1 ;;
+-        (I) [[ $_idle_is_first ]] && _idle_to_process=1 ;;
+-        (S) ble/util/idle/.check-clock "$_idle_status" && _idle_to_process=1 ;;
+-        (W) ble/util/idle/.check-clock "$_idle_status" && _idle_to_process=1 ;;
+-        (F) [[ -s ${_idle_status:1} ]] && _idle_to_process=1 ;;
+-        (E) [[ -e ${_idle_status:1} ]] && _idle_to_process=1 ;;
+-        (P) ! builtin kill -0 ${_idle_status:1} &>/dev/null && _idle_to_process=1 ;;
+-        (C) eval -- "${_idle_status:1}" && _idle_to_process=1 ;;
+-        (*) unset -v '_ble_util_idle_task[_idle_key]'
+-        esac
+-        if [[ $_idle_to_process ]]; then
+-          local _idle_command=${_ble_util_idle_task[_idle_key]#*"$_ble_util_idle_SEP"}
+-          _idle_processed=1
+-          ble/util/idle.do/.call-task "$_idle_command"; local ext=$?
+-          ((ext==148)) && return 0
+-        elif [[ $_idle_status == [FEPC]* ]]; then
+-          _idle_waiting=1
+-        fi
+-      done
+-      _idle_is_first=
+-      ble/util/idle.do/.sleep-until-next; local ext=$?
+-      ((ext==148)) && break
+-      [[ $_idle_next_itime$_idle_next_time$_idle_running$_idle_waiting ]] || break
+-    done
+-    [[ $_idle_processed ]]
+-  }
+-  function ble/util/idle.do/.call-task {
+-    local _command=$1
+-    local ble_util_idle_status=
+-    local ble_util_idle_elapsed=$((_ble_util_idle_sclock-_idle_start))
+-    builtin eval "$_command"; local ext=$?
+-    if ((ext==148)); then
+-      _ble_util_idle_task[_idle_key]=R$_ble_util_idle_SEP$_command
+-    elif [[ $ble_util_idle_status ]]; then
+-      _ble_util_idle_task[_idle_key]=$ble_util_idle_status$_ble_util_idle_SEP$_command
+-      if [[ $ble_util_idle_status == [WS]* ]]; then
+-        local scheduled_time=${ble_util_idle_status:1}
+-        if [[ $ble_util_idle_status == W* ]]; then
+-          local next=_idle_next_itime
+-        else
+-          local next=_idle_next_time
+-        fi
+-        if [[ ! ${!next} ]] || ((scheduled_time<next)); then
+-          builtin eval "$next=\$scheduled_time"
+-        fi
+-      elif [[ $ble_util_idle_status == R ]]; then
+-        _idle_running=1
+-      elif [[ $ble_util_idle_status == [FEPC]* ]]; then
+-        _idle_waiting=1
+-      fi
+-    else
+-      unset -v '_ble_util_idle_task[_idle_key]'
+-    fi
+-    return "$ext"
+-  }
+-  function ble/util/idle/.check-clock {
+-    local status=$1
+-    if [[ $status == W* ]]; then
+-      local next=_idle_next_itime
+-      local current_time=$_ble_util_idle_sclock
+-    elif [[ $status == S* ]]; then
+-      local ret
+-      local next=_idle_next_time
+-      ble/util/idle.clock; local current_time=$ret
+-    else
+-      return 1
+-    fi
+-    local scheduled_time=${status:1}
+-    if ((scheduled_time<=current_time)); then
+-      return 0
+-    elif [[ ! ${!next} ]] || ((scheduled_time<next)); then
+-      builtin eval "$next=\$scheduled_time"
+-    fi
+-    return 1
+-  }
+-  function ble/util/idle.do/.sleep-until-next {
+-    ble/util/idle/IS_IDLE || return 148
+-    [[ $_idle_running ]] && return
+-    local isfirst=1
+-    while
+-      local sleep_amount=
+-      if [[ $_idle_next_itime ]]; then
+-        local clock=$_ble_util_idle_sclock
+-        local sleep1=$((_idle_next_itime-clock))
+-        if [[ ! $sleep_amount ]] || ((sleep1<sleep_amount)); then
+-          sleep_amount=$sleep1
+-        fi
+-      fi
+-      if [[ $_idle_next_time ]]; then
+-        local ret; ble/util/idle.clock; local clock=$ret
+-        local sleep1=$((_idle_next_time-clock))
+-        if [[ ! $sleep_amount ]] || ((sleep1<sleep_amount)); then
+-          sleep_amount=$sleep1
+-        fi
+-      fi
+-      [[ $isfirst && $_idle_waiting ]] || ((sleep_amount>0))
+-    do
+-      local ble_util_idle_elapsed=$((_ble_util_idle_sclock-_idle_start))
+-      local interval=$((bleopt_idle_interval))
+-      if [[ ! $sleep_amount ]] || ((interval<sleep_amount)); then
+-        sleep_amount=$interval
+-      fi
+-      ble/util/idle/.sleep "$sleep_amount"
+-      ble/util/idle/IS_IDLE || return 148
+-      isfirst=
+-    done
+-  }
++  function ble/util/idle.do { return 1; }
+   function ble/util/idle.push/.impl {
+     local base=$1 entry=$2
+     local i=$base
+-- 
+2.21.0
+

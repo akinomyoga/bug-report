@@ -1,0 +1,25 @@
+From 06fbee58c51ca84ff555cf6997bbeb20840cca82 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 06:52:51 +0800
+Subject: [PATCH 2/8] remove history
+
+---
+ ble.sh | 1243 +-------------------------------------------------------
+ 1 file changed, 3 insertions(+), 1240 deletions(-)
+
+diff --git a/ble.sh b/ble.sh
+index c0f4245..9e1b3ba 100644
+--- a/ble.sh
++++ b/ble.sh
+@@ -9512,6 +9512,9 @@ function ble/canvas/panel#clear-after.draw {
+ function ble/history/isearch-backward {
+   ble/history/forward-isearch.impl "$1:backward"
+ }
++
++ble/history:bash/reset() { :; }
++
+ bleopt/declare -v edit_vbell ''
+ bleopt/declare -v edit_abell 1
+ bleopt/declare -v history_lazyload 1
+-- 
+2.21.0

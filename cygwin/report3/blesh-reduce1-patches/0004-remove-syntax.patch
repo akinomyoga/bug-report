@@ -1,0 +1,29 @@
+From 21ab460893623aff927d7a15e54d1fa5e8339c5a Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 07:11:41 +0800
+Subject: [PATCH 4/8] remove syntax
+
+---
+ ble.sh             |    1 +
+ lib/core-syntax.sh | 4580 --------------------------------------------
+ 2 files changed, 1 insertion(+), 4580 deletions(-)
+ delete mode 100644 lib/core-syntax.sh
+
+diff --git a/ble.sh b/ble.sh
+index 9e1b3ba..9723350 100644
+--- a/ble.sh
++++ b/ble.sh
+@@ -8921,6 +8921,7 @@ function ble-edit/content/.update-dirty-range {
+   for obs in "${_ble_edit_dirty_observer[@]}"; do "$obs" "$@"; done
+ }
+ function ble-edit/content/update-syntax {
++  return 0
+   if ble/is-function ble/syntax/parse; then
+     local beg end end0
+     ble/dirty-range#load --prefix=_ble_edit_dirty_syntax_
+diff --git a/lib/core-syntax.sh b/lib/core-syntax.sh
+deleted file mode 100644
+index 11c8a4f..0000000
+-- 
+2.21.0
+

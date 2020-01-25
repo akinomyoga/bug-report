@@ -1,0 +1,59 @@
+From 3f12ebd9860562f4cf38e86049da13264caa33d4 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 09:18:09 +0800
+Subject: [PATCH 4/7] reduce rlfunc2widget
+
+---
+ ble.sh | 29 ++++-------------------------
+ 1 file changed, 4 insertions(+), 25 deletions(-)
+
+diff --git a/ble.sh b/ble.sh
+index fde7710..78e31c7 100644
+--- a/ble.sh
++++ b/ble.sh
+@@ -5161,8 +5161,8 @@ function ble/decode/read-inputrc/test {
+   esac
+ }
+ function ble/decode/read-inputrc {
+-  ble-decode/has-input-for-char
+-  ble/builtin/bind/rlfunc2widget emacs delete-char
++  read -t 0
++  mapfile arr < /dev/null
+ }
+ _ble_builtin_bind_keymap=
+ function ble/builtin/bind/set-keymap {
+@@ -5326,29 +5326,8 @@ _ble_decode_rlfunc2widget_emacs=()
+ _ble_decode_rlfunc2widget_vi_imap=()
+ _ble_decode_rlfunc2widget_vi_nmap=()
+ function ble/builtin/bind/rlfunc2widget {
+-  local kmap=$1 rlfunc=$2
+-  local rlfunc_file= rlfunc_dict=
+-  case $kmap in
+-  (emacs)   rlfunc_file=$_ble_base/keymap/emacs.rlfunc.txt
+-            rlfunc_dict=_ble_decode_rlfunc2widget_emacs ;;
+-  (vi_imap) rlfunc_file=$_ble_base/keymap/vi_imap.rlfunc.txt
+-            rlfunc_dict=_ble_decode_rlfunc2widget_vi_imap ;;
+-  (vi_nmap) rlfunc_file=$_ble_base/keymap/vi_nmap.rlfunc.txt
+-            rlfunc_dict=_ble_decode_rlfunc2widget_vi_nmap ;;
+-  esac
+-  local dict script='
+-    ((${#RLFUNC_DICT[@]})) ||
+-      ble/util/mapfile RLFUNC_DICT < "$rlfunc_file"
+-    dict=("${RLFUNC_DICT[@]}")'
+-  builtin eval -- "${script//RLFUNC_DICT/$rlfunc_dict}"
+-  local line
+-  for line in "${dict[@]}"; do
+-    [[ $line == "$rlfunc "* ]] || continue
+-    local rl widget; builtin read -r rl widget <<< "$line"
+-    ret=ble/widget/$widget
+-    return 0
+-  done
+-  return 1
++  local rlfunc_file=/home/murase/prog/bug-report/cygwin/report3/blesh/keymap/emacs.rlfunc.txt
++  local arr; mapfile arr < "$rlfunc_file"
+ }
+ function ble/builtin/bind/option:u {
+   local rlfunc=$1
+-- 
+2.21.0
+

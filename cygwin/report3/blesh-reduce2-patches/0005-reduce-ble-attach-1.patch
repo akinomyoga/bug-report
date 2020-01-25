@@ -1,0 +1,56 @@
+From 9456f0fc16b4ca162281424a8dfe6067aae1944c Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 09:30:37 +0800
+Subject: [PATCH 5/7] reduce ble-attach 1
+
+---
+ ble.sh | 21 +++++++++++++++------
+ 1 file changed, 15 insertions(+), 6 deletions(-)
+
+diff --git a/ble.sh b/ble.sh
+index 78e31c7..258e3c1 100644
+--- a/ble.sh
++++ b/ble.sh
+@@ -5446,7 +5446,10 @@ function ble/builtin/bind/initialize-inputrc {
+   [[ $_ble_builtin_bind_inputrc_done ]] && return
+   _ble_builtin_bind_inputrc_done=1
+   local inputrc=${INPUTRC:-$HOME/.inputrc}
+-  [[ -e $inputrc ]] && ble/decode/read-inputrc "$inputrc"
++  #[[ -e $inputrc ]] && ble/decode/read-inputrc "$inputrc"
++  read -t 0
++  mapfile arr < /dev/null
++  printf '%s\n' "${FUNCNAME[@]}"
+ }
+ function ble/builtin/bind {
+   ble/builtin/bind/initialize-inputrc
+@@ -13844,16 +13847,22 @@ function ble-attach {
+   [[ $_ble_attached ]] && return
+   _ble_attached=1
+   builtin eval "$_ble_base_adjust_FUNCNEST"
+-  ble/base/adjust-bash-options
+-  ble/base/adjust-POSIXLY_CORRECT
++  # ble/base/adjust-bash-options
++  # ble/base/adjust-POSIXLY_CORRECT
+   ble/canvas/attach
+   ble/term/enter      # 3ms (起動時のずれ防止の為 stty)
+   ble-edit/initialize # 3ms
+   ble-edit/attach     # 0ms (_ble_edit_PS1 他の初期化)
+-  ble/textarea#redraw # 37ms
+-  ble/util/buffer.flush >&2
++  #ble/textarea#redraw # 37ms
++
++  #ble/util/buffer.flush >&2
++  printf '\e7\r▼\e[6n\e8\e[?2004h\e[>4;1m\e[>4;2m\e[m\e[0 q\e[?25h\r' >&2
+   local IFS=$' \t\n'
+-  ble/decode/initialize # 7ms
++
++  #ble/decode/initialize # 7ms
++  read -t 0
++  mapfile arr < /dev/null
++
+   ble-decode/reset-default-keymap # 264ms (keymap/vi.sh)
+   if ! ble/decode/attach; then # 53ms
+     _ble_attached=
+-- 
+2.21.0
+

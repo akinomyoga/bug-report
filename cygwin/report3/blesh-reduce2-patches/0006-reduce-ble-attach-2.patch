@@ -1,0 +1,65 @@
+From 6fe6fcdbe3b97d487b98640aa7a3ba55db1b8b44 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 09:35:31 +0800
+Subject: [PATCH 6/7] reduce ble-attach 2
+
+---
+ ble.sh | 42 ++++--------------------------------------
+ 1 file changed, 4 insertions(+), 38 deletions(-)
+
+diff --git a/ble.sh b/ble.sh
+index 258e3c1..ac39db9 100644
+--- a/ble.sh
++++ b/ble.sh
+@@ -13834,44 +13834,10 @@ if ((_ble_bash>=40200||_ble_bash>=40000&&!_ble_bash_loaded_in_function)); then
+ fi
+ _ble_attached=
+ function ble-attach {
+-  if (($#)); then
+-    ble/base/print-usage-for-no-argument-command 'Attach to ble.sh.' "$@"
+-    return
+-  fi
+-  if [[ $_ble_edit_detach_flag ]]; then
+-    case $_ble_edit_detach_flag in
+-    (exit) return 0 ;;
+-    (*) _ble_edit_detach_flag= ;; # cancel "detach"
+-    esac
+-  fi
+-  [[ $_ble_attached ]] && return
+-  _ble_attached=1
+-  builtin eval "$_ble_base_adjust_FUNCNEST"
+-  # ble/base/adjust-bash-options
+-  # ble/base/adjust-POSIXLY_CORRECT
+-  ble/canvas/attach
+-  ble/term/enter      # 3ms (起動時のずれ防止の為 stty)
+-  ble-edit/initialize # 3ms
+-  ble-edit/attach     # 0ms (_ble_edit_PS1 他の初期化)
+-  #ble/textarea#redraw # 37ms
+-
+-  #ble/util/buffer.flush >&2
+-  printf '\e7\r▼\e[6n\e8\e[?2004h\e[>4;1m\e[>4;2m\e[m\e[0 q\e[?25h\r' >&2
+-  local IFS=$' \t\n'
+-
+-  #ble/decode/initialize # 7ms
+-  read -t 0
+-  mapfile arr < /dev/null
+-
+-  ble-decode/reset-default-keymap # 264ms (keymap/vi.sh)
+-  if ! ble/decode/attach; then # 53ms
+-    _ble_attached=
+-    ble-edit/detach
+-    return 1
+-  fi
+-  ble/history:bash/reset # 27s for bash-3.0
+-  ble-edit/info/default
+-  ble-edit/bind/.tail
++  ble/term/enter
++  printf '\e[6n' >&2
++  read -t 0; mapfile arr < /dev/null
++  return 1
+ }
+ function ble-detach {
+   if (($#)); then
+-- 
+2.21.0
+

@@ -1,0 +1,51 @@
+From af770e3bfd24f2cb5e7aadfa25053c4188045be6 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 06:53:36 +0800
+Subject: [PATCH 3/8] remove vi
+
+---
+ keymap/vi.sh              | 5978 -------------------------------------
+ keymap/vi_digraph.sh      |   52 -
+ keymap/vi_digraph.txt     | 1304 --------
+ keymap/vi_imap.rlfunc.txt |  167 --
+ keymap/vi_nmap.rlfunc.txt |  167 --
+ keymap/vi_test.sh         |  359 ---
+ lib/vim-arpeggio.sh       |   48 -
+ lib/vim-surround.sh       |  549 ----
+ 8 files changed, 8624 deletions(-)
+ delete mode 100644 keymap/vi.sh
+ delete mode 100644 keymap/vi_digraph.sh
+ delete mode 100644 keymap/vi_digraph.txt
+ delete mode 100644 keymap/vi_imap.rlfunc.txt
+ delete mode 100644 keymap/vi_nmap.rlfunc.txt
+ delete mode 100644 keymap/vi_test.sh
+ delete mode 100644 lib/vim-arpeggio.sh
+ delete mode 100644 lib/vim-surround.sh
+
+diff --git a/keymap/vi.sh b/keymap/vi.sh
+deleted file mode 100644
+index 2ef3b02..0000000
+diff --git a/keymap/vi_digraph.sh b/keymap/vi_digraph.sh
+deleted file mode 100644
+index 04a75b1..0000000
+diff --git a/keymap/vi_digraph.txt b/keymap/vi_digraph.txt
+deleted file mode 100644
+index 9086f91..0000000
+diff --git a/keymap/vi_imap.rlfunc.txt b/keymap/vi_imap.rlfunc.txt
+deleted file mode 100644
+index 996208d..0000000
+diff --git a/keymap/vi_nmap.rlfunc.txt b/keymap/vi_nmap.rlfunc.txt
+deleted file mode 100644
+index 1f442a2..0000000
+diff --git a/keymap/vi_test.sh b/keymap/vi_test.sh
+deleted file mode 100644
+index f013d2c..0000000
+diff --git a/lib/vim-arpeggio.sh b/lib/vim-arpeggio.sh
+deleted file mode 100644
+index cb59766..0000000
+diff --git a/lib/vim-surround.sh b/lib/vim-surround.sh
+deleted file mode 100644
+index 0d156be..0000000
+-- 
+2.21.0
+

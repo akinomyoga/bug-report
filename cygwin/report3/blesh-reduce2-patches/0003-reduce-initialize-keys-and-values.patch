@@ -1,0 +1,48 @@
+From b5c44851b4818ddb6bdf37f8783df6ad74cfb08f Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 09:05:47 +0800
+Subject: [PATCH 3/7] reduce initialize-keys-and-values
+
+---
+ ble.sh | 18 ++----------------
+ 1 file changed, 2 insertions(+), 16 deletions(-)
+
+diff --git a/ble.sh b/ble.sh
+index 5133442..fde7710 100644
+--- a/ble.sh
++++ b/ble.sh
+@@ -5161,7 +5161,7 @@ function ble/decode/read-inputrc/test {
+   esac
+ }
+ function ble/decode/read-inputrc {
+-  ble/builtin/bind/.initialize-keys-and-value '"\e[3~": delete-char'
++  ble-decode/has-input-for-char
+   ble/builtin/bind/rlfunc2widget emacs delete-char
+ }
+ _ble_builtin_bind_keymap=
+@@ -5281,21 +5281,7 @@ function ble/builtin/bind/.initialize-kmap {
+   return 0
+ }
+ function ble/builtin/bind/.initialize-keys-and-value {
+-  local spec=$1 opts=$2
+-  keys= value=
+-  local keyseq
+-  ble/builtin/bind/.decompose-pair "$spec" || return
+-  local chars
+-  if [[ $keyseq == \"*\" ]]; then
+-    local ret; ble/util/keyseq2chars "${keyseq:1:${#keyseq}-2}"
+-    chars=("${ret[@]}")
+-    ((${#chars[@]})) || ble/util/print "ble.sh (bind): warning: empty keyseq" >&2
+-  else
+-    [[ :$opts: == *:nokeyname:* ]] &&
+-      ble/util/print "ble.sh (bind): warning: readline \"bind -x\" does not support \"keyname\" spec" >&2
+-    ble/builtin/bind/.parse-keyname "$keyseq"
+-  fi
+-  ble/builtin/bind/.decode-chars "${chars[@]}"
++  ble-decode-char 126
+ }
+ function ble/builtin/bind/option:x {
+   local q=\' Q="''\'"
+-- 
+2.21.0
+

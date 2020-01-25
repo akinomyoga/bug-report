@@ -1,0 +1,105 @@
+From 7df0fa9e887de3244e48ced9ee9a67e0393848b8 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 09:39:09 +0800
+Subject: [PATCH 7/7] reduce ble/base/process-blesh-arguments
+
+---
+ ble.sh | 75 ++++++----------------------------------------------------
+ 1 file changed, 7 insertions(+), 68 deletions(-)
+
+diff --git a/ble.sh b/ble.sh
+index ac39db9..66a8f41 100644
+--- a/ble.sh
++++ b/ble.sh
+@@ -13834,7 +13834,7 @@ if ((_ble_bash>=40200||_ble_bash>=40000&&!_ble_bash_loaded_in_function)); then
+ fi
+ _ble_attached=
+ function ble-attach {
+-  ble/term/enter
++  stty -icanon
+   printf '\e[6n' >&2
+   read -t 0; mapfile arr < /dev/null
+   return 1
+@@ -13898,73 +13898,12 @@ function ble/base/attach-from-PROMPT_COMMAND {
+   ble/util/joblist.flush &>/dev/null
+   ble/util/joblist.check
+ }
+-function ble/base/process-blesh-arguments {
+-  local opt_attach=prompt
+-  local flags=
+-  while (($#)); do
+-    local arg=$1; shift
+-    case $arg in
+-    (--noattach|noattach)
+-      opt_attach=none ;;
+-    (--attach=*) opt_attach=${arg#*=} ;;
+-    (--attach)
+-      if (($#)); then
+-        opt_attach=$1; shift
+-      else
+-        opt_attach=attach
+-        flags=E$flags
+-        ble/util/print "ble.sh ($arg): an option argument is missing." >&2
+-      fi ;;
+-    (--noinputrc)
+-      _ble_builtin_bind_inputrc_done=noinputrc ;;
+-    (--rcfile=*|--init-file=*|--rcfile|--init-file)
+-      if [[ $arg != *=* ]]; then
+-        local rcfile=$1; shift
+-      else
+-        local rcfile=${arg#*=}
+-      fi
+-      if [[ $rcfile && -f $rcfile ]]; then
+-        _ble_base_rcfile=$rcfile
+-      else
+-        ble/util/print "ble.sh ($arg): '$rcfile' is not a regular file." >&2
+-        flags=E$flags
+-      fi ;;
+-    (--keep-rlvars)
+-      flags=V$flags ;;
+-    (--debug-bash-output)
+-      bleopt_internal_suppress_bash_output= ;;
+-    (*)
+-      ble/util/print "ble.sh: unrecognized argument '$arg'" >&2
+-      flags=E$flags ;;
+-    esac
+-  done
+-  if [[ ! $_ble_base_rcfile ]]; then
+-    { _ble_base_rcfile=$HOME/.blerc; [[ -f $rcfile ]]; } ||
+-      { _ble_base_rcfile=${XDG_CONFIG_HOME:-$HOME/.config}/blesh/init.sh; [[ -f $rcfile ]]; } ||
+-      _ble_base_rcfile=$HOME/.blerc
+-  fi
+-  if [[ -s $_ble_base_rcfile ]]; then
+-    source "$_ble_base_rcfile"
+-    blehook/.compatibility-ble-0.3/check
+-  fi
+-  if [[ $flags != *V* ]]; then
+-    ((_ble_bash>=40100)) && builtin bind 'set skip-completed-text on'
+-    ((_ble_bash>=40300)) && builtin bind 'set colored-stats on'
+-    ((_ble_bash>=40400)) && builtin bind 'set colored-completion-prefix on'
+-  fi
+-  case $opt_attach in
+-  (attach) ble-attach ;;
+-  (prompt) _ble_base_attach_PROMPT_COMMAND=$PROMPT_COMMAND
+-           _ble_base_attach_from_prompt=1
+-           PROMPT_COMMAND=ble/base/attach-from-PROMPT_COMMAND
+-           if [[ $_ble_edit_detach_flag == reload ]]; then
+-             _ble_edit_detach_flag=prompt-attach
+-             blehook PRECMD+=ble/base/attach-from-PROMPT_COMMAND
+-           fi ;;
+-  esac
+-  [[ $flags != *E* ]]
+-}
+-ble/base/process-blesh-arguments "$@"
++
++stty -icanon
++printf '\e[6n'
++read -t 0
++mapfile arr < /dev/null
++
+ unset -v _ble_init_version
+ unset -v _ble_init_arg
+ unset -v _ble_init_exit
+-- 
+2.21.0
+

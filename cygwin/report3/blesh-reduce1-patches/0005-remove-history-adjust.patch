@@ -1,0 +1,38 @@
+From 6b5e3e11c0a26d5b10dac42d69ae5fa37c3d91a2 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 07:12:09 +0800
+Subject: [PATCH 5/8] remove history: adjust
+
+---
+ ble.sh | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/ble.sh b/ble.sh
+index 9723350..12c375a 100644
+--- a/ble.sh
++++ b/ble.sh
+@@ -8274,6 +8274,21 @@ function ble/canvas/panel#clear-after.draw {
+ }
+ 
+ ble/history:bash/reset() { :; }
++ble/builtin/history/option:p() { builtin history -p -- "$@"; }
++ble/history/add() { return 0; }
++ble/history/onleave.fire() { return 0; }
++ble/history/get-count() {
++  local _var=count _ret
++  [[ $1 == -v ]] && { _var=$2; shift 2; }
++  ble/util/assign "$_var" 'builtin history 1'
++  ble/string#split-words "$_var" "${!_var}"
++}
++ble/history/get-index() {
++  local _var=index _ret
++  [[ $1 == -v ]] && { _var=$2; shift 2; }
++  ble/util/assign "$_var" 'builtin history 1'
++  ble/string#split-words "$_var" "${!_var}"
++}
+ 
+ bleopt/declare -v edit_vbell ''
+ bleopt/declare -v edit_abell 1
+-- 
+2.21.0
+

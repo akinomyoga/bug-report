@@ -1,0 +1,83 @@
+From cb3e5d597c83ffd8d50a2cb887684bf88fc638e4 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 09:04:54 +0800
+Subject: [PATCH 2/7] reduce bind/option:-
+
+---
+ ble.sh | 53 +++--------------------------------------------------
+ 1 file changed, 3 insertions(+), 50 deletions(-)
+
+diff --git a/ble.sh b/ble.sh
+index 0ac0a0f..5133442 100644
+--- a/ble.sh
++++ b/ble.sh
+@@ -5161,7 +5161,8 @@ function ble/decode/read-inputrc/test {
+   esac
+ }
+ function ble/decode/read-inputrc {
+-  ble/builtin/bind/.process -- '"\e[3~": delete-char'
++  ble/builtin/bind/.initialize-keys-and-value '"\e[3~": delete-char'
++  ble/builtin/bind/rlfunc2widget emacs delete-char
+ }
+ _ble_builtin_bind_keymap=
+ function ble/builtin/bind/set-keymap {
+@@ -5397,55 +5398,7 @@ function ble/builtin/bind/option:u/search-recursive {
+   done
+ }
+ function ble/builtin/bind/option:- {
+-  local ret; ble/string#trim "$1"; local arg=$ret
+-  local ifs=$' \t\n'
+-  if [[ $arg == 'set'["$ifs"]* ]]; then
+-    if [[ $_ble_decode_bind_state != none ]]; then
+-      local variable= value= rex=$'^set[ \t]+([^ \t]+)[ \t]+([^ \t].*)$'
+-      [[ $arg =~ $rex ]] && variable=${BASH_REMATCH[1]} value=${BASH_REMATCH[2]}
+-      case $variable in
+-      (keymap)
+-        ble/builtin/bind/set-keymap "$value"
+-        return ;;
+-      (editing-mode)
+-        _ble_builtin_bind_keymap= ;;
+-      esac
+-      builtin bind "$arg"
+-    fi
+-    return
+-  fi
+-  local keys value kmap
+-  if ! ble/builtin/bind/.initialize-keys-and-value "$arg"; then
+-    local q=\' Q="''\'"
+-    ble/util/print "ble.sh (bind): unrecognized readline command '${arg//$q/$Q}'." >&2
+-    flags=e$flags
+-    return 1
+-  elif ! ble/builtin/bind/.initialize-kmap "$opt_keymap"; then
+-    ble/util/print "ble.sh (bind): sorry, failed to initialize keymap:'$opt_keymap'." >&2
+-    flags=e$flags
+-    return 1
+-  fi
+-  if [[ $value == \"* ]]; then
+-    value=${value#\"} value=${value%\"}
+-    local ret chars; ble/util/keyseq2chars "$value"; chars=("${ret[@]}")
+-    local command="ble/widget/.MACRO ${chars[*]}"
+-    ble-decode-key/bind "${keys[*]}" "$command"
+-  elif [[ $value ]]; then
+-    if local ret; ble/builtin/bind/rlfunc2widget "$kmap" "$value"; then
+-      local command=$ret
+-      local arr; ble/string#split-words arr "$command"
+-      if ble/is-function "${arr[0]}"; then
+-        ble-decode-key/bind "${keys[*]}" "$command"
+-        return
+-      fi
+-    fi
+-    ble/util/print "ble.sh (bind): unsupported readline function '${value//$q/$Q}'." >&2
+-    flags=e$flags
+-    return 1
+-  else
+-    ble/util/print "ble.sh (bind): readline function name is not specified ($arg)." >&2
+-    return 1
+-  fi
++  return
+ }
+ function ble/builtin/bind/.process {
+   flags=
+-- 
+2.21.0
+

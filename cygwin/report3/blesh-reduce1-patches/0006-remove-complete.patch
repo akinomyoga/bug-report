@@ -1,0 +1,32 @@
+From 018f9fdc64909ea2c73a8b20845955f4cb4f898a Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 24 Jan 2020 07:12:16 +0800
+Subject: [PATCH 6/8] remove complete
+
+---
+ ble.sh               |    4 +-
+ lib/core-complete.sh | 4099 ------------------------------------------
+ 2 files changed, 2 insertions(+), 4101 deletions(-)
+ delete mode 100644 lib/core-complete.sh
+
+diff --git a/ble.sh b/ble.sh
+index 12c375a..0c40c0f 100644
+--- a/ble.sh
++++ b/ble.sh
+@@ -12140,8 +12140,8 @@ function ble/widget/magic-space {
+   [[ $_ble_decode_keymap == vi_imap ]] &&
+     local oind=$_ble_edit_ind ostr=$_ble_edit_str
+   local arg; ble-edit/content/get-arg ''
+-  ble/widget/history-expand-backward-line ||
+-    ble/complete/sabbrev/expand
++  # ble/widget/history-expand-backward-line ||
++  #   ble/complete/sabbrev/expand
+   local ext=$?
+   ((ext==147)) && return 147 # sabbrev/expand でメニュー補完に入った時など。
+   [[ $_ble_decode_keymap == vi_imap ]] &&
+diff --git a/lib/core-complete.sh b/lib/core-complete.sh
+deleted file mode 100644
+index 01799e4..0000000
+-- 
+2.21.0
+
