@@ -1,0 +1,37 @@
+https://savannah.gnu.org/bugs/?57697
+
+Category: Crash/Freeze/Infloop
+Release: 4.99.0
+Planned Release: None
+
+Subject: 4.99.0: CPU usage always 100% after the commit 8becc4d (Convert select() to poll() in sched.c)
+
+Hello, I'm trying the master branch (screen-4.99.0) for 24-bit color
+support, but I noticed that the CPU usage of the main screen process
+is always 100%.  I confirmed this with two Linux hosts:
+
+  $ uname -a
+  Linux song123 5.3.0-26-generic #28~18.04.1-Ubuntu SMP Wed Dec 18 16:40:14 UTC 2019 x86_64 x86_64 x86_64 GNU/Linux
+  $ uname -a
+  Linux chatoyancy 5.1.20-300.fc30.x86_64 #1 SMP Fri Jul 26 15:03:11 UTC 2019 x86_64 x86_64 x86_64 GNU/Linux
+
+I checked recent commits in the git repository and found that this
+started to happen after the following commit:
+
+  --------------------------------------------------------------------
+  commit 8becc4d29a12688b39312639f56e1aeeb76f96e2 (HEAD)
+  Author: Amadeusz Sławiński <***@***>
+  Date:   Sun Nov 3 00:31:59 2019 +0100
+
+      Convert select() to poll() in sched.c
+
+      select() limits number of file descriptors that can be used by screen.
+      Migrate to poll() to avoid this limitation.
+
+      As can be seen in case of scheduler it requires quite some changes, care
+      must be taken to count poll() events properly.
+
+      Bug: 55697
+
+      Signed-off-by: Amadeusz Sławiński <***@***>
+  --------------------------------------------------------------------
