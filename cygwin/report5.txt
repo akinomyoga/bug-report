@@ -1,0 +1,231 @@
+Subject: Question on pseudo console and legacy console
+
+I have a question on the pseudo console mode and the legacy console
+mode.
+
+Question:
+
+  Does it cause problems to set `disable_pcon' in the default value of
+  the environment variable `CYGWIN'?  When is the pseudo console mode
+  recommended, and when can I use the legacy console mode?  I noticed
+  that the terminal emulators with the pseudo console mode is quite
+  slower than with the legacy console mode, so I am thinking of
+  setting `disable_pcon' by default if it does not cause problem.
+
+
+Background:
+
+* There are large performance differences of terminal emulators
+  between the legacy and pseudo console modes.  I show some test and
+  results in my laptop as follows:
+
+  For example, one can measure a performance of the terminal emulators
+  by the following commands.  It measures the processing time of the
+  terminal for 1M lines.
+
+  $ yes | head -1000000 > yes.txt
+  $ time cat yes.txt
+
+  The results with different terminals and different console modes
+  are summarized below:
+
+  urxvt     ... legacy: 0.410s,   pcon: 33.517s   (~ 80x slower)
+  (A) win   ... legacy: 1.593s,   pcon: 36.064s   (~ 20x slower)
+  (B) x11   ... legacy: 1.573s,   pcon: 35.611s   (~ 20x slower)
+  (C) tty   ... legacy: 1.614s,   pcon: 35.129s   (~ 20x slower)
+  mintty    ... legacy: 3.811s,   pcon: 39.406s   (~ 10x slower)
+  xterm -j  ... legacy: 39.809s,  pcon: 1m2.237s  (~ 1.5x slower)
+
+  [ Note: `legacy' and `pcon' are the legacy and pseudo console
+  modes, respectively.  (A)--(C) are three different modes of the
+  terminal that I wrote by myself and also I primarily use daily.
+  When xterm is tested, the option -j is passed to explicitly turn
+  off the smooth scrolling mode. ]
+
+  This is the results for a specific computer, but the difference
+  between legacy and pseudo console modes is clear.  I think the
+  reason why pseudo console is so slow is that it actually
+  internally processes terminal sequences and constructs its
+  terminal contents in backgrounds, which is completely redundant
+  process when the user uses terminal emulators.  And the background
+  terminal is as slow as xterm, which is at least ten times slower
+  than the other terminal emulators.
+
+* I understand that, with the pseudo console mode, the Cygwin console
+  have more powerful terminal features compared to the legacy console
+  mode.  However, I do not usually use the console but another
+  terminal emulator.  Also the default Cygwin Terminal (which can be
+  launched from the shortcut icon on desktop or in the start menu) is
+  actually Mintty, so I believe most other people also use terminal
+  emulators.
+
+  Is there any reason to enable the pseudo console mode for all the
+  programs including those which does not use the console window?  For
+  example, does the Cygwin PTY with the legacy console mode have some
+  limitation which is not present with the pseudo console mode?  Or,
+  are there some problems caused by the legacy console mode?  I
+  thought maybe some Windows Command-Line application (based on
+  Windows Console API) could have troubles with the legacy console
+  mode, but with a quick check for `cmd' and `PowerShell' it appears
+  to work in the terminal emulators with the legacy console mode
+  though I haven't tested it thoroughly.
+
+* For these reasons, if there is no functional differences between the
+  pseudo console mode and the legacy console mode as far as I use
+  terminal emulators, I tend to think about setting `disable_pcon' as
+  the default value of the environment variable `CYGWIN'.  But looking
+  at the discussion at
+
+  https://cygwin.com/ml/cygwin-patches/2020-q1/threads.html#00060
+
+  it appears the setting `disable_pcon' is only introduced as a
+  workaround for the programs incompatible with the pseudo console
+  mode (such as `cgdb'), and the pseudo console mode is still
+  considered to be appropriate for normal programs.
+
+* If the console mode would not cause any differences when there is no
+  visible console window, would it make sense to change Cygwin's
+  behavior so that it switches to the pseudo console mode only when
+  the console window is present (if it is not too difficult
+  technically)?
+
+----------------------------------------------------------------------
+
+Thank you for the explanation.  I think I'm going to by default add
+`disable_pcon' to the environment variable `CYGWIN' before calling
+`posix_openpt'.
+
+> Do you mean "without pseudo console support" by "legacy console mode"?
+
+Yes.
+
+> If so, pty should behave as before 3.1.0 if you set disable_pcon,
+
+I see. Actually I was particularly interested in whether the
+introduction of the pseudo console support is related to solving any
+existing problems before 3.1.0 or not.
+
+> except that char code conversion, from code page which you set, to
+> char code which is declared by locale, is still enabled.
+
+I haven't recognized this change. This is really nice!
+
+> With out pseudo console, for example:
+> 1) cmd.exe echos command twice.
+> 2) dir /p does not work in cmd.exe.
+> 3) Many of windows native console apps such as windows native gnuplot
+>    does not work at all.
+
+OK, there are in fact functional differences between the pseudo
+console mode and the legacy console mode.  So, is the purpose of the
+introduction of the pseudo console mode is not just to enhance the
+Cygwin console but to make Windows Command-Line applications work
+properly in all Cygwin terminals including terminal emulators as well
+as console?
+
+Now I understand the difficulties of the pseudo console modes.  This
+is really challenging as Windows Console API and ANSI/VT terminal
+sequences are independent ecosystems and based on different models.
+I'm not sure if it is even possible to make it realize in a completely
+transparent way for both types (Windows and Cygwin) of applications.
+
+> > * If the console mode would not cause any differences when there
+> >   is no visible console window, would it make sense to change
+> >   Cygwin's behavior so that it switches to the pseudo console mode
+> >   only when the console window is present (if it is not too
+> >   difficult technically)?
+>
+> I am not sure what you mean "the console window is present", but
+
+I am sorry I did not put it clearly.  By "the console window is
+present", I meant the case that a console will be allocated for the
+terminal emulator but the corresponding GUI console window will not be
+shown in the foreground.  My suggestion was to choose/switch a mode
+for each PTY session but not for each program.
+
+Specifically I thought about completely disabling the pseudo console
+support with terminal emulators, and turning on it only for Cygwin
+consoles.  But this is based on my assumption that the pseudo console
+mode is aimed to provide enhanced Cygwin consoles and does not affect
+the functional differences in terminal emulators.
+
+----
+
+Nevertheless, IMHO, the current implementation of the pseudo console
+mode is better to be turned off for terminal emulators by default and
+only turned on for Cygwin consoles.  Of course, it can still
+optionally be turned on in terminal emulators when the user or the
+terminal emulator explicitly request that.
+
+The TTY/PTY mechanism should be transparent to the types of terminals,
+but the current implementation of PTY by the pseudo console mode
+requires a specific set of terminal capabilities and does not allow
+any extensions which is not in the pseudo console.  This is not a good
+design as a basic system API.  If this pseudo console mode is
+defaulted for Cygwin PTY, that means any terminal emulator cannot be
+implemented properly on Cygwin except the case that the terminal
+emulator is a perfect copy of the pseudo console.
+
+In fact there are already many reports caused by the behavior
+difference of the pseudo console from an expected one.  I don't think
+this kind of troubles stops by just modifying the superficial behavior
+of the current implementation.  We want to avoid supporting new
+features (Windows Command-Line applications) by breaking many existing
+applications which opens PTY.  I think it is better to wait until we
+could find a way to make the PTY behavior transparent to the terminal
+types.
+
+---
+
+% Nevertheless, as we need to have completely equivalent terminal
+% capabilities to keep the consistency, it might be a possible solution
+% for now
+% 
+% > that is possible if you accept the behaviour that the output of
+% > cygwin native apps disappears everytime when windows native app is
+% > executed.
+% 
+% If we can detect whether a visible GUI console window is needed or not
+% (for example, we do not need it for terminal emulators) at some point
+% before we receive the first output from the PTY slave, we can
+% initialize the pseudo console mode from the beginning only when the
+% GUI console window is needed.  If I correctly understand it, I think
+% by initializing it from the beginning we can avoid the problem of
+% clearing screens.
+% 
+% My naive thinking is, when the PTY is created through Unix style
+% interfaces such as `/dev/ptmx', `openpty' or `posix_openpt' (which is
+% used by Unix terminal emulators), a GUI console window will not be
+% shown because the system is not expected to create a window by just
+% opening a PTY and the terminal emulator (or the process holding the
+% PTY master) is responsible for preparing an appropriate user
+% interfaces.
+% 
+% But all of the above discussions are based on the assumption that
+% there is no functional differences between two modes with terminal
+% emulators.  If the purpose of the introduction of the pseudo console
+% support is to make Windows Command-Line applications (such as "cmd
+% echo", "dir /p", "gnuplot", etc. you have mentioned) work properly in
+% Unix terminal emulators, the above suggestion of turning off the
+% pseudo console mode in the terminal is unacceptable.
+% %
+% Nevertheless, as you have explained, there is a problem with this
+% approach that  do not work properly in terminal emulators with the
+% legacy console mode.
+
+----------------------------------------------------------------------
+
+状況が分かってきた。結局 ConPTY は一つの端末エミュレータであり、純粋な
+PTY などではない。そして Cygwin でやろうとしている事の問題は、2つの端
+末エミュレータの描画を一貫性を持たせて組み合わせる事ができるか、という
+事になる。
+
+Microsoft は ConPTY と称して一体何を考えてこんな設計にしたのだろう、と
+思ったがよく考えたら Microsoft は ConPTY を Windows アプリケーションが
+Unix 端末で動くように提供したのであって、色々混ぜ合わせて使う事を想定
+した訳ではないのではないか。と思ったがそうでもない。ちゃんと ANSI のイ
+ンターフェイスで動くアプリケーションも対応するという事にしている。そし
+てそれらを両方使える様にする為に内部に本物の仮想端末を持たせるというの
+は自然な発想である。然し、それならば認識できないシーケンスは全て吸収し
+てしまうべきであって、適当にパススルーしながら独自解釈したりするのがお
+かしいんだ。

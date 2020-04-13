@@ -1,0 +1,137 @@
+Subject: Cygwin-3.1.3: Terminal contents are overwritten by the
+  contents of internal pseudo console on the start of non-Cygwin
+  programs
+
+Hi, this is another report replated to the pseudo console.
+
+Description:
+
+  When a non-Cygwin program is started for the first time in that PTY
+  in terminal emulators such as Mintty, Xterm, Urxvt and GNU Screen,
+  the terminal contents are overwritten by less graphical ones.  I
+  guess that the contents of the internal pseudo console (which is
+  constructed in the background?) is somehow output and overwrites the
+  original contents of those functional terminal emulators.
+
+  This is reproduced with the latest snapshot and also with the latest
+  commit 3a71c4638.
+
+Repeat-By:
+
+  Open Mintty or Xterm and run the following commands (with Bash):
+
+  $ x86_64-w64-mingw32-gcc -xc - -o nocyg.exe <<< 'main(){}'
+  $ printf '\e[%smhello\e[m\n' {0..9}
+  $ ./nocyg.exe
+
+  With the first line, the simplest non-Cygwin program is compiled.
+  With the second line, "hello" is printed with various graphic
+  styles.  However, when one runs a non-Cygwin command in the third
+  line, those graphic styles are reset (i.e., overwritten by contents
+  of a less functional terminal).
+
+Details:
+
+* If I start mintty or xterm with the environment variable
+  `CYGWIN=disable_pcon', the problem does not occur.
+
+* Before the commit `e38f2dc9b' (Cygwin: pty: Revise code waiting for
+  forwarding again.), this occured every time a non-Cygwin command is
+  executed.  But after the commit, this only occurs for the first
+  execution of any non-Cygwin program in that PTY session.
+
+* The problem is not restricted in just clearing graphic styles of
+  characters.  For GNU Screen I use Screen-specific terminal sequences
+  "ESC k ... ST" in my shell prompt to set the title of each window.
+  But the overwriting contents seem to be constructed by another
+  terminal which does not recognize this terminal sequence.  As a
+  results, the layout of terminal contents after the non-Cygwin
+  program is completely broken.  The problem should occur with any
+  other functionalities which are supported by modern terminal
+  emulators but not by pseudo console.
+
+* As well as non-Cygwin programs, also Cygwin programs `ssh', `scp' or
+  `git push/pull' with SSH connections cause the same results.  I
+  guess SSH utilities internally use non-Cygwin programs.  (Actually I
+  originally faced with this problem with these "Cygwin" commands.)
+
+
+Best regards,
+
+Koichi
+
+----------------------------------------------------------------------
+
+Thank you for your quick response and the explanations and pointers to
+related discussions.
+
+> From https://www.cygwin.com/ml/cygwin/2019-10/msg00063.html
+>
+> The pseudo console has its own screen buffer behind, and redraws the
+> screen based on the screen buffer at undetermined timing.
+
+I'm not sure if I correctly understand the situation, but does this
+mean we cannot prevent the pseudo console from redrawing the screen
+(i.e., sending some texts and escape sequences to the terminal
+emulators) based on its background screen buffer?  For that reason do
+we need to keep the terminal contents of both the terminal emulator
+and the background screen consistent with each other?
+
+
+> > * The problem is not restricted in just clearing graphic styles of
+> >   characters.  For GNU Screen I use Screen-specific terminal sequences
+> > (snip)
+>
+> How can I reproduce this?
+
+For example, in GNU screen,
+
+  [user@hostname 0 ~]$ PS1='\[\ek[\u@\h \j \w]$ $BASH_COMMAND\e\\\][\u@\h \j \W]\$ '
+  [user@hostname 0 ~]$
+  [user@hostname 0 ~]$
+  [user@hostname 0 ~]$
+  [user@hostname 0 ~]$
+  [user@hostname 0 ~]$
+  [user@hostname 0 ~]$
+  [user@hostname 0 ~]$
+  [user@hostname 0 ~]$ ./nocyg
+
+where ./nocyg is the program in the original mail.  Then it turnes
+into something like:
+
+  [user@hostname 0 ~]$ PS1='\[\e]0;\w\a\]\n\[\e[32m\]\u@\h \[\e[33m\]\w\[\e[[user
+  @hostname 0 ~]$ PS1='\[\e]0;\w\a\]\n\[\e[32m\]\u@\h \[\e[33m\]\w\[\e[
+  [user@hostname 0 ~]$ PS1='\[\e]0;\w\a\]\n\[\e[32m\]\u@\h \[\e[33m\]\w\[\e[
+  0m\]\n\$ '[user@hostname 0 ~]$
+
+  [user@hostname 0 ~]$ PS1='\[\ek[\u@\h \j \w]$ $BASH_COMMAND\e\\\][\u@\h \j
+   \W]\$ '[user@hostname 0 ~]$
+  [user@hostname 0 ~]$ PS1='\[\ek[\u@\h \j \w]$ $BASH_COMMAND\e\\\][\u@\h \j
+   \W]\$ '[user@hostname 0 ~]$
+  [user@hostname 0 ~]$ PS1='\[\ek[\u@\h \j \w]$ $BASH_COMMAND\e\\\][\u@\h \j
+   \W]\$ '[user@hostname 0 ~]$
+  [user@hostname 0 ~]$ PS1='\[\ek[\u@\h \j \w]$ $BASH_COMMAND\e\\\][\u@\h \j
+   \W]\$ '[user@hostname 0 ~]$
+  [user@hostname 0 ~]$ PS1='\[\ek[\u@\h \j \w]$ $BASH_COMMAND\e\\\][\u@\h \j
+   \W]\$ '[user@hostname 0 ~]$
+  [user@hostname 0 ~]$ PS1='\[\ek[\u@\h \j \w]$ $BASH_COMMAND\e\\\][\u@\h \j
+   \W]\$ '[user@hostname 0 ~]$ ./nocyg
+  [user@hostname 0 ~]$
+
+> > * As well as non-Cygwin programs, also Cygwin programs `ssh', `scp' or
+> >   `git push/pull' with SSH connections cause the same results.  I
+> >   guess SSH utilities internally use non-Cygwin programs.  (Actually I
+> >   originally faced with this problem with these "Cygwin" commands.)
+> 
+> I cannot reproduce this. Cygwin ssh, scp and git does not triggers
+> redraw screen in my environment.
+> 
+> Do you surely execute *cygwin* command rather that windows one?
+
+Yes, I'm using those commands from Cygwin (the command "type ssh scp
+git" shows /usr/bin/... for all of them).
+
+I'm sorry I found the reason.  I have been specifying a shell script
+for the SSH option `ProxyCommand' in my `~/.ssh/config'.  In that
+shell script, I was using a Windows system command to retrieve the
+current network configuration.
