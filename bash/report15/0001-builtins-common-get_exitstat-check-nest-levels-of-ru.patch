@@ -1,0 +1,91 @@
+From af8f762464d6ae6c029e76147b591f0c2e522eed Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 17 Apr 2020 00:08:40 +0900
+Subject: [PATCH] builtins/common (get_exitstat): check nest levels of running
+ trap for no-argument "return"
+
+---
+ builtins/common.c |  3 ++-
+ trap.c            | 11 +++++++++++
+ trap.h            |  1 +
+ 3 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/builtins/common.c b/builtins/common.c
+index 3c9ac49d..bb64847d 100644
+--- a/builtins/common.c
++++ b/builtins/common.c
+@@ -563,7 +563,8 @@ get_exitstat (list)
+ 	 change $?.  The DEBUG trap gets to change $?, though, since that is
+ 	 part of its reason for existing, and because the extended debug mode
+ 	 does things with the return value. */
+-      if (this_shell_builtin == return_builtin && running_trap > 0 && running_trap != DEBUG_TRAP+1)
++      if (this_shell_builtin == return_builtin && running_trap > 0 && running_trap != DEBUG_TRAP+1 &&
++	running_trap_nest == funcnest + sourcenest)
+ 	return (trap_saved_exit_value);
+       return (last_command_exit_value);
+     }
+diff --git a/trap.c b/trap.c
+index c5687187..895ef684 100644
+--- a/trap.c
++++ b/trap.c
+@@ -113,6 +113,13 @@ int pending_traps[NSIG];
+    trap command (e.g., when `return' is executed in the trap command). */
+ int running_trap;
+ 
++/* Set to the number of nest for effective return nests (funcnest +
++   sourcenest) where the trap action is started.  Note that
++   `return_catch_flags != funcnest + sourcenest' because
++   return_catch_flags also counts the nest of "evalstring" which needs
++   to run some cleanup codes on `return'. */
++int running_trap_nest;
++
+ /* Set to last_command_exit_value before running a trap. */
+ int trap_saved_exit_value;
+ 
+@@ -299,6 +306,7 @@ run_pending_traps ()
+   register int sig;
+   int old_exit_value, x;
+   int old_running;
++  int old_running_trap_nest;
+   WORD_LIST *save_subst_varlist;
+   HASH_TABLE *save_tempenv;
+   sh_parser_state_t pstate;
+@@ -336,6 +344,7 @@ run_pending_traps ()
+   ps = save_pipestatus_array ();
+ #endif
+   old_running = running_trap;
++  old_running_trap_nest = running_trap_nest;
+ 
+   for (sig = 1; sig < NSIG; sig++)
+     {
+@@ -347,6 +356,7 @@ run_pending_traps ()
+ 	    /*continue*/;
+ 
+ 	  running_trap = sig + 1;
++	  running_trap_nest = funcnest + sourcenest;
+ 
+ 	  if (sig == SIGINT)
+ 	    {
+@@ -447,6 +457,7 @@ run_pending_traps ()
+ 
+ 	  pending_traps[sig] = 0;	/* XXX - move before evalstring? */
+ 	  running_trap = old_running;
++	  running_trap_nest = old_running_trap_nest;
+ 	}
+     }
+ 
+diff --git a/trap.h b/trap.h
+index bf2c9a1e..0cdafe83 100644
+--- a/trap.h
++++ b/trap.h
+@@ -63,6 +63,7 @@ extern char *trap_list[];
+ extern int trapped_signal_received;
+ extern int wait_signal_received;
+ extern int running_trap;
++extern int running_trap_nest;
+ extern int trap_saved_exit_value;
+ extern int suppress_debug_trap_verbose;
+ 
+-- 
+2.21.1
+

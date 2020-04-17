@@ -3,6 +3,56 @@
   Memo
 ------------------------------------------------------------------------------
 
+2020-04-15
+
+* tempenv が絡んだ時の unset の振る舞いが変だ。
+  以下は unset の状態になると期待するが実際には global が見えてしまう。
+  Bash-4.2 までは期待通りの動作だが、Bash-4.3 以降でこうなってしまっている。
+
+  f1() {
+    local v=local
+    unset -v v
+    echo "v=${v- (unset)}"
+  }
+  v=global
+  v=tempenv f1
+
+  そもそも何処でこの処理をしているのかについて確認する。
+  先ず初めに builtins/set.def (builtin_unset) が呼び出される。
+  そして variables.c (unbind_variable(name)) が呼び出される。
+  其処から variables.c (makunbound(name, variable_context)) が呼び出される。
+  この関数の中で localvar_unset 等の判定が行われている。
+  variable_context と比較して一致するかどうかを判定している。
+
+  うーん。ここで別の文脈という事になってしまっているという事だろうか。
+  然し、不思議なのは local builtin で variable_context に値が設定される訳ではないという事。
+
+  * 取り敢えず本当にここで違う物が得られているのかという事を確認するのが最初。
+    と思って実際に試してみた所、ちゃんと両者は一致していて 1 になっている。
+    此処で確認しておいてよかった。もうすぐで variable_context が何処で設定されているか
+    調べ始めてしまうところであった。だとするともっと別の場所で判定が行われている。
+  * 別の条件 local_p によってスキップしているのだろうかと思ったがそうでもなかった。
+  * 更に nofree_p が設定されていない事によって勝手に削除されてしまうのだろうか、
+    と思ったが確認してみた所、普通のローカル変数でも tmpenv でも nofree_p は 0 だった。
+  * 駄目だ FREE する所まで振る舞いが一致している。という事はまた別の場所で何か処理が行われている?
+    試しに dynamic unset の時の path で出力する様にして見たが、
+    其処は通過していない様だ。という事は何か別の経路で変数が削除されてしまっている。
+  * 因みに tempvar_p についてはちゃんと有効になっている。
+    或いは export 属性がついていると変数が即座に削除されてしまう等の事があるのだろうか。
+    もしくは tempvar が export 属性を持っていない場合には無視されてしまうというバグがあるのか。
+
+  とここで気づいてしまったのだが bash-dev では直っている。
+  突き止めた。f65f3d54 で修正されている。以下の ChangeLog がこれに対応する物だ。
+
+  |             2/6
+  |             ---
+  | variables.c
+  |   - make_local_variable: make sure local variables that have the same
+  |     names as variables found in the temporary environment are marked as
+  |     local. From Grisha Levit <grishalevit@gmail.com> back in 12/2018
+
+
+
 2020-03-21
 
 * "local -p" で flags が出力されない。
@@ -77,6 +127,219 @@
 -------------------------------------------------------------------------------
   Done
 -------------------------------------------------------------------------------
+
+2020-04-17
+
+* また別の議論で Bash の変な振る舞いを見つけた。
+  https://github.com/akinomyoga/ble.sh/issues/48
+
+  | $ test_command='f1() { false; return; }; trap "f1 && echo unexpected" WINCH; kill -WINCH 0'
+  | $ bash-2.05b -c "$test_command"
+  | $ bash-3.1 -c "$test_command"
+  | $ bash-3.2 -c "$test_command"
+  | $ bash-4.0 -c "$test_command"
+  | $ bash-4.1 -c "$test_command"
+  | $ bash-4.2 -c "$test_command"
+  | $ bash-4.3 -c "$test_command"
+  | $ bash-4.4 -c "$test_command"
+  | unexpected
+  | $ bash-5.0 -c "$test_command"
+  | unexpected
+  | $ bash-dev -c "$test_command"
+  | unexpected
+
+  Bash のソースコードを確認すると buitins/common.c (get_exitstat) に説明が書かれている。
+
+  | if (list == 0)
+  |   {
+  |     /* If we're not running the DEBUG trap, the return builtin, when not
+  |        given any arguments, uses the value of $? before the trap ran.  If
+  |        given an argument, return uses it.  This means that the trap can't
+  |        change $?.  The DEBUG trap gets to change $?, though, since that is
+  |        part of its reason for existing, and because the extended debug mode
+  |        does things with the return value. */
+  |     if (this_shell_builtin == return_builtin && running_trap > 0 && running_trap != DEBUG_TRAP+1)
+  |       return (trap_saved_exit_value);
+  |     return (last_command_exit_value);
+  |   }
+
+  理由は書かれていないが、bug-bash で検索した感じだと誰かが文句を言ったという事だろうか。
+  git blame で確認してみる事にする。以下のような感じである。
+
+  939d190e0 (Chet Ramey 2014-03-21 14:15:01 -0400  559
+  e2f12fdf5 (Chet Ramey 2014-04-07 10:46:02 -0400  560
+
+  7117c2d22 (Jari Aalto 2002-07-17 14:10:11 +0000 497)   if (list == 0)
+  939d190e0 (Chet Ramey 2014-03-21 14:15:01 -0400 498)     {
+  e2f12fdf5 (Chet Ramey 2014-04-07 10:46:02 -0400 499)       /* If we're not running the DEBUG trap, the return builtin, when not
+  e2f12fdf5 (Chet Ramey 2014-04-07 10:46:02 -0400 500)           given any arguments, uses the value of $? before the trap ran.  If
+  e2f12fdf5 (Chet Ramey 2014-04-07 10:46:02 -0400 501)           given an argument, return uses it.  This means that the trap can't
+  e2f12fdf5 (Chet Ramey 2014-04-07 10:46:02 -0400 502)           change $?.  The DEBUG trap gets to change $?, though, since that is
+  e2f12fdf5 (Chet Ramey 2014-04-07 10:46:02 -0400 503)           part of its reason for existing, and because the extended debug mode
+  e2f12fdf5 (Chet Ramey 2014-04-07 10:46:02 -0400 504)           does things with the return value. */
+  e2f12fdf5 (Chet Ramey 2014-04-07 10:46:02 -0400 505)       if (this_shell_builtin == return_builtin && running_trap > 0 && running_trap != DEBUG_TRAP+1)
+  939d190e0 (Chet Ramey 2014-03-21 14:15:01 -0400 506)           return (trap_saved_exit_value);
+  939d190e0 (Chet Ramey 2014-03-21 14:15:01 -0400 507)       return (last_command_exit_value);
+  939d190e0 (Chet Ramey 2014-03-21 14:15:01 -0400 508)     }
+
+  939d190e0 を確認してみる。
+
+  7117c2d22 (Jari Aalto 2002-07-17 14:10:11 +0000 497)   if (list == 0)
+  939d190e0 (Chet Ramey 2014-03-21 14:15:01 -0400 498)     {
+  939d190e0 (Chet Ramey 2014-03-21 14:15:01 -0400 499)       if (this_shell_builtin == return_builtin && running_trap)
+  939d190e0 (Chet Ramey 2014-03-21 14:15:01 -0400 500)          return (trap_saved_exit_value);
+  939d190e0 (Chet Ramey 2014-03-21 14:15:01 -0400 501)       return (last_command_exit_value);
+  939d190e0 (Chet Ramey 2014-03-21 14:15:01 -0400 502)     }
+
+  939d190e0~ ではどうだろうか。
+
+  7117c2d22 (Jari Aalto 2002-07-17 14:10:11 +0000 496)   if (list == 0)
+  7117c2d22 (Jari Aalto 2002-07-17 14:10:11 +0000 497)     return (last_command_exit_value);
+
+
+  1つ目の修正の説明は以下の様に書かれている。
+
+  >            3/11
+  >            ----
+  > 
+  > builtins/common.c
+  >   - get_exitstat: when running `return' in a trap action, and it is not
+  >     supplied an argument, use the saved exit status in
+  >     trap_saved_exit_value.  Fixes Posix problem reported by
+  >     Eduardo A. Bustamante L坦pez <dualbus@gmail.com>
+
+  2つ目の修正は以下の様になっている。
+
+  >            3/18
+  >            ----
+  > 
+  > builtins/common.c
+  >   - get_exitstat: update fix of 3/11 to allow the DEBUG trap to use the
+  >     current value of $? instead of the value it had before the trap
+  >     action was run.  This is one reason the DEBUG trap exists, and
+  >     extended debug mode uses it.  Might want to do this only in Posix
+  >     mode
+
+
+  議論は以下にある。POSIX によると return が trap action の中で呼び出された時、
+  必ず trap 直前の値になるという事らしい。うーん。
+  https://lists.gnu.org/archive/html/bug-bash/2014-03/msg00053.html
+
+  恐らく2つ目の修正は以下によってなされた。
+  https://lists.gnu.org/archive/html/bug-bash/2018-04/msg00047.html
+
+  うーん。と思って他のシェルを調べたら振る舞いがばらばらである。
+
+  | $ mksh -c "$test_command"
+  | unexpected
+  | $ ksh -c "$test_command"
+  | unexpected
+  | $ yash -c "$test_command"
+  | unexpected
+  | $ ash -c "$test_command"
+  | $ dash -c "$test_command"
+  | $ zsh -c "$test_command"
+  | $ busybox sh -c "$test_command"
+  | $ posh -c "${test_command//WINCH/INT}"
+
+  https://lists.gnu.org/archive/html/bug-bash/2014-03/msg00053.html
+  の議論を改めて観察してみると Eduardo は
+  元々 trap action (trap の引数に指定したもの) の中にある return を意図している気がする。
+  然し Chet は trap handler が動いている時は無条件で return が
+  trap handler 起動直前の $? を返す様に変更した。
+
+  うーん。trap handler に指定した一番上の return だけが影響を受けるという実装はないのか。
+  zsh は例えばどの様に実装しているだろうか。
+  zsh は以下の設定でシグナルでループを終わらせる事を確認した。
+  $ trap 'echo TRAPINT; return 123' USR1
+  $ while (($?==0)); do :; done
+  と思ったがこれだと終了して当たり前なので振る舞いを確認できない。
+  というより、実際に $? がどうなったかを確かめる必要がある。
+
+  % trap 'echo TRAPINT; (exit 123); return' USR1
+  % f1() { while :; do for i in {1..100}; do (exit 111); done; done; }
+  % f1
+  TRAPINT
+  % echo $?
+  123
+
+  どうも return は普通に trap action の中での直前のコマンドを参照している様だ。
+
+  POSIX は一体どういう意図で書かれたのだろうか。
+  * trap の action に関数呼び出しなどの複雑なコマンドは指定できないという事?
+    然し、関数は一単語で呼び出せるし special utility を関数で実装する事も許している。
+    関数呼び出しをしてはいけないという事を考える必要があるとは思えない。
+    そう思うとやはり関数呼び出しの中でも return は同様に振る舞うべきなのか。
+  * 或いは f1() { 何かの処理; return; }; trap '処理色々; f1' などの様にして使うのが目的なのか。
+    然し、その様な使い方は考えにくいし、その様にするぐらいであれば、
+    trap 'f1; return' 等の様に書く気がする。
+
+  取り敢えず修正案を作ってそれから報告する事にする。
+  然しどの様に修正するのが良いか。
+
+  取り敢えず trap に入る瞬間の frame を覚えておいて、
+  その frame にいる時に限り return の戻り値を直前のコマンドのそれに置き換える。
+  その様に実装すれば良い筈である。
+
+  では trap に入る瞬間の frame をどの様に記録するか。
+  そもそも何処で trap に入るというのを検出する事は可能か。
+  取り敢えず running_trap が設定される状況について確認する。
+
+  * jobs.c で running_trap = SIG_CHLD + 1 が設定されている。
+    その後で 0 にクリアされている。
+  * trap.c (run_pending_traps) において running_trap = sig + 1 が実行されている。
+    trap handler は主に此処で走るということの様である。
+
+    * 此処で $? を global trap_saved_exit_value に保存している。
+      但し、この保存が行われるのは複数の handler を処理する前である。
+      つまり各 handler が実行される度に更新されるのではなくて、
+      何れの handler が実行されるよりも前の値が記録されている。
+
+    * もし return の位置を記録するのだとしたら $? とは違って、
+      各 handler が実行される毎に毎回記録し直す必要がある。
+      そういう意味で running_trap を設定する度に設定し直す。
+
+      一方で old_running という変数がある。
+      これが示唆する事は trap handler が入れ子になって呼び出される可能性があるという事。
+      そして、そうだとすると return_frame に関しても old_return_frame 等に
+      記録して入れ子に対応できる様にしなければならない。
+
+      或いは return の文脈を直接記録しなくても関数の呼び出しの
+      深さのような変数があればそれでも良い。そういう意味では
+      BASH_SOURCE か FUNCNAME の様な変数がどの様に更新されるのかを見ても良い。
+
+  | FUNCNAME について調べるとこれの実体は funcname_a という配列オブジェクトの様だ。
+  | * そしてこれは execute_cmd.c 4767, 4901 において array_pop, array_push されている。
+  |   前者は restore_funcarray_state であり、後者は execute_function である。
+  | * 他に builtins/evalfile.c で array_push が実行されている。
+  |   これは source, . であろう。
+  | * それから shell.c で array_push が実行されている。
+  |   これは見た所は最初の初期化としてグローバルに対応する要素を設定しているだけである。
+  | 
+  | と思ったら丁度 funcnest という変数がいい感じに管理されている。
+  | 実はこれを記録すれば良いのではないだろうか。
+  | * execute_cmd.c の execute_function では funcnest++ されている。
+  | * shell.c では funcnest は設定されていない。
+  | * evalfile.c では funcnest ではなくて sourcelevel++ が実行されている。
+  | 
+  | よく見ると return_catch_flag++ されている様だ。
+  | * evalfile.c で return_catch_flag++ されている。
+  | * 実は evalstring.c でも return_catch_flag++ されている。
+  |   コメントの説明によると eval の中で return をした場合には、
+  |   一旦捕まえて clean up をしてから更に外側に行くとの事。
+
+  総合すると return_catch_flag が使えそうな気がするが、
+  これは実は eval も数えてしまうので使えない。
+  他に funcnest, sourcenest, evalnest, sourcelevel 等の変数がある。
+  evalnest は eval の数を数えるのに使えるかと思いきや、
+  何だか関係ない場所でも inc/dec されている (trap.c)。
+  普通に考えたら return_catch_flag で evalstring の分を除いた物を記録したい。
+  然し、evalstring は eval の他にも様々な場所で使われているから evalnest は使えない。
+  色々考えると funcnest + sourcenest が使えるという事の気がする。
+
+  取り敢えず修正した。そして修正した bash を使って幾つかテストしてみた。
+  どうやら期待通りに動いている様に見える。
+  次にするべき事は Bash に report を書く事である。提出した。
 
 2019-01-22
 

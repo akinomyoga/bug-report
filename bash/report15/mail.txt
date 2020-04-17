@@ -1,0 +1,212 @@
+From: Koichi Murase <myoga.murase@gmail.com>
+To: bug-bash@gnu.org
+Subject: Exit status by no-argument `return' for function calls in trap handlers
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -O2 -g -pipe -Wall -Werror=format-security
+  -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS -fexceptions
+  -fstack-protector-strong -grecord-gcc-switches
+  -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1
+  -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1 -m64 -mtune=generic
+  -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection
+  -Wno-parentheses -Wno-format-security
+uname output: Linux chatoyancy 5.1.20-300.fc30.x86_64 #1 SMP Fri Jul
+  26 15:03:11 UTC 2019 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-redhat-linux-gnu
+
+Bash Version: 5.0
+Patch Level: 11
+Release Status: release
+
+Summary:
+
+  The behavior of no-argument `return' in trap handlers has been
+  changed from Bash 4.4 to follow the description of POSIX.  Recently
+  this behavior caused problems in my Bash script.  I am wondering
+  whether this change actually matches with the behavior meant by
+  POSIX because the change introduces unreasonable constraints in
+  writing shell functions.
+
+  For the condition of this special treatment of `return', POSIX says
+  ``When return is executed in a trap action''.  Here are two possible
+  interpretation: (A) `return's specified in the argument string of
+  `trap' builtin are affected, or (B) all the `return's in entire
+  runtime function-call tree in trap processing are affected.  I guess
+  that POSIX wanted to provide a way to exit functions that received
+  signals without changing the value of `$?'.  If that is the case,
+  the POSIX should have meant (A).  However, the current Bash
+  implementation behaves as if it follows the interpretation (B).
+
+  I would like to hear what do you think of this.
+
+Description:
+
+  In the latest release of Bash 5.0.16 and in the current devel
+  branch, when function calls in trap handlers are terminated by
+  no-argument `return' builtin, the exit status is always the value of
+  $? at the moment that the trap handler started.  This behavior was
+  introduced in Bash 4.4.
+
+  I noticed this behavior in debugging an infinite loop caused by
+  SIGWINCH reported at https://github.com/akinomyoga/ble.sh/issues/48.
+  The structure of the code related to the infinite loop can be
+  summarized in the following small script.
+
+  ----------------------------------------
+  #!/bin/bash
+
+  function check_loop_condition {
+    if ((index++%10==0)); then
+      echo index=$index
+      ((index<100))
+      return # *** return exit status of the previous command ***
+    fi
+
+    : do something
+    return 0
+  }
+
+  function update {
+    local index=0
+    while check_loop_condition; do :; done
+  }
+
+  trap 'update' USR1
+  kill -USR1 $$
+  ----------------------------------------
+
+  If the function `update' is called normally (outside of trap
+  handlers), it will print the numbers {1..101..10} and terminate
+  soon.  However, when it is called in trap handlers, it falls into an
+  infinite loop in Bash 4.4+.  This is because the no-argument
+  `return' in the function `check_loop_condition' always returns `$?'
+  before the trap started regardless of the exit status of
+  `((index<100))'.
+
+  If all the `return's in the entire function-call tree are affected
+  in trap processing as in the interpretation (B), one cannot reliably
+  use no-argument `return' to return the last-command exit status.  To
+  avoid the problem, one has to always write the exit status
+  explicitly as `return $?', and there is no use case for no-argument
+  `return' at all.  I don't think this is meant by POSIX which defines
+  the behavior of no-argument `return' explicitly.  Or, maybe one
+  cannot use shell functions in trap handlers.  Note that in my
+  script, I need to re-render the terminal contents on SIGWINCH so
+  that I need to run complicated shell programs implemented as shell
+  functions.  POSIX does not prohibit the use of shell functions in
+  trap handlers.
+
+  Here I checked how the behavior was changed in Bash 4.4.  The
+  related commits are 939d190e0 (commit bash-20140314 snapshot) and
+  e2f12fdf5 (commit bash-20140321 snapshot).  The relevant ChangeLog
+  is quoted as follows:
+
+  >            3/11
+  >            ----
+  > 
+  > builtins/common.c
+  >   - get_exitstat: when running `return' in a trap action, and it is not
+  >     supplied an argument, use the saved exit status in
+  >     trap_saved_exit_value.  Fixes Posix problem reported by
+  >     Eduardo A. Bustamante L坦pez <dualbus@gmail.com>
+  > 
+  > 
+  >            3/18
+  >            ----
+  > 
+  > builtins/common.c
+  >   - get_exitstat: update fix of 3/11 to allow the DEBUG trap to use the
+  >     current value of $? instead of the value it had before the trap
+  >     action was run.  This is one reason the DEBUG trap exists, and
+  >     extended debug mode uses it.  Might want to do this only in Posix
+  >     mode
+
+  This change is made after the following discussion:
+
+  https://lists.gnu.org/archive/html/bug-bash/2014-03/msg00053.html
+
+  Taking the following comment and the code example by the original
+  reporter Eduardo, he seems to assume the interpretation (A), but
+  what was actually implemented was the interpretation (B).
+
+  > So as I read it, `action' refers to the whole string.
+
+  Also, I have checked the behavior of other shells. `zsh', `ash'
+  family (dash/ash, busybox sh) and `posh' does not implement the
+  special treatment of `return' in trap handlers.  `ksh' family
+  (ksh93, mksh) and `yash' implements the interpretation (B).  There
+  is no existing implementation of (A).  But currently I still think
+  the intepretation (A) is reasonable.  If there is rationale for the
+  interpretation (B), I would like to know it.
+
+Repeat-By:
+
+  Here I provide a few test cases for the special treatment of
+  no-argument `return'.  The following example demonstrates the
+  behavior of no-argument `return' appearing directly in the trap
+  argument.  The expected result is `exit=0' but not `exit=222' as
+  `return' should return the exit status before the trap handler
+  starts as required by POSIX.  Bash 4.3 and before outputs `exit=222'
+  because it does not implement the special treatment.  Bash 4.4 and
+  later ourputs `exit=0' as expected.
+
+  ----------------------------------------
+  #!/bin/bash
+
+  setexit() { return "$1"; }
+  trap 'setexit 222; return' USR1
+
+  process() { kill -USR1 $$; }
+  process
+  echo exit=$?
+  ----------------------------------------
+
+  The next example also demonstrates the behavior of no-argument
+  `return' directly specified in the trap argument.  The expected
+  result is to print `exit=0'.  Bash 4.3 and earlier outputs
+  `exit=123', and Bash 4.4 and later outputs `exit=0' as expected by
+  POSIX.
+
+  ----------------------------------------
+  #!/bin/bash
+
+  function setexit { return "$1"; }
+
+  trap 'setexit 123; return' USR1
+
+  function loop { while :; do :; done; }
+
+  function get_loop_exit { loop; echo "exit=$?"; }
+
+  { sleep 1; kill -USR1 $$; } &
+  get_loop_exit
+  ----------------------------------------
+
+  The third example is the case for `return' in function calls in trap
+  processing.  If we adopt the interpretation A (B), the expected
+  result is `A' (`B').  Bash 4.3 and earlier outputs `A', and Bash 4.4
+  and later outputs `B'.
+
+  ----------------------------------------
+  #!/bin/bash
+
+  check() { false; return; }
+  handle() { check && echo B || echo A; }
+  trap handle USR1
+  kill -USR1 $$
+  ----------------------------------------
+
+Fix:
+
+  I attach a patch which changes the behavior to match with the more
+  reasonable interpretation (A).  To detect the current nest level of
+  returns, I initially thought about using the variable
+  `return_catch_flags', but it turned out that the variable also
+  counts the levels of `evalstring' so I decided to use `funcnest +
+  sourcenest' instead.  The patch is tested with the above four cases.
+
+--
+Koichi
