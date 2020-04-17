@@ -1,0 +1,275 @@
+
+
+2020-04-10
+
+* note: exec 2>&- してエラーメッセージが出力されると
+  その場で osh が終了してしまう。
+  まあ、これは一つの可能な動作である気もする。
+
+  →と思ったがこれはどうやら3桁の単語はリダイレクトではないと判断されて
+  exec 100>&- がコマンド exec 100 >&- と解釈されているからだった様だ。
+
+* note: ble/builtin/trap のエラーは trap -l の形式の違いに起因する。
+
+
+
+------------------------------------------------------------------------------
+  Done
+------------------------------------------------------------------------------
+
+2020-04-15
+
+* discussion on dynamic unset [osh0002]
+
+  書きかけて少し Bash を試したら一体どういう動作になっているのか分からない。
+
+  Bash のソースを観察すると `temporary_env` という所に `bind_tempenv_variable` という関数を用いて変数を記録している。
+  それとは別に local スコープにもちゃんと記録している様である。
+  実はそもそもこれが今考えている `var=value f1` の形式の一次代入に対応するものなのかどうかも不明ではある。
+  `temporary_env` は `assign_in_env` という関数を用いた時に生成されている。他で生成される事はないようである。
+  そしてこの関数は variables.c (`expand_word_list_internal`) で使用されている。
+  説明を読むとやはり `assign_in_env` という関数で inline assignment を処理している様に見える。
+  →結局 bash-dev ではこの変な振る舞いは修正されているという事が分かった。
+
+  色々試したが分からない。
+  これは tempenv に対する unset かどうかという様に判断するのではなくて、
+  previous scope なのか current scope なのかという様に判断するべきの気がする。
+
+  その後また色々調べるとやはり振る舞いがよく分からない。
+  取り敢えず最新の Bash でどう振る舞うのか調べる。
+
+  * unlocal は tempenv と local を全て削除する?
+    * [global,tempenv,local] の時に unlocal すると tempenv/local の両方が削除される。
+    * [global,tempenv] や [global,local] の時にも削除される。
+    * ToDo: eval で tempenv を階層的に定義している場合はどうか?
+    →やはりこれは勘違いの可能性が高い。
+  * unset は local に対しては value unset になるが、
+    tempenv に対しては dynamic unset になっている。
+    これが意味する所は tempenv は previous-scope に属しているという事か?
+    或いは tempenv flag でコントロールしている可能性?
+  * 関数呼び出しに指定した tempenv は local と scope を共有する。
+    * 棄却: これは check7d で tempenv に対して local しても値が変化しない事と、
+      →check7f,check7g でまた微妙な結果になった。check7f の結果を見ると、
+      local しても値が変化しないという事は同じ scope かどうかに依らない。
+    * check7c で tempenv,local が一緒に unlocal される事から推測できる。
+  * ToDo: eval で階層的に tempenv を作成して、
+    更に階層的に local を設定すると何が起こる?
+
+  現状の仮説
+
+  * (check7c) 関数呼び出しに使用した tempenv は local と scope を共有する。
+    途中で eval を挟むなどすると独立した scope になる。
+  * (check7f) また各変数は tempenv かどうかの属性を持つ。
+    local で上書きすると tempenv 属性は失われる。
+  * (check7d,check7g) local 宣言は tempenv の値を必ず継承する。
+    その tempenv がずっと上で定義されていても同様である。
+    export 属性を付けるだけでは値を継承しない。
+
+  まとめ。
+
+  * 関数は独自の local-context を持つ。
+    追加で、関数内で v=tempenv eval '...' を用いて複数の nested-context を作成できる。
+    各 context に定義される cell は tempenv 属性がある。
+    ここでは tempenv 属性がある物を tempenv としない物を localvar と呼ぶ事にする。
+  * 関数呼び出しに指定した tempenv はその関数の local-context に作られる。
+
+  * local 宣言は同じ関数内の context に変数が見つかればそれを使う。
+    もしそれが tempenv であれば tempenv 属性を削除して通常の localvar に変更する。
+
+    もし関数内に変数が見つからなければ、local-context に新しく変数を定義する。
+    * 初期値: local 宣言で初期値が指定されていればそれを使う。`shopt -s
+      localvar_inherit` が設定されていれば関数外の同名の変数の値を用いる。
+      関数外の同名の変数が tempenv であればその変数の値を用いる。そうで
+      なければ Undef 状態で初期化する。
+
+  * `shopt -s localvar_unset` が設定されている時は常に value-unset になる。
+    unset は同じ関数内の localvar に対しては value-unset になる。
+    それ以外の場合 (他の関数及び tempenv) に対しては常に cell-unset である。
+
+  以下は書きかけたけれど取り下げになった reply
+
+  | ## Scope of tempenv and local variables
+  |
+  | I investigated the interaction of tempenv and unset again with the
+  | devel branch.
+  |
+  | First I have checked `unset` against local variables that shadows
+  | tempenv (see the following section "Test 1" for detail).  This is my
+  | observation: Before Bash 4.3, it seems that tempenv and local
+  | variables are created in two distinct scopes.  From Bash 4.3, tempenv
+  | and local variables are defined in the same scope, *i.e.*, local
+  | variables overwrites tempenv of the function call.  But at the same
+  | time, the above-mentioned bug has been introduced for localvar
+  | `unset`.  From Bash 5.1, the localvar `unset` bug for local variables
+  | overwriting tempenv has been fixed.
+  |
+  | <details><summary>Test 1</summary>
+  |
+  | ```bash
+  | #!/bin/bash
+  |
+  | unlocal() { unset -v "$1"; }
+  |
+  | echo "# localvar unset (stack: [global, tempenv, local])"
+  | f1() {
+  |   local v=local
+  |   unset v
+  |   echo "v: ${v-(unset)}"
+  | }
+  | v=global
+  | v=tempenv f1
+  |
+  | echo "# dynamic unset (stack: [global, tempenv, local])"
+  | f1() {
+  |   local v=local
+  |   unlocal v
+  |   echo "v: ${v-(unset)}"
+  | }
+  | v=global
+  | v=tempenv f1
+  | ```
+  |
+  | Bash 2.05b
+  |
+  | ```
+  | # localvar unset (stack: [global, tempenv, local])
+  | v: (unset)
+  | # dynamic unset (stack: [global, tempenv, local])
+  | v: tempenv
+  | ```
+  |
+  | Bash 4.3 (bug: localvar unset)
+  |
+  | ```
+  | # localvar unset (stack: [global, tempenv, local])
+  | v: global
+  | # dynamic unset (stack: [global, tempenv, local])
+  | v: global
+  | ```
+  |
+  | Bash devel branch
+  |
+  | ```
+  | # localvar unset (stack: [global, tempenv, local])
+  | v: (unset)
+  | # dynamic unset (stack: [global, tempenv, local])
+  | v: global
+  | ```
+  |
+  | Bash devel branch (`shopt -s localvar_unset`)
+  |
+  | ```
+  | # localvar unset (stack: [global, tempenv, local])
+  | v: (unset)
+  | # dynamic unset (stack: [global, tempenv, local])
+  | v: (unset)
+  | ```
+  | </details>
+
+2020-04-10
+
+* . lib/test-util.sh > util.txt
+  で出力が戻ってこない。。。
+
+  $ . lib/test-util.sh | sed 's/\x1b\[[ -?]*[@-~]//g' > test-util.txt
+
+  →これに関しては ble/fd#alloc を {}>&- を使う様に変更したら直った。
+  : 2>/dev/null >&30 と同じ問題によるバグであろう。
+  もし未だ直っていないのだとしたら
+  また後で再現するだろうから今は解決したと思って良い。
+
+* done: is-running-in-subshell が何故か動かない。
+  ble/util/getpid はちゃんと動いている様に見える。
+  ble/util/getpid; echo "BASHPID=$BASHPID pid=$(sh -c 'echo $PPID') SID=$$" >&2
+
+* done: fd#alloc すると 2>/dev/null になる。何故?
+  fun { echo hello; } 2>/dev/null で fd がそのままになる様だ。
+  と思ったが再現しない。
+  これは : 2>/dev/null >&30 という構造で再現する様だ。
+
+* done: NYI: $BASHPID 報告した。
+
+* これは正直どうても良いコメントなのでコメントしない。
+  何より @Crestwave が取り下げたのをつつくのは良くない。
+
+  @Crestwave Thank you for the suggestion! Actually, arithmetic
+  evaluations occur on each argument of let separately. Also, I
+  noticed that Oil is not POSIX-compatible so parameter expansions in
+  arithmetic commands do not work as expected in Oil. I adjusted the
+  definition for Oil. I'm currently using the following definition as
+  a workaround for testing ble.sh.
+
+  function let { local __expr; for __expr; do eval "(($__expr))"; done; }
+
+
+2020-04-08
+
+* https://github.com/oilshell/oil/issues/653
+
+  以下は書いたけれど無駄な事を話しているので削除する事にした。
+
+  You have written in the following comment that we will almost always
+  fix differences if a real program relies on them. But `ble.sh` is an
+  unusual shell program that uses the Bash features that other programs
+  would not use, so I think we don't have to fix them just because
+  `ble.sh` uses them.
+
+  > https://github.com/oilshell/oil/issues/701#issuecomment-610744233 by @andychu
+  >
+  > Any spec tests that reveal a difference between Oil and other shells
+  > are accepted, even if we don't actually fix them. (But we almost
+  > always will if a real program relies on the behavior, although it's
+  > a question of priorities.)
+
+2020-03-30
+
+  文脈: Recursive arithmetic evaluation を実装できないか
+
+  In the page, many different recursive natures in shells are
+  summarized, but the recursive arithmetic evaluation is not mentioned
+  there:
+
+  - The first example of the page is talking about the *extra
+    arithmetic subscript expansion*. I agree that this is confusing
+    and dangerous. But this is another feature different from the
+    *recursive arithmetic evaluation*.
+
+  - The link "[*Shell Double Expansion from Fedora
+    Security*](https://docs.fedoraproject.org/en-US/Fedora_Security_Team/1/html/Defensive_Coding/sect-Defensive_Coding-Shell-Double_Expansion.html)"
+    is talking about the recursive expansions for a single
+    command. This is a problem of the syntactic design of shells. The
+    *recursive arithmetic evaluation*, which is a runtime behavior, is
+    not related to this one.
+
+  - The link "[*Security Implications of Forgetting to Quote a
+    Variable*](https://unix.stackexchange.com/questions/171346/security-implications-of-forgetting-to-quote-a-variable-in-bash-posix-shells)"
+    discusses the quote which is not related to the recursive
+    expansion.
+
+  - The other syntactic discussion doesn't apply to the recursive
+    arithmetic evaluation either.
+
+
+2020-03-13
+
+  # oilshell で説明しようと思って書きかけた文章
+
+  The reason why `ble.sh` doesn't support `enter` for accepting
+  suggestion is: When user hits `enter` at the same time `ble.sh` shows
+  autosuggestions, `ble.sh` cannot tell whether the user intended to
+  execute the current command or to accept the suggestion (`ble.sh`
+  produces autosuggestions in backgrounds, so it can pop up at arbitrary
+  timing).
+
+  https://www.xfree86.org/current/ctlseqs.html
+
+  I had knowledge on terminals before implementing `ble.sh`. Around ten
+  years ago, I was using an open source terminal emulator Poderosa
+  written in C# which I was personally rewriting some part of the source
+  codes. To rewrite the source code of the terminal, I referenced
+  manuals of several terminals such as Xterm.  When I started to write
+  `ble.sh` which was about seven years ago, I haven't looked at source
+  codes of other line editors in implementing `ble.sh` but just observed
+  their behavior. And now, I have more knowledge on terminals because
+  I'm no longer using Poderosa but using a terminal which I wrote from
+  scratch in C++.
