@@ -1,15 +1,21 @@
 
-> But it is even more complicated than local scope and dynamic scope, because you also have these "temp bindings" to worry about.
+> But it is even more complicated than local scope and dynamic scope,
+> because you also have these "temp bindings" to worry about.
+> https://github.com/oilshell/oil/issues/653#issuecomment-613774521 by
+> @andychu
 
 I'm sorry, it took much time to investigate the behavior of these temporary bindings (`tempenv`).
 I have never tested the interaction of `unset` and `tempenv`, so
 I was investigating it with Bash and puzzled by its strange behavior.
 I think now I came to a conclusion. Here I summarize my investigation.
 
-## 1. tempenv and unset bug in Bash-4.3..5.0
+## 1. Bug in Bash-4.3..5.0 and tempenv/local/unset
 
 I was searching inside the Bash source code (where I found that these temporary bindings are called `tempenv` in the Bash source code).
 Finally it turned out that actually there is a bug in Bash-4.3..5.0, which was now fixed in the devel branch of Bash.
+Also, the treatment of `tempenv` has been largely changed from Bash 4.3, so **we need to test with the devel branch of Bash to know its behavior**.
+
+<details><summary>Details of Bug</summary>
 
 ```bash
 #!/bin/bash
@@ -71,8 +77,10 @@ https://lists.gnu.org/archive/html/bug-bash/2018-12/msg00031.html
 >
 > Is this intentional?
 
+</details>
 
-## 2. The interaction of tempenv/localvar/eval/unset
+
+## 2. Interaction of tempenv/localvar/eval/unset
 
 Here I summarize the behavior in Bash 4.3+.
 The treatment of tempenv has been largely changed in Bash 4.3.
@@ -85,7 +93,10 @@ In addition, we can create multilevel nested variable contexts in a function sco
 There are two types of the variable defined in any of the function-scope contexts: `tempenv` and `localvar`.
 Each variable has a flag to indicate if it is a `tempenv` or `localvar`.
 
+### Function call with `tempenv`
 The function call of the form `v=xxx fn` creates a `tempenv` in `local_context` of `fn`.
+
+### Builtin `local`
 
 When one attepts to create a variable by `local` builtin,
 Bash first searches an existing variable cell with the same name.
@@ -99,12 +110,26 @@ Bash first searches an existing variable cell with the same name.
   value is inherited from the existing variable.  Otherwise, the value
   is `Undef`.
 
+The behavior is complicated, so I don't think Oil should exactly
+follow Bash behavior particularly for the case where `eval` (nested
+contexts in a function) is involved (until we find any Bash script
+that uses such a structure like `v=xxx eval 'unset v` or `v=xxx eval
+'local v`.  `ble.sh` doesn't use such a structure).
+
+### Builtin `unset`
+
 `unset` can have two different behaviors: local-scope unset
 (`value-unset`) and dynamic unset (`cell-unset`).  If `shopt -s
 localvar_unset` is set or the target variable is `localvar` in the
 current function, `unset` performs `value-unset`.  Otherwise, `unset`
 is always `cell-unset`.
 
+To implement it in Oil, you can forget about the option `shopt -s
+localvar_unset`. Then, the rule is simple: **If the variable is
+`localvar` of the current function scope, `value-unset` is
+prformed. Otherwise, `cell-unset` is performed.**
+
+<details><summary>Test cases</summary>
 
 Here are test cases to demonstrate the above behavior.
 Results are obtained by the devel branch of Bash. I will create PR for spec tests later.
@@ -133,8 +158,8 @@ v=global
 f1 global
 ```
 
+Result
 ```
-# result
 [global,local,(unset)] v: (unset)
 [global,local,(unlocal)] v: global
 ```
@@ -165,8 +190,8 @@ v=global
 v=tempenv f1 global,tempenv
 ```
 
+Result
 ```
-# result
 [global,tempenv,local,(unset)] v: (unset)
 [global,tempenv,local,(unlocal)] v: global
 ```
@@ -195,8 +220,8 @@ v=global
 v=tempenv f1 global,tempenv
 ```
 
+Result
 ```
-# result
 [global,tempenv,(unset)] v: global
 [global,tempenv,(unlocal)] v: global
 ```
@@ -226,8 +251,8 @@ v=tempenv f5 global,tempenv
 v=tempenv eval 'f5 "global,tempenv,(eval)"'
 ```
 
+Result
 ```
-# result
 [global] v: global
 [global,local] v: (unset)
 [global,local+unset] v: (unset)
@@ -263,8 +288,8 @@ v=tempenv f2 global,tempenv
 (export v=global; f2 xglobal)
 ```
 
+Result
 ```
-# result
 [global,tempenv,(func),(local)] v: tempenv
 [xglobal,(func),(local)] v: (unset)
 ```
@@ -292,8 +317,8 @@ v=global
 v=tempenv1 f1 global,tempenv1
 ```
 
+Result
 ```
-# result
 [global,tempenv1,local1] v: local1
 [global,tempenv1,local1,tempenv2,(eval)] v: tempenv2
 [global,tempenv1,local1,tempenv2,(eval),local2] v: local2
@@ -319,8 +344,8 @@ f2() {
 v=tempenv1 f2 global,tempenv1
 ```
 
+Result
 ```
-# result
 [global,tempenv1,local1,tempenv2,(eval),local2,(unset)] v: (unset)
 [global,tempenv1,local1,tempenv2,(eval),local2,(unlocal)] v: local1
 ```
@@ -355,8 +380,8 @@ v=global
 v=tempenv1 f3 global,tempenv1
 ```
 
+Result
 ```
-# result
 [global,tempenv1/local1,tempenv2/local2,tempenv3/local3] v: local3
 [global,tempenv1/local1,tempenv2/local2,tempenv3/local3] v: local2 (unlocal 1)
 [global,tempenv1/local1,tempenv2/local2,tempenv3/local3] v: local1 (unlocal 2)
@@ -392,8 +417,8 @@ v=global
 v=tempenv1 f4.unlocal global,tempenv1
 ```
 
+Result
 ```
-# result
 [global,tempenv1,tempenv2,tempenv3] v: tempenv3
 [global,tempenv1,tempenv2,tempenv3] v: tempenv2 (unlocal 1)
 [global,tempenv1,tempenv2,tempenv3] v: tempenv1 (unlocal 2)
@@ -429,11 +454,106 @@ v=tempenv1 f4.unset global,tempenv1
 
 ```
 
+Result
 ```
-# result
 [global,tempenv1,tempenv2,tempenv3] v: tempenv3
 [global,tempenv1,tempenv2,tempenv3] v: tempenv2 (unset 1)
 [global,tempenv1,tempenv2,tempenv3] v: tempenv1 (unset 2)
 [global,tempenv1,tempenv2,tempenv3] v: global (unset 3)
 [global,tempenv1,tempenv2,tempenv3] v: (unset) (unset 4)
 ```
+
+</details>
+
+## 3. `shopt -s localvar_unset`
+
+> Is the bash 5.0 behavior with localvar_unset OK? I would rather keep
+> it simple rather than have too many special cases, but still
+> compatible. It's hard to write documentation when there are too many
+> special cases.
+> https://github.com/oilshell/oil/issues/653#issuecomment-613774521 by
+> @andychu
+
+No. Actually you can just forget about `localvar_unset`.  Existing
+many Bash programs including `bash-completion` doesn't work with
+`shopt -s localvar_unset`.  And, no *Bash* program uses `shopt -s
+localvar_unset`.  I just tested with that option for completeness.
+
+There is a story for `localvar_unset`. About two years ago, a man
+appeared in bug-bash mailing list and insisted that the dynamic unset
+behavior is *bug* and try to change the existing behavior of Bash.
+Chet and other people try to convince him that the behavior is
+intensional one even if it is tricky or quirky, there are many
+existing scripts relying on that behavior, the behavior varies among
+shells so there is no established *correct behavior*.  But we could
+not convince him, and he continued to post replies to the mailing list
+for a long time.  Finally Chet implemented an option `localvar_unset`
+for him, but I don't think he has actually written a script affected
+by that option because the original discussion is started by the
+question from another user but not by him.
+
+I have searched [the use of `localvar_unset` in GitHub](https://github.com/search?q=%22localvar_unset%22+language%3AShell&type=Code).
+We can find only two programs that use `localvar_unset`, `ble.sh` and `modernish`.
+A few other scripts just enumerates all the `shopt` options.
+- `ble.sh` temporarilly turn off `localvar_unset` to implement dynamic
+  `unset` when `localvar_unset` is enabled.
+- `modernish` turns on `localvar_unset` to make a behavior more common
+  to other shells.  As you know `modernish` tries to make a universal
+  shell scripting experience which can run on a wide range of POSIX
+  shells.  In this sense, `modernish` is not compatible with real Bash
+  scripts like `bash-completion` and others which are full of Bashism.
+
+----
+
+> Does the behavior as of the last commit make it work?
+> https://github.com/oilshell/oil/issues/653#issuecomment-613774521 by
+> @andychu
+
+
+To implement the Bash behavior, we need to switch between these two
+behavior depending on a situation. The conlusion of the above
+discussion is: **If the variable is `localvar` of the current function
+scope, `value-unset` is prformed. Otherwise, `cell-unset` is
+performed.**
+
+> This statement and the table below doesn't exactly match what I
+> observe... maybe you can add some test cases below #24 in
+> `spec/builtin-vars.test.sh`?
+> https://github.com/oilshell/oil/issues/653#issuecomment-613774521 by
+> @andychu
+
+> I will look at it more later but having a test case for exactly
+> what's used in ble.sh will help.
+> https://github.com/oilshell/oil/issues/653#issuecomment-613774521 by
+> @andychu
+
+> Since people rely on the bash idiom, it's probably better to change
+> it to be closer to that, but I'm not sure exactly how. So yeah
+> having the exact test cases for ble.sh will help, e.g. in
+> `spec/ble-idioms.tset.sh`. by @andychu
+> https://github.com/oilshell/oil/issues/653#issuecomment-613775611 by
+> @andychu
+
+> That is hysterical. I can't see from the test results... what's your
+> test case for temp bindings and/or locals and unset?
+> https://github.com/oilshell/oil/issues/706#issuecomment-614982326 by
+> @mgree
+
+> I think we have to come up with some better test cases ...
+> https://github.com/oilshell/oil/issues/706#issuecomment-614987077
+> by @andychu
+
+I'm sorry for the late reply.  Later, I will try to add test cases in
+`spec/{builtin-vars,ble-idioms}.test.sh`.  I haven't tested so much
+with other shells, but it seems the model is completely different
+between any shells.
+
+> Also, if it helps, we could upgrade the version in test/spec-bin.sh
+> to bash 5.0 rather than 4.4
+> https://github.com/oilshell/oil/issues/706#issuecomment-613778933
+> by @andychu
+
+Although Bash 5.0 has an option `shopt -s localvar_unset`, effectively
+no Bash program uses that option.  Also, as the local/unset bug of
+Bash 4.3 is not yet fixed in Bash 5.0, I think we don't have to
+upgrade it.
