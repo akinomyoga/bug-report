@@ -353,7 +353,7 @@ check7h() {
   v=global
   v=tempenv1 f4.unset global,tempenv1
 }
-check7h
+#check7h
 
 # local は tempenv cell があれば其処に変数を定義する。
 # 然し、上の階層の関数の tempenv も書き換えてしまう事はあるのだろうか。
@@ -373,3 +373,36 @@ check7i() {
 # global,tempenv,local undef         global
 # global,tempenv       global        global
 # global,local         undef         global
+
+#------------------------------------------------------------------------------
+
+check8() {
+  f2() {
+    local v=local1
+    v=tempenv2 eval '
+      local v=local2
+      unset v
+      echo "[tempenv1/local1,tempenv2/local2,(unset)] v: ${v-(unset)}"'
+  }
+  v=tempenv1 f2
+
+  f3() {
+    local v=local1
+    v=tempenv2 eval '
+      local v=local2
+      v=tempenv3 eval "
+        local v=local3
+        unset v
+        echo \"[tempenv1/local1,tempenv2/local2,tempenv3/local3,(unset)] v: \${v-(unset)}\"
+      "
+    '
+  }
+  v=tempenv1 f3
+}
+check8
+
+# [global,tempenv1,tempenv2,tempenv3] v: tempenv3
+# [global,tempenv1,tempenv2,tempenv3] v: (unset) (unlocal 1)
+# [global,tempenv1,tempenv2,tempenv3] v: (unset) (unlocal 2)
+# [global,tempenv1,tempenv2,tempenv3] v: (unset) (unlocal 3)
+# [global,tempenv1,tempenv2,tempenv3] v: (unset) (unlocal 4)

@@ -557,3 +557,35 @@ Although Bash 5.0 has an option `shopt -s localvar_unset`, effectively
 no Bash program uses that option.  Also, as the local/unset bug of
 Bash 4.3 is not yet fixed in Bash 5.0, I think we don't have to
 upgrade it.
+
+------------------------------------------------------------------------------
+
+## Summary of behavior of different shells
+
+|                          | bash   | osh   | yash   | mksh   | zsh    | ash    | dash    |
+|--------------------------|--------|-------|--------|--------|--------|--------|---------|
+| *unset localvar*         | switch | cell  | cell   | cell   | value  | value  | value   |
+| *unset tempenv*          | cell   | cell  | cell   | value  | value  | value  | value   |
+| *tempenv-in-localctx*    | yes    | no    | no     | no     | no     | yes    | ?       |
+| *localvar-tempenv-share* | yes    | yes   | no     | no     | no     | no     | no      |
+| *localvar-init*          | unset  | unset | unset  | unset  | empty  | unset  | inherit |
+| *localvar-nest*          | yes    | yes   | no     | no     | yes    | no     | no      |
+| *nested-unset*           | bash   | cell  | yash   | mksh   | value  | value  | value   |
+
+- *unset localvar, tempenv*
+  - switch = `value-unset` for the local scope, `cell-unset` for the dynamic scope
+  - cell = always `cell-unset`
+  - value = always `value-unset`
+- *tempenv-in-localctx*: Is tempenv in `v=tempenv fn` created in local context of `fn`?
+- *localvar-tempenv-share*: Are tempenv and localvar in `v=tempenv eval 'local v=localvar'` created in the same variable context?
+- *localvar-init*: How the variable is initialized with `local v`?
+  - unset = the variable is set to be unset state
+  - empty = the empty string is set
+  - inherit = inherit the value of the variable with the same name in previous context
+- *localvar-nest*: Are local1 and local2 in `local v=local1; v=tempenv2 eval 'local v=local2'` created in different nested contexts?
+- *nested-unset*:
+  - bash = `value-unset` for localvar, one-level `cell-unset` for tempenv
+  - yash = cell-unset all tempenvs and cell-unset one-level localvar in the function
+  - mksh = cell-unset all tempenvs and localvars in the function
+  - cell = one-level `cell-unset`
+  - value = `value-unset`

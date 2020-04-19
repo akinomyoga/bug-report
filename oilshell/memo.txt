@@ -17,6 +17,23 @@
   Done
 ------------------------------------------------------------------------------
 
+2020-04-18
+
+* bash_unset のテストをしているがどのシェルも振る舞いが異なる。
+
+
+                         bash    zsh     mksh    ash     dash    yash    osh
+  tempenv-in-localctx    local   prev    prev    local   ?       prev    prev
+  localvar-tempenv-share yes     no      no      no      no      no      yes
+  unset localvar         bash    value   cell    value   value   cell    cell
+  unset tempenv          cell    value   value   value   value   cell    cell
+  localvar-init          unset   empty   unset   unset   inherit unset   unset
+  localvar-nest          yes     yes     no      no      no      no      yes
+  nested-unset           bash    unset   mksh    unset   unset   yash    cell
+
+  うーん。osh はサブシェルで実行すると振る舞いが変?
+
+
 2020-04-15
 
 * discussion on dynamic unset [osh0002]
