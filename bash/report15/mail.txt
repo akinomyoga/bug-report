@@ -1,4 +1,6 @@
-From: Koichi Murase <myoga.murase@gmail.com>
+# ★UTF-8
+
+From: Koichi Murase <address@hidden>
 To: bug-bash@gnu.org
 Subject: Exit status by no-argument `return' for function calls in trap handlers
 
@@ -111,7 +113,7 @@ Description:
   >   - get_exitstat: when running `return' in a trap action, and it is not
   >     supplied an argument, use the saved exit status in
   >     trap_saved_exit_value.  Fixes Posix problem reported by
-  >     Eduardo A. Bustamante L坦pez <dualbus@gmail.com>
+  >     Eduardo A. Bustamante L坦pez <address@hidden>
   > 
   > 
   >            3/18
@@ -214,7 +216,7 @@ Koichi
 ------------------------------------------------------------------------
 
 
-2020-04-19 5:12 Chet Ramey <chet.ramey@case.edu>:
+2020-04-19 5:12 Chet Ramey <address@hidden>:
 > The POSIX wording seems straightforward and implies (B). The
 > `action' is a string that is defined to behave as if it were the
 > argument to `eval', so it can be an arbitrary command, which makes
@@ -222,11 +224,6 @@ Koichi
 >
 > You could always ask the austin-group list for an interpretation, or
 > send me something that I could forward to the list for you.
-
-Thank you for the suggestion.  Is <austin-group-l@opengroup.org> the
-mailing list you mentioned above?  I have created an account in
-opengroup.org and subscribed the mailing list.  I will later write a
-question on wording of `return' special builtin in that list.
 
 Thank you for the suggestion.  Is <austin-group-l@opengroup.org> the
 mailing list you mentioned above?  I have created an account in
@@ -260,7 +257,7 @@ I would appreciate it if you could provide me some suggestion on other
 ways to work around the general problems caused by such user-provided
 `PROMPT_COMMAND'?
 
-2020-04-17 2:21 Koichi Murase <myoga.murase@gmail.com>:
+2020-04-17 2:21 Koichi Murase <address@hidden>:
 
 >   Also, I have checked the behavior of other shells. `zsh', `ash'
 >   family (dash/ash, busybox sh) and `posh' does not implement the
@@ -316,7 +313,7 @@ Koichi
 ------------------------------------------------------------------------
 
 
-From: Koichi Murase <myoga.murase@gmail.com>
+From: Koichi Murase <address@hidden>
 To: austin-group-l@opengroup.org
 Subject: XCU 2.14: Exit status by no-argument `return' in shell trap handlers
 
@@ -431,3 +428,55 @@ behaves differently from other shells.
 
 --
 Koichi Murase
+
+------------------------------------------------------------------------
+
+
+2020-04-19 15:21 Oğuz <address@hidden>:
+> The same document you linked says:
+>
+> > If the shell is not currently executing a function or dot script, the
+> > results are unspecified.
+>
+> in DESCRIPTION section; it's unspecified what those returns do.
+
+Thank you for the comment, but I am confused.  In both two examples
+that I provided, it actually running a function when `kill' is called,
+i.e. `kill' is called when `invoke' is executed.  Then the trap
+handler is invoked while executing the function.
+
+If that is not the correct interpretation [i.e., the function is not
+considered currently executed while the trap handler is processed, and
+the description on `return' applies only to `return's appearing in the
+function calls inside the trap action], then it is the third
+interpretation:
+
+(C) The `return's in the function-call tree in trap processing are
+  affected, but the behavior of `return' directly called from the trap
+  argument is unspecified.
+
+However, in this case, the same question for the interpretation (B)
+also applies to the interpretation (C):
+
+2020-04-19 13:32 Koichi Murase <address@hidden>:
+> > - If the literal interpretation (B) is correct, what is the use case
+> >   of this behavior, or what is the rationale for this behavior?
+
+Currently, I do not see any rationale for the behavior (B) or (C).
+Does anyone know something which explains the necessity of the
+behavior (B) or (C)?
+
+It seems to me that (A) is the natural behavior because it is more
+consistent with the following description in `trap' section.  I can
+imagine that the special case for the `return' exit status is added to
+make it more consistent with this section.
+
+https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_28_03
+> [XCU 2.14 Special Built-In Utilities - trap - DESCRIPTION/paragraph 2]
+>
+> [...] The value of "$?" after the trap action completes shall be the value
+> it had before trap was invoked.
+
+Maybe I am wrong, but I cannot stop suspecting that this is a wording
+problem that the original intension is (A), but it just reads like (B)
+or (C) due to not enough description in the standard.
