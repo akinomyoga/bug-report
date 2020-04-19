@@ -210,3 +210,224 @@ Fix:
 
 --
 Koichi
+
+------------------------------------------------------------------------
+
+
+2020-04-19 5:12 Chet Ramey <chet.ramey@case.edu>:
+> The POSIX wording seems straightforward and implies (B). The
+> `action' is a string that is defined to behave as if it were the
+> argument to `eval', so it can be an arbitrary command, which makes
+> (A) unlikely.
+>
+> You could always ask the austin-group list for an interpretation, or
+> send me something that I could forward to the list for you.
+
+Thank you for the suggestion.  Is <austin-group-l@opengroup.org> the
+mailing list you mentioned above?  I have created an account in
+opengroup.org and subscribed the mailing list.  I will later write a
+question on wording of `return' special builtin in that list.
+
+Thank you for the suggestion.  Is <austin-group-l@opengroup.org> the
+mailing list you mentioned above?  I have created an account in
+opengroup.org and subscribed to the mailing list.  I will later write
+a question on wording of `return' special builtin in that list.
+
+> That's an unreasonable statement, throwing out all uses of return without
+> an argument because of how it behaves while running a trap.
+
+OK.  I agree that for the shell functions that will not be used in
+trap handlers, no-argument `return' can be used without problems.
+
+Actually the situation in my script (ble.sh) is a little bit special.
+In my script, some parts of Bash features are emulated.  I run `eval
+-- "$PROMPT_COMMAND"' in SIGWINCH handler where `PROMPT_COMMAND' is
+specified by users so is not under the control of the script but under
+the control of the user.  Naively, with interpretation (B), I need to
+put restrictions on the commands that can be specified in
+`PROMPT_COMMAND', on which there are no restrictions in the original
+Bash.  The use of no-argument `return' is common, and such
+restrictions are non-trivial for users.  In fact, there are already
+existing Bash configurations, that use no-argument `return' in
+`PROMPT_COMMAND', which I would like to support with my script.  One
+example is `bash-preexec' (https://github.com/rcaloras/bash-preexec)
+which aims to provide a feature like `preexec' and `precmd' hooks of
+zsh.  `bash-preexec' uses no-argument `return'.  The configuration
+provided by iTerm2 for shell--terminal integration also uses this
+`bash-preexec' framework.
+
+I would appreciate it if you could provide me some suggestion on other
+ways to work around the general problems caused by such user-provided
+`PROMPT_COMMAND'?
+
+2020-04-17 2:21 Koichi Murase <myoga.murase@gmail.com>:
+
+>   Also, I have checked the behavior of other shells. `zsh', `ash'
+>   family (dash/ash, busybox sh) and `posh' does not implement the
+>   special treatment of `return' in trap handlers.  `ksh' family
+>   (ksh93, mksh) and `yash' implements the interpretation (B).  There
+>   is no existing implementation of (A).  But currently I still think
+>   the intepretation (A) is reasonable.  If there is rationale for
+>   the interpretation (B), I would like to know it.
+
+Let me correct this paragraph. Actually `zsh', `dash' and `busybox'
+implement the behavior of the interpretation (A).  After my previous
+email, I noticed that there was an oversight in testing the shells.
+With the attached script `0015-test4.sh',
+
+$ bash 0015-test4.sh
+In trap-argument: last command preceding the trap action
+In a function call: last command preceding the trap action
+$ bash-4.3 0015-test4.sh
+In trap-argument: last command in the trap action
+In a function call: last command in the trap action
+$ zsh 0015-test4.sh
+In trap-argument: last command preceding the trap action
+In a function call: last command in the trap action
+$ dash 0015-test4.sh
+In trap-argument: last command preceding the trap action
+In a function call: last command in the trap action
+$ busybox sh 0015-test4.sh
+In trap-argument: last command preceding the trap action
+In a function call: last command in the trap action
+$ mksh 0015-test4.sh
+In trap-argument: last command preceding the trap action
+In a function call: last command preceding the trap action
+$ ksh 0015-test4.sh
+In trap-argument: last command preceding the trap action
+In a function call: last command preceding the trap action
+$ yash 0015-test4.sh
+In trap-argument: (failed to exit the function)
+In a function call: last command preceding the trap action
+$ posh 0015-test4.sh
+In trap-argument: last command in the trap action
+In a function call: last command in the trap action
+
+which can be summarized in the following list:
+
+Interpretation A: zsh, dash, busybox
+Interpretation B: bash-5.0, ksh, mksh
+Interpretation B (broken): yash
+Not implemeted: bash-4.3, posh
+
+--
+Koichi
+
+------------------------------------------------------------------------
+
+
+From: Koichi Murase <myoga.murase@gmail.com>
+To: austin-group-l@opengroup.org
+Subject: XCU 2.14: Exit status by no-argument `return' in shell trap handlers
+
+I have a question on the POSIX behavior of `return' shell builtin
+without arguments when used in a shell `trap' action.  I initially
+came to this question on investigating an infinite-loop issue reported
+by Silvio Knizek at
+
+  https://github.com/akinomyoga/ble.sh/issues/48 .
+
+Then, I reported the issue in bug-bash mailing list where I was
+introduced to the austing-group list by Chet.  This is the thread:
+
+  https://lists.gnu.org/archive/html/bug-bash/2020-04/threads.html#00089
+
+
+The corresponding section in POSIX is as follows:
+
+> [XCU 2.14 Special Built-In Utilities - return - EXIT STATUS]
+>
+> The value of the special parameter '?' shall be set to n, an
+> unsigned decimal integer, or to the exit status of the last command
+> executed if n is not specified. If n is not an unsigned decimal
+> integer, or is greater than 255, the results are unspecified. When
+> return is executed in a trap action, the last command is considered
+> to be the command that executed immediately preceding the trap
+> action.
+
+What does ``When return is executed in a trap action'' exactly mean?
+There can be two interpretations: (A) `return's specified in the
+argument string of `trap' builtin (or, more specifically, `return's
+which terminate the trap action) are affected, or (B) all the
+`return's in an entire runtime function-call tree in trap processing
+are affected.  Literally, it reads like the interpretation (B), but it
+seems unreasonable.
+
+- If this exception of `return' in trap actions aims to provide a way
+  to recover the value of $? before the trap handler is invoked, the
+  behavior (A) is enough, and there is no need to affect every
+  `return's in the function-call tree as in (B).
+
+- If the behavior of no-argument `return's can be changed in functions
+  as in (B), one cannot reliably use no-argument `return's in the
+  functions that can be possibly be used in trap handlers.  Actually
+  this caused the infinite loop I mentioned above in Bash 5.0 which
+  implements the interpretation (B).  With interpretation (B), it
+  seems hard to work around it properly.
+
+- If the literal interpretation (B) is correct, what is the use case
+  of this behavior, or what is the rationale for this behavior?
+
+
+In fact the implementation in shells varies.  I have tested using the
+following script:
+
+  # 0015-test4.sh
+
+  setexit() { return "$1"; }
+  invoke() { kill -USR1 $$; return 222; }
+
+  trap 'setexit 111; return' USR1
+  invoke
+  case $? in
+  (0)   echo 'In trap argument: last command preceding the trap action' ;;
+  (111) echo 'In trap argument: last command in the trap action' ;;
+  (222) echo 'In trap argument: (failed to exit the function)' ;;
+  (*)   echo 'In trap argument: (unexpected)' ;;
+  esac
+
+  stat=99
+  handler() { setexit 111; return; }
+  trap 'handler; stat=$?; return' USR1
+  invoke
+  case $stat in
+  (0)   echo 'In function call: last command preceding the trap action' ;;
+  (111) echo 'In function call: last command in the trap action' ;;
+  (*)   echo 'In function call: (unexpected)' ;;
+  esac
+
+`zsh-5.7.1', `dash-0.5.10.2' and `busybox-1.28.3 implements the
+interpretation (A) which produces the following result:
+
+  In trap argument: last command preceding the trap action
+  In function call: last command in the trap action
+
+`bash-4.4', `ksh-2020.0.0' and `mksh R57' implements the
+interpretation (B) which produces the following result:
+
+  In trap argument: last command preceding the trap action
+  In function call: last command preceding the trap action
+
+`bash-4.3' and `posh-0.13.2' does not implement the special treatment
+in a trap action.
+
+  In trap argument: last command in the trap action
+  In function call: last command in the trap action
+
+`yash-2.49' seems to try to implement the interpretation (B), but it
+behaves differently from other shells.
+
+  In trap argument: (failed to exit the function)
+  In function call: last command preceding the trap action
+
+  It seems `yash' fails to follow the following description.
+
+  > XCU 2.14 Special Built-In Utilities - trap - DESCRIPTION
+  >
+  > Each time trap is invoked, the action argument shall be processed
+  > in a manner equivalent to:
+  >
+  > eval action
+
+--
+Koichi Murase
