@@ -1,0 +1,99 @@
+From fc3cd19a38298ba6731dfc53cecc7913042c8083 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 20 Apr 2020 18:37:02 +0900
+Subject: [PATCH] hashlib: Implement rehash
+
+---
+ hashlib.c | 41 +++++++++++++++++++++++++++++++++++++++++
+ hashlib.h |  2 ++
+ 2 files changed, 43 insertions(+)
+
+diff --git a/hashlib.c b/hashlib.c
+index f8e3b09a..3834f3d2 100644
+--- a/hashlib.c
++++ b/hashlib.c
+@@ -39,6 +39,7 @@
+ #define HASH_BUCKET(s, t, h) (((h) = hash_string (s)) & ((t)->nbuckets - 1))
+ 
+ static BUCKET_CONTENTS *copy_bucket_array __P((BUCKET_CONTENTS *, sh_string_func_t *));
++static void hash_rehash __P((HASH_TABLE *));
+ 
+ /* Make a new hash table with BUCKETS number of buckets.  Initialize
+    each slot in the table to NULL. */
+@@ -105,6 +106,40 @@ copy_bucket_array (ba, cpdata)
+   return new_bucket;  
+ }
+ 
++static void
++hash_rehash (table)
++     HASH_TABLE *table;
++{
++  int old_nbuckets, i, j;
++  BUCKET_CONTENTS **old_bucket_array, *item, *next;
++  unsigned int hv;
++
++  if (table == NULL || table->nentries > INT_MAX / HASH_REHASH_MULTIPLIER) return;
++
++  old_nbuckets = table->nbuckets;
++  old_bucket_array = table->bucket_array;
++
++  table->nbuckets = table->nbuckets * HASH_REHASH_MULTIPLIER;
++  table->bucket_array =
++    (BUCKET_CONTENTS **)xmalloc (table->nbuckets * sizeof (BUCKET_CONTENTS *));
++  for (i = 0; i < table->nbuckets; i++)
++    table->bucket_array[i] = (BUCKET_CONTENTS *)NULL;
++
++  for (j = 0; j < old_nbuckets; j++)
++    {
++      for (item = old_bucket_array[j]; item; item = next)
++	{
++	  next = item->next;
++	  i = HASH_BUCKET (item->key, table, hv);
++	  item->khash = hv;
++	  item->next = table->bucket_array[i];
++	  table->bucket_array[i] = item;
++	}
++    }
++
++  free (old_bucket_array);
++}
++
+ HASH_TABLE *
+ hash_copy (table, cpdata)
+      HASH_TABLE *table;
+@@ -198,6 +233,9 @@ hash_search (string, table, flags)
+ 
+   if (flags & HASH_CREATE)
+     {
++      if (table->nentries >= table->nbuckets * HASH_MAX_LOADFACTOR)
++	hash_rehash (table);
++
+       list = (BUCKET_CONTENTS *)xmalloc (sizeof (BUCKET_CONTENTS));
+       list->next = table->bucket_array[bucket];
+       table->bucket_array[bucket] = list;
+@@ -269,6 +307,9 @@ hash_insert (string, table, flags)
+ 
+   if (item == 0)
+     {
++      if (table->nentries >= table->nbuckets * HASH_MAX_LOADFACTOR)
++	hash_rehash (table);
++
+       bucket = HASH_BUCKET (string, table, hv);
+ 
+       item = (BUCKET_CONTENTS *)xmalloc (sizeof (BUCKET_CONTENTS));
+diff --git a/hashlib.h b/hashlib.h
+index 88ea778f..1adcdd7c 100644
+--- a/hashlib.h
++++ b/hashlib.h
+@@ -74,6 +74,8 @@ extern unsigned int hash_string __P((const char *));
+ 
+ /* Default number of buckets in the hash table. */
+ #define DEFAULT_HASH_BUCKETS 128	/* must be power of two */
++#define HASH_REHASH_MULTIPLIER 4		/* must be power of two */
++#define HASH_MAX_LOADFACTOR 1.0
+ 
+ #define HASH_ENTRIES(ht)	((ht) ? (ht)->nentries : 0)
+ 
+-- 
+2.21.1
+

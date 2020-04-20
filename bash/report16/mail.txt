@@ -70,3 +70,30 @@ Koichi
 
 
 ------------------------------------------------------------------------
+
+
+2020-04-20 10:00 George Jones <fooologist@gmail.com>:
+> Thank you.   Patch applied and (performance) tested with come tests
+> I was working on
+> https://github.com/eludom/snippits/tree/master/bash/tests
+> .... bottom line:
+
+Thank you for the measurements.
+
+Also, I am sorry that I disturbed your plan for contributing Bash.  I
+actually initially doubted that the insertion with the current
+implementation is O(N), so I created the test first and then found
+that it is an easy fix rather than reimplementing it by B-tree or
+other data structures.  I couldn't stop my interest on how much it is
+improved by the easy fix.
+
+Nevertheless, I have not tuned the parameters of rehashing.  Actually
+it is a tradeoff between the memory comsumption and the computational
+time, so it is a matter of preference to some extent.  I attach an
+updated patch which exposes some parameters.  If you have interest,
+you can play by chaging the value of the parameters
+`HASH_REHASH_MULTIPLIER' and `HASH_MAX_LOADFACTOR' defined in
+`hashlib.h'.
+
+--
+Koichi
