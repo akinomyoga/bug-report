@@ -73,27 +73,45 @@ Koichi
 
 
 2020-04-20 10:00 George Jones <fooologist@gmail.com>:
-> Thank you.   Patch applied and (performance) tested with come tests
+> Thank you.  Patch applied and (performance) tested with come tests
 > I was working on
 > https://github.com/eludom/snippits/tree/master/bash/tests
 > .... bottom line:
 
 Thank you for the measurements.
 
-Also, I am sorry that I disturbed your plan for contributing Bash.  I
-actually initially doubted that the insertion with the current
+Also, I am sorry that I disturbed your plan for contributing to Bash.
+I actually initially doubted that the insertion with the current
 implementation is O(N), so I created the test first and then found
 that it is an easy fix rather than reimplementing it by B-tree or
-other data structures.  I couldn't stop my interest on how much it is
+other data structures.  I couldn't stop my interest in how much it is
 improved by the easy fix.
 
 Nevertheless, I have not tuned the parameters of rehashing.  Actually
-it is a tradeoff between the memory comsumption and the computational
+it is a tradeoff between the memory consumption and the computational
 time, so it is a matter of preference to some extent.  I attach an
-updated patch which exposes some parameters.  If you have interest,
-you can play by chaging the value of the parameters
+updated patch which exposes some parameters.  If you have an interest,
+you can play by changing the value of the parameters
 `HASH_REHASH_MULTIPLIER' and `HASH_MAX_LOADFACTOR' defined in
 `hashlib.h'.
+
+--
+Koichi
+
+------------------------------------------------------------------------
+
+Yes, thank you for clarification and sorry for confusing writing.  I
+did not mean George's contribution disappeared, but just I have
+disturbed his five-step plan on his blog where the remaining four
+steps are now canceled.  I have to add that identifying the problem is
+definitely the most non-trivial part because it is relatively
+straightforward to fix the problem once the problem is identified :).
+Also, I would like to thank George for additional testing of my patch.
+
+Of course, this also applies to my patches.  I think I have sent more
+than ten patches so far and many of them have been applied, but I am
+anyway happy if the problems are solved.  You can always reject my
+patches when you have better solutions.
 
 --
 Koichi
