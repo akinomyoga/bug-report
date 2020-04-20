@@ -1,4 +1,4 @@
-2020-04-19 23:54 George Jones <fooologist@gmail.com>:
+2020-04-19 23:54 George Jones <address@hidden>:
 > It looks like hash_search just does a linear walk if array entries
 > to find elements in a list.
 
@@ -26,7 +26,7 @@ workaround for the collision of hashes.  As far as the load factor of
 the hash table is maintained properly, the linear search is O(1)
 because the length of the list is O(1).
 
-2020-04-19 23:54 George Jones <fooologist@gmail.com>:
+2020-04-19 23:54 George Jones <address@hidden>:
 > This slows down (order N?) new inserts when the number of entries
 > gets large.
 
@@ -34,6 +34,7 @@ I looked into `hashlib.c' and found that rehashing is actually not
 implemented.  I just added a function to perform rehashing, and
 the performance has been improved.
 
+2020-04-19 23:54 George Jones <address@hidden>:
 > Would there be any interest in merging a patch to add an option for
 > making this faster (maybe using b-trees?)
 
@@ -49,4 +50,23 @@ arrays do not ensure the ordering of the items, so the hash table can
 be used as a more efficient choice and is already implemented in
 `hashlib.c'.  We can simply add rehashing.
 
-Please find the attached patch.
+------------------------------------------------------------------------
+
+I attach a patch `0001-hashlib-Implement-rehash.patch' which
+implements the rehashing.
+
+I also tested the performance.  The attached `test1.png' shows the
+computational time of insertion of items before and after the fix.
+The lines are fitted by the function `Time = C Size^alpha' where alpha
+is the exponent.  Before the fix, there are two regimes depending on
+the number of items: linear regime O(N) (alpha ~ 1) and quadratic
+regime O(N^2) (alpha ~ 2).  The quadratic regime signals the linear
+scaling of a single insertion.  After the fix, the prformance has been
+improved, and the computational time scales linearly in entire region.
+I also attach a script `test1.sh' which was used to measure the time.
+
+--
+Koichi
+
+
+------------------------------------------------------------------------
