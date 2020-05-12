@@ -1,0 +1,146 @@
+2020-05-11 6:20 Peng Yu <pengyu.ut@gmail.com>:
+>
+> Hi,
+>
+> $(fun) by default will always use a new bash process. This is wasteful
+> in certain cases. In there a way to use the existing bash process
+> (without using a temp file)? Thanks.
+
+Another solution with a shell function.
+
+  $ cat a.sh
+
+  #!/bin/bash
+
+  _ble_base_run=$(mktemp -d)
+  trap -- 'rm -rf "$_ble_base_run"' EXIT
+
+  _ble_util_assign_base=$_ble_base_run/$$.ble_util_assign.tmp
+  _ble_util_assign_level=0
+  function ble/util/assign {
+    local _ble_local_tmp=$_ble_util_assign_base.$((_ble_util_assign_level++))
+    builtin eval "$2" >| "$_ble_local_tmp"
+    local _ble_local_ret=$? _ble_local_arr=
+    ((_ble_util_assign_level--))
+    mapfile -t _ble_local_arr < "$_ble_local_tmp"
+    IFS=$'\n' eval "$1=\"\${_ble_local_arr[*]}\""
+    return "$_ble_local_ret"
+  }
+
+  # sample
+  function f { echo "$BASHPID"; }
+
+  pid=$(f)
+  echo "command subst  : $BASHPID,$pid"
+
+  ble/util/assign pid f
+  echo "ble/util/assign: $BASHPID,$pid"
+
+  $ bash a.sh
+  command subst  : 39173,39175
+  ble/util/assign: 39173,39173
+
+Actually, this function `ble/util/assign' is maintained as one of the
+most important utility in my script for more than five years and
+tested well.
+
+https://github.com/akinomyoga/ble.sh/blob/54769337/src/util.sh#L1414-L1446
+
+Maybe you don't like it because it internally uses temporary files,
+but you do not have to care about the handling of temporary files as
+the shell function takes care of them.  If you do not want to cause
+disk access, you can create temporary files/directories on in-memory
+filesystems (tmpfs) such as /dev/shm or /tmp.  Even if the system does
+not mount in-memory filesystems, filesystem access is much faster than
+fork & exec.
+
+--
+Koichi
+
+----------------------------------------------------------------------
+
+2020-05-11 6:55 Peng Yu <pengyu.ut@gmail.com>:
+>
+> x=$(cmd)
+>
+> The above syntax can only save stdout to a bash variable. Is there a
+> way to save the stdout and stderr of the command to two different
+> bash variables? Thanks.
+
+You can use `ble/util/assign' in the following post:
+https://lists.gnu.org/archive/html/help-bash/2020-05/msg00057.html
+
+  ble/util/assign stderr '
+    ble/util/assign stdout "cmd" 2>&1'
+
+It works because `ble/util/assign' executes commands in the same
+process without fork.  Actually, there is a use case here:
+
+https://github.com/akinomyoga/ble.sh/blob/54769337/lib/core-test.sh#L155-L156
+
+--
+Koichi
+
+----------------------------------------------------------------------
+
+2020-05-12 6:13 Peng Yu <pengyu.ut@gmail.com>:
+>
+> But this solution still involves using external files if I read the
+> code correctly? Thanks.
+
+Yes, as already explained in the original post of `ble/util/assign'.
+If you don't want to use external files, you can instead use nested
+command substitutions and variable exports by `declare -p':
+
+  function cmd {
+    echo this is stderr >&2
+    echo this is stdout
+  }
+
+  eval -- "$(
+    { stderr=$(
+        { stdout=$(cmd); } 2>&1
+        declare -p stdout >&3); } 3>&1
+    declare -p stderr )"
+
+  echo "($stdout)($stderr)"
+
+If you feel it is cumbersome to write it every time, again you can
+wrap it in a function:
+
+  function upvars {
+    while (($#)); do
+      unset "$1"
+      printf -v "$1" %s "$2"
+      shift 2
+    done
+  }
+  function save-stdout-stdin {
+    eval -- "$(
+      { printf -v "$2" %s "$(
+        { printf -v "$1" %s "$(eval -- "$3")"; } 2>&1
+        declare -p "$1" >&3)"; } 3>&1
+      declare -p "$2" )"
+    upvars "$1" "${!1}" "$2" "${!2}"
+  }
+
+  save-stdout-stdin a b cmd
+  echo "($a)($b)"
+
+However, these solutions require at least three forks which are slower
+than the external file accesses.  There is no solution with neither
+forks nor external file accesses.  In my opinion, there is no reason
+to refrain from external files as far as the files are created in
+memory (tmpfs such as /dev/shm or /tmp) and the permissions are
+properly mainined.
+
+Also, if you do not allow even internal usages of external files at
+all, you cannot use here documents and here strings as they also use
+temporary files internally.  For example, you can confirm this by the
+following command.
+
+$ ls -la /dev/fd/0 <<< Here
+lr-x------. 1 murase murase 64 2020-05-12 09:42:22 /dev/fd/0 -> /tmp/sh-thd.ZLmXgN (deleted)
+
+--
+Koichi

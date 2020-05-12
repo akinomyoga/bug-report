@@ -1,4 +1,4 @@
-# pipesubst (Bash utility)
+# pipesubst (Bash Utility)
 #   2020-04-10 K. Murase <myoga.murase@gmail.com>
 #   https://lists.gnu.org/archive/html/help-bash/2020-04/msg00016.html
 

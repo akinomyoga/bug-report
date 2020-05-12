@@ -1,0 +1,74 @@
+2020-05-12 1:25 Peng Yu <pengyu.ut@gmail.com>:
+> Hi Chet, These walkarounds seem to be cumbersome.
+>
+> Given | and |& are available, for the reason of symmetry, could an
+> operator be introduced to bash to make piping stderr only in a
+> pipeline easy?
+
+I think there is not so much demands to support it as a builtin
+feature like `|&'.  Even if it is cumbersome to write them directly,
+one can always write a shell function to wrap these complicated
+redirections and pipes rather than request them to be builtin
+features.
+
+2020-05-10 12:24 Peng Yu <pengyu.ut@gmail.com>:
+>
+> Thanks. The original stdout must be redirected back to stdout (see
+> "2>&1"). I have to use something like this to do it. This looks quite
+> cumbersome.
+>
+> $ { { echo error 1>&2; echo out; } 3>&1 1>&2 2>&3 | awk -e '{ print
+> "awk:", $0 }'; } 2>&1 | awk -e '{ print "awk2: " $0 }'
+> awk2: out
+> awk2: awk: error
+
+If you want to achieve the above pipe structures, you can actually use
+"pipesubst" in the following post.
+
+https://lists.gnu.org/archive/html/help-bash/2020-04/msg00017.html
+
+  $ cat a.sh
+  f1() {
+    echo stderr 1>&2
+    echo stdout
+  }
+
+  echo cumbersome
+  { f1 3>&1 1>&2 2>&3 |
+    awk -e '{ print "awk1: ", $0 }'; } 2>&1 |
+    awk -e '{ print "awk2: " $0 }'
+
+  echo pipesubst
+  source pipesubst.sh
+  pipesubst 'f1 2>&$fd1' \
+            $'> awk \'{ print "awk1: ", $0 }\'' |
+    awk '{ print "awk2: " $0 }'
+
+  $ bash a.sh
+  cumbersome
+  awk2: stdout
+  awk2: awk1:  stderr
+  pipesubst
+  awk2: stdout
+  awk2: awk1:  stderr
+
+----------------------------------------------------------------------
+
+>> On Sun, May 10, 2020 at 09:43:48PM +0200, Andreas Kusalananda Kähäri wrote:
+>>> On Sun, May 10, 2020 at 01:58:16PM -0500, Peng Yu wrote:
+>>> > That is not a pipeline. And, different from a pipeline, the status in
+>>> > >(cmd) can not be gotten easily.
+>>>
+>>> Maybe you should have stated you requirements from the start?
+
+I think these questions are related the following threads.  Peng
+doesn't explain the requirements explicitly, but one can guess them to
+some extent.  Nevertheless these background discussions should have
+been mentioned/listed first.
+
+https://lists.gnu.org/archive/html/help-bash/2020-03/msg00071.html
+https://lists.gnu.org/archive/html/help-bash/2020-04/msg00006.html
+https://lists.gnu.org/archive/html/help-bash/2020-04/msg00014.html
+
+--
+Koichi
