@@ -480,3 +480,308 @@ https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18
 Maybe I am wrong, but I cannot stop suspecting that this is a wording
 problem that the original intension is (A), but it just reads like (B)
 or (C) due to not enough description in the standard.
+
+------------------------------------------------------------------------
+
+2020-04-19 20:51 Robert Elz <kre@munnari.oz.au>:
+> Before I make any other comments, I should point out that quite a
+> bit of what is in the shell standard (and the rest of POSIX, and for
+> that matter, many other standards) isn't there because there's a
+> good reason for it, but just because the original shells implemented
+> it that way, often for expediency purposes (the original Bourne
+> shell had to run in the 64KB address space (code, data, and stack)
+> of a PDP-11).
+
+Thank you for pointing out this.  After reading your comment, I was
+interested in the behavior of the Bourne shell, so I have tried with
+the Heirloom Bourne shell (which is a port of the SVR4 Bourne shell
+according to its page) in AUR.  Actually, the Heirloom Bourne shell
+turns out to follow the interpretation (A) [ although it might be
+possible that the behavior is changed by the port ].
+
+2020-04-19 20:51 Robert Elz <kre@munnari.oz.au>:
+> Note that another intrepretation that you didn't list is that this
+> magic return applies to return in functions called directly from the
+> trap action string (which are more likely to be functions written
+> expressly with the intent of being called this way) but not to
+> functions called indirectly.
+
+Thank you for suggesting another possibility.  Let me call the above
+one the interpretation (D).  I have updated the script to distinguish
+(D) from (B):
+
+  setexit() { return "$1"; }
+  invoke() { kill -USR1 $$; return 222; }
+
+  trap 'setexit 111; return' USR1
+  invoke
+  case $? in
+  0)   echo 'In trap argument: last command preceding the trap action' ;;
+  111) echo 'In trap argument: last command in the trap action' ;;
+  222) echo 'In trap argument: (failed to exit the function)' ;;
+  *)   echo 'In trap argument: (unexpected)' ;;
+  esac
+
+  stat=99
+  handler() { setexit 111; return; }
+  trap 'handler; stat=$?; return' USR1
+  invoke
+  case $stat in
+  0)   echo 'In direct function call: last command preceding the trap action' ;;
+  111) echo 'In direct function call: last command in the trap action' ;;
+  *)   echo 'In direct function call: (unexpected)' ;;
+  esac
+
+  stat=99
+  utility2() { setexit 111; return; }
+  handler2() { utility2; stat=$?; }
+  trap 'handler2' USR1
+  invoke
+  case $stat in
+  0)   echo 'In indirect function call: last command preceding the trap action' ;;
+  111) echo 'In indirect function call: last command in the trap action' ;;
+  *)   echo 'In indirect function call: (unexpected)' ;;
+  esac
+
+But there was actually no implementation that follows (D) among the
+shells that I tested so far.  Here is the summary:
+
+  (A) `zsh', `dash', `busybox', `heirloom-sh'
+  (B) `bash-4.4', `mksh', `ksh'
+  (C) `yash'
+  (D) none
+  Not Implemented: `bash-4.3', `posh'
+
+--
+Koichi
+
+------------------------------------------------------------------------
+
+
+2020-04-19 21:55 Harald van Dijk <ag@gigawatt.nl>:
+> My reading was that interpretation B must be what is intended, which
+> is why I had modified my shell, a fork of dash, to change dash's A
+> behaviour to B in late 2018.
+
+Thank you.  Is your shell this https://github.com/hvdijk/gwsh ?  I
+tried gwsh-0.5.9.1.  Here is the updated list:
+
+  (A) `zsh', `dash', `busybox', `heirloom-sh'
+  (B) `bash-4.4', `mksh', `ksh', `gwsh'
+  (C) `yash'
+  (D) none
+  Not Implemented: `bash-4.3', `posh'
+
+> My reasoning for that is that the description of the return
+> commanhd ("When return is executed in a trap action, the last
+> command is considered to be the command that executed immediately
+> preceding the trap action.") is identical to that of the exit
+> command ("When exit is executed in a trap action, the last command
+> is considered to be the command that executed immediately preceding
+> the trap action.")
+
+Thank you.  This is a good point. Maybe this is the origin of the
+current wording.
+
+> and for the exit command, almost all shells, including dash, are in
+> agreement that it applies even when the exit command is invoked
+> indirectly. [...]
+
+It is reasonable that indirect `exit' in function calls in trap
+handlers are affected because it actually brings the completion of
+trap action which is more consistent with the following description of
+`trap'.  While, the trap action will not be completed by indirect
+`return', so it is not surprising that the behavior can be different
+between `exit' and `return'.
+
+>>>> [XCU 2.14 Special Built-In Utilities - trap - DESCRIPTION/paragraph 2]
+>>>>
+>>>> [...] The value of "$?" after the trap action completes shall be
+>>>> the value it had before trap was invoked.
+
+--
+Koichi
+
+------------------------------------------------------------------------
+
+% I think there are two aspects of the standard:
+% 
+% - One is that the standard defines normative behavior for the
+%   implementations.  In this sense, first the standard can be changed
+%   and then the shells follow it.  Waiting for the implementations to
+%   change their behavior to spontaneously form agreement before
+%   defining it in the standard is the other way round.  If we can get
+%   agreement without the standard, we do not need the standard.
+%   However, even if the standard defines some behavior, the shells
+%   might not necessarily follow the standard (particularly in the case
+%   that the defined behavior is historical and unreasonable).  In this
+%   case, users cannot reliably use the behavior defined in POSIX.
+% 
+% - Here we come to notice the other practical aspect of the standard:
+%   It effectively defines a maximal common set of features of various
+%   shells which users can rely on.  However, if we strictly follow this
+%   policy, we can only define a very limited set of behaviors and many
+%   important behaviors becomes unspecified, which is not sufficient for
+%   real uses.  So we have to give up to some extent. In fact, POSIX
+%   shell include several features that is not in the original Bourne
+%   shell, such as `$()' and `$(())' [ I also noticed yesterday that `('
+%   in `case x in (pat) ;; esac' cannot be specified in the Bourne
+%   shell.  We have to always omit it. ].
+
+2020-04-20 1:42 Robert Elz <kre@munnari.oz.au>:
+> Probably not, bosh is derived from that shell (more or less) and it is
+> also A
+>
+> [...]
+>
+> So are the FreeBSD and NetBSD shells (which is not surprising, as like
+> dash, they're descendants of ash).
+>
+> You can also add zsh to A:
+
+Thank you for the information.  I have also tested ksh93, pdksh and
+oksh (OpenBSD KornShell) on FreeBSD.  `ksh93' is (B), and `pdksh' and
+`oksh' do not implement the special treatment in trap handlers.  Here
+is the current list:
+
+  (A) zsh (zsh-5.7.1, zsh-5.6.2)
+    ash variants (dash-0.5.10.2, busybox-1.28.3, FreeBSD sh, NetBSD sh),
+    Bourne sh variants (heirloom-sh-050706-4, bosh-2020/04/18)
+  (B) bash-4.4, gwsh,
+    ksh variants (ksh-2020.0.0, ksh93.u_1, mksh-R57, mksh-R56)
+  (C) yash-2.49
+  (D) none
+  (Not Implemented) bash-4.3, pdksh-5.2.14.2, oksh-6.6.1, posh-0.13.2
+
+I think now it is rather clear that the current wording of POSIX is
+somehow ambiguous and there can be different interpretations.  In
+fact, there is a split, (A) vs (B), in shell implementations.
+
+>> 2020-04-19 23:00 Harald van Dijk <ag@gigawatt.nl>:
+>>> It does still mean that anyone writing a function needs to beware that
+>>> exit and exit $? do not have the same effect, if there is any
+>>> possibility that the function will be invoked from a trap action. I
+>>> suspect most people writing functions will not be aware of that.
+
+Yes, that is the problem.  Actually, the original problem is that I
+just want to perform `eval "$PROMPT_COMMAND"` in a trap action in Bash
+script where `$PROMPT_COMMAND' is provided by users.  If everythinig
+is under the control, I can just always write `return $?', but the
+commands in `$PROMPT_COMMAND' are specified by users who are unlikely
+to care about this problem.  This specific case is just my personal
+one, but I think the behavior (B) can possibly cause similar problems
+in other shell scripts in general.
+
+
+>> 2020-04-19 20:51 Robert Elz <kre@munnari.oz.au>:
+>>> [...]
+>>>
+>>> The end result, unless we can get agreement that some
+>>> implementations are buggy, and will be fixed (which given the
+>>> split seems an unlikely outcome) is likely to simply be that all
+>>> of this simply becomes unspecified (or perhaps we could hope,
+>>> implementation defined) which will mean even more cases where it
+>>> becomes more difficult to write portable reliable code.
+>>>
+>>> kre
+
+>> 2020-04-19 23:00 Harald van Dijk <ag@gigawatt.nl>:
+>>> True, and if the intent is that exit and return behave differently
+>>> and the standard is updated to clearly require that, I have no
+>>> problem changing the shell back to the prior behaviour.
+
+According to these comments, it seems like a deadlock. The standard
+will not change until shells change their behavior to match with each
+other, and shells will not change their behavior until the standard is
+clarified.  Actually I can understand both sides, but I think we can
+find a point of compromise.
+
+There are already different implementations so it is already difficult
+to write portable and reliable code.  Even some shells such as
+`pdksh', `oksh' and `posh' does not implement the special behavior of
+`return' in trap actions at all, so the standard does not describe the
+current situation properly.  Thus I think the side effect of making it
+unspecified is limited.  Maybe we can first let it be unspecified and
+then wait to see if the shells will switch whether behavior from the
+literal reading (B) to more sensible interpretation (A) or not.
+
+- It might be difficult to change the behavior (B) of `ksh' and `mksh'
+  because its behavior is unchanged at least since 1993.
+
+- While, `bash' implemented the behavior (B) in bash-4.4 which is
+  relatively recently in its long history, so maybe we can hope for a
+  change.
+
+- Harald: The remaining shell with (B) in the list is `gwsh'.  For
+  example, if the standard changes its description to `unspecified'
+  (instead of clearly requiring (A) or other interpretation), do you
+  think you have a chance to change the behavior back?
+
+- I think `yash' with the interpretation (C) will follow the standard
+  anytime if the standard clarifies the intended behavior because
+  `yash' aims to strictly support POSIX.
+
+------------------------------------------------------------------------
+
+追加情報: Solaris 11 の /usr/sunos/bin/sh は Bourne sh らしい。
+これで試してみると解釈 A である。然し、Bourne sh の version が何かは謎。
+取り敢えず "SunOS 5.11 11.3 /usr/sunos/bin/sh" としておく。
+
+/usr/sunos/bin/ksh は ksh88 らしい。
+
+* version の確認の仕方が分からないが、
+  どうやら ksh88 には $ERRNO があり、また ${.sh.version} には対応していないらしい。
+  そして /usr/sunos/bin/ksh はそれを満たしている。或いは、
+  strings ksh | grep Version とやって確認するらしい。試しに実行してみると
+
+    @(#)Version M-11/16/88i
+
+  と表示されるが見方が良く分からない。
+  要するに 1988-11-16 の version という事か。
+
+* これで試すと先ず kill -USR $$ すると終了してしまう。
+  仕方がないので無限ループを回して外からのシグナルで trap を発動する事にした。
+  trap argument で return するとそのままシェルが終了してしまう。
+  そして関数の中で return すると preceding $? を使うらしい。
+
+  そもそも $? が全く変わらない可能性もある? と思ったが、
+  関数内で setexit するとちゃんと $? は更新されている。
+  という訳で ksh88 の振る舞いは (C) である。
+
+
+* bash-preexec.sh でやはり問題に為る気がする。
+  https://github.com/rcaloras/bash-preexec/blob/master/bash-preexec.sh#L232
+  ここでユーザが登録した関数の戻り値を確認している。
+  ユーザは return が直前のコマンドの終了ステータスを返すと考えるだろう。
+
+
+  暫くして何も動きがなければまた Bash に掛け合って見る事にする。
+
+  a 現在の振る舞いを変更する事を提案する。
+
+    * 長らく対応して来なかった。現在の振る舞いは割合最近の物である。
+
+      そして、変更の発端になったのは
+      (曖昧とされた POSIX) の記述による物であって、
+      実際の使用例から動機づけられた訳ではない。
+
+    * 寧ろ、今回のように問題が起きている。
+
+    * bash-prexec.sh でもユーザが return を使うと
+      DEBUG ハンドラの中で変な事が起こる。
+      preexec_function_ret_value の値が変な事になる。
+      然し、preexec_function_ret_value は bash-preexec 自身では使われていない。
+      実際にこの変数を使うスクリプトが存在するのかは謎。
+      iterm2_shell_integration も使ってはいない。
+      Google で検索すると preexec_function_ret_value を
+      含んでいるのはこの二つだけである。
+
+    * 現在の振る舞いに依存しているコードがあるとは思えない
+      (使いみちが分からない。結局理由付けも為されなかった)。
+
+  b -o posix の時にのみ B の振る舞いにする。
+    これは元々の ChangeLog の中に残されていた言葉に基づく。
+
+  c 或いはこの振る舞いを制御する shopt を作成する?
+    この細かい振る舞いだけに特化した shopt を作るのも
+    変だという気がするので、compat50 か compat44 に含めても良い。
