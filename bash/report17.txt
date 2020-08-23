@@ -1,0 +1,51 @@
+Subject:  How to use PROMPT_COMMAND(S) without breaking other scripts
+
+Hi, I have a question on the behavior of the new array PROMPT_COMMANDS
+and the best practice to use it.
+
+In coming Bash 5.1, the new array variable `PROMPT_COMMANDS' is
+available in the replacement of `PROMPT_COMMAND'.  When the array
+`PROMPT_COMMANDS' has one or more elements, the scalar version
+`PROMPT_COMMAND' is disabled.
+
+Is there a background that the scalar version is disabled in the
+presence of the array version?  Because of this behavior, I am
+wondering how to write a source script in the way not interfering with
+other source scripts which might use either of `PROMPT_COMMANDS' or
+`PROMPT_COMMAND'.
+
+* If I use the newer form `PROMPT_COMMANDS+=(my-function)', other
+  scripts that use `PROMPT_COMMAND' will be broken.  Maybe I can write
+  in the following way to convert `PROMPT_COMMAND' to
+  `PROMPT_COMMANDS', but it still does not resolve the problem of the
+  scripts sourced after my script.
+
+  if [[ $PROMPT_COMMAND ]]; then
+    PROMPT_COMMANDS+=("$PROMPT_COMMAND")
+    unset PROMPT_COMMAND
+  fi
+  PROMPT_COMMANDS+=(my-function)
+
+* If I use the older form with `PROMPT_COMMAND', it will be broken
+  when another script sets the variable `PROMPT_COMMANDS'.  Maybe I
+  can switch to `PROMPT_COMMANDS' only when the array already exists,
+  but it again does not work when the other script sourced after mine
+  newly sets `PROMPT_COMMANDS'.
+
+  if ((${#PROMPT_COMMANDS})); then
+    PROMPT_COMMANDS+=(my-function)
+  else
+    PROMPT_COMMAND="my-function${PROMPT_COMMAND:+;}$PROMPT_COMMAND"
+  fi
+
+Here, my question is what is the best practice to use the new array
+variable `PROMPT_COMMANDS' in the way that it does not break the
+conventional scripts that use `PROMPT_COMMAND'.
+
+# The related commit is 5f49ef47d (commit bash-20200323 snapshot).
+# Here are the related threads:
+# https://lists.gnu.org/archive/html/bug-bash/2018-01/threads.html#00067
+# https://lists.gnu.org/archive/html/bug-bash/2018-02/threads.html#00019
+
+--
+Koichi
