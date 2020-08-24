@@ -107,3 +107,98 @@ PROMPT_COMMAND set by others into PROMPT_COMMANDS.
 
 --
 Koichi
+
+----------------------------------------------------------------------
+
+From: Martijn Dekker
+
+Op 24-08-20 om 15:57 schreef Chet Ramey:
+> I sometimes think I should have stuck with converting PROMPT_COMMAND to
+> an array. Either way, there's going to be a transition, and maybe that
+> would have been the easiest.
+
+Is it too late? I think that would actually be cleaner than adding a
+separate array, per Koichi's report.
+
+One problem is that if a script does the obvious
+
+     PROMPT_COMMAND+=("some command here")
+
+if PROMPT_COMMAND is not yet set, then it starts adding at array index
+0, so a subsequent traditional usage from some other script
+
+     PROMPT_COMMAND="some command here"
+
+would overwrite it. So array usage should not use the 0 index. To avoid
+using the 0 index, one possibility is:
+
+     PROMPT_COMMAND[$(( ${#PROMPT_COMMAND[@]} + 1 ))]="some command here"
+
+which, if PROMPT_COMMAND is unset, starts adding at index 1, not 0, and
+otherwise acts identically. However, 'set -u'/'set -o nounset' kills
+that. That option makes the ${#PROMPT_COMMAND[@]} expansion error out if
+there are no array elements (even though ${#@} works with no positional
+parameters). It's also an unwieldy command. So maybe that idea is not
+the best.
+
+Another way to avoid using the 0 index, which is 'set -u' compatible,
+would be
+
+     PROMPT_COMMAND=${PROMPT_COMMAND-}
+     PROMPT_COMMAND+=("some command here")
+
+The first command sets PROMPT_COMMAND[0] to the empty value if it
+doesn't exist yet, and otherwise leaves it unchanged. It's a bit of an
+ugly hack though.
+
+But then, maybe it's best if bash itself just sets PROMPT_COMMAND[0] to
+the empty value on initialisation. IMO that would be a reasonably clean
+and reliable way to ensure a smooth transition.
+
+Just my 2¢,
+
+- M.
+
+----------------------------------------------------------------------
+
+% > Is it too late? I think that would actually be cleaner than adding a
+% > separate array, per Koichi's report.
+% 
+% If it's not too late to change, converting PROMPT_COMMAND to an array
+% looks better to me too.
+% 
+% > if PROMPT_COMMAND is not yet set, then it starts adding at array index
+% > 0, so a subsequent traditional usage from some other script
+% > 
+% >      PROMPT_COMMAND="some command here"
+% 
+% I haven't thoght this was a really problem because this is the
+% existing obvious problem and one can carefully work around it by
+% appending/prepending the new command or saving the original content in
+% a private variable (as discussed in the original thread at
+% https://lists.gnu.org/archive/html/bug-bash/2018-01/threads.html#00067
+% ) though it can mess up things.  If some scripts doing
+% PROMPT_COMMAND="some command here" caused a problem, the script that
+% did it should be responsible.
+% 
+% But, yes, if we have a way to work around the problems caused by such
+% broken scripts, that's nice.
+%
+% > But then, maybe it's best if bash itself just sets PROMPT_COMMAND[0]
+% > to the empty value on initialisation. IMO that would be a reasonably
+% > clean and reliable way to ensure a smooth transition.
+% 
+% This looks the simplest and cleanest solution.  In this way, one can
+% just write `PROMPT_COMMANDS+=("...")'.
+
+色々書いたけれども自明な事しか書いていないのでやめた。
+結局伝えたいのは "自分は賛成" という事だけなのである。
+
+> Is it too late? I think that would actually be cleaner than adding a
+> separate array, per Koichi's report.
+
+If it's not too late to change, converting PROMPT_COMMAND to an array
+looks better to me too.  As for the problem of scripts doing
+`PROMPT_COMMAND=command', as suggested in the last paragraph from
+Martijn, I think it is enough to initialize PROMPT_COMMAND[0] by an
+empty string.
