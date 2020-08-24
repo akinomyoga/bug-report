@@ -49,3 +49,61 @@ conventional scripts that use `PROMPT_COMMAND'.
 
 --
 Koichi
+
+----------------------------------------------------------------------
+
+On 8/22/20 10:35 PM, Koichi Murase wrote:
+> Hi, I have a question on the behavior of the new array PROMPT_COMMANDS
+> and the best practice to use it.
+>
+> In coming Bash 5.1, the new array variable `PROMPT_COMMANDS' is
+> available in the replacement of `PROMPT_COMMAND'.  When the array
+> `PROMPT_COMMANDS' has one or more elements, the scalar version
+> `PROMPT_COMMAND' is disabled.
+>
+> Is there a background that the scalar version is disabled in the
+> presence of the array version?
+
+There's no real good solution. I wanted a clean break between the scalar
+and array versions, figuring that the distributions that populated
+PROMPT_COMMAND could easily make that PROMPT_COMMANDS[0].
+
+It would be easy enough to favor PROMPT_COMMANDS over PROMPT_COMMAND,
+but execute both if both are set. The problem there is that it
+interferes with the ability to use both, as some distros might want as a
+transition, and result in commands being executed twice. Since you have
+to check the bash version to make sure that PROMPT_COMMANDS is going to
+work, I don't think it's going to be that hard to use one or the other
+consistently.
+
+I sometimes think I should have stuck with converting PROMPT_COMMAND to
+an array. Either way, there's going to be a transition, and maybe that
+would have been the easiest.
+
+--
+Chet
+
+----------------------------------------------------------------------
+
+2020-08-24 23:57 Chet Ramey <address@hidden>:
+> There's no real good solution. I wanted a clean break between the scalar
+> and array versions, figuring that the distributions that populated
+> PROMPT_COMMAND could easily make that PROMPT_COMMANDS[0].
+
+Thank you for your reply.  OK, if there would be no better solution, I
+would go with the first option (to convert PROMPT_COMMAND to
+PROMPT_COMMANDS and append mine to PROMPT_COMMANDS) and see if
+something happens.
+
+> The problem there is that it interferes with the ability to use
+> both, as some distros might want as a transition, and result in
+> commands being executed twice.
+
+Now I see the points.  I didn't come to the idea to set the values to
+both as I somehow unconsciously assumed that everyone checks the Bash
+version when one uses PROMPT_COMMANDS.  Thank you for pointing this
+out.  This means that I need to be careful if I would convert
+PROMPT_COMMAND set by others into PROMPT_COMMANDS.
+
+--
+Koichi
