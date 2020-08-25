@@ -1,0 +1,76 @@
+
+
+
+* coveralls の使い方がよく分からない。
+
+  https://coveralls.io/jobs/92059
+
+  https://coveralls.io/jobs/66744010 1
+  https://coveralls.io/jobs/66744120 2
+  https://coveralls.io/jobs/66744154 3
+  https://coveralls.io/jobs/66744301 4
+
+
+  何れも有効な行が存在せず coverage 0% total 0% になっている。
+  検索してみると以下のページが見つかった。
+  https://stackoverflow.com/questions/37373398/why-does-coveralls-show-0-coverage-when-every-source-file-is-100-covered
+  g++ version と gcov version が一致していないからだとの事。
+  g++ のコンパイルログに何か gcov version が出力されるそうだが、確認してみるとない。
+  というより g++ のオプションを見てもそれらしい物が存在しない。
+  g++ の coverage サポートは一体どうなっているのだろうかと調べてみると、
+  以下のページによると -ftest-coverage -fprofile-arcs をコンパイラオプションに指定するそうだ。
+  https://medium.com/@naveen.maltesh/generating-code-coverage-report-using-gnu-gcov-lcov-ee54a4de3f11
+  存在していない。Makefile の中を覗いても書いていない。Makefile.am の先頭に条件で COND_GCOV というのを見ている。
+  つまり ./configure オプション? と思って確認したらそうだった。
+  $ ./configure --prefix=$HOME/opt/seq2gif --enable-gcov
+  $ make clean
+  $ m
+  今度はちゃんと --coverage というオプションが指定されている。
+
+  $ m coveralls
+  ちゃんと色々出力される様になった。しかしエラーメッセージが表示されている。
+  seq2gif-malloc_stub.gcno:関数が見つかりません
+  seq2gif-malloc_stub.gcda:データファイルを開けません。実行されていないと見なします
+  {'message': 'Job ##123.5', 'url': 'https://coveralls.io/jobs/66744478'}
+
+  ttyrec -f tests/data/IND.tty -- echo $'A\eMB'
+  ttyrec -f tests/data/CSI-broken.tty -- echo $'\e[\am'
+
+  https://coveralls.io/jobs/66744478 5
+  https://coveralls.io/jobs/66744795 6
+  https://coveralls.io/jobs/66744851 7
+  https://coveralls.io/jobs/66744865 8
+  https://coveralls.io/jobs/66744925 9
+
+* palette16
+
+  $ cat color16.sh
+  #!/bin/bash
+
+  printf '%s' $'\e[38;5;'{0..15}'mA'; echo
+  printf '%s' $'\e[48;5;'{0..15}'mA'; echo
+  $ ttyrec -e ./color16.sh -f tests/data/color16.tty
+
+* support-bold-rendition
+
+| Original      | New  | New (with option `-B`) |
+|:-------------:|:----:|:----------------------:|
+| Bright colors | Bold | Bright colors          |
+
+* colormap
+
+  24 gray scale の変換がおかしい気がする。
+
+  k2v は 8+k*10 の式で計算する。
+  最小は 8 で最大は 238 である。
+  取り敢えず黒と白を i=16,i=232 で代替する事は考慮に入れない。
+
+  どの様に変換するのが適切だろうか。
+  それぞれの色について +- 5 を自分の範囲とするのが良いだろう。
+  つまり、v=8+k*10 に対して [v-5,v+5) が k に対応する強度の範囲。
+  全体としては [3,243) が対応範囲になる。
+  
+  式は `24*(v-3)/240 = (v-3)/10` という事になる。
+
+  https://coveralls.io/jobs/66769312
+  https://coveralls.io/jobs/66798275
