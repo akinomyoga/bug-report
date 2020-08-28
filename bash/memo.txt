@@ -1,20 +1,10 @@
 
+
 ------------------------------------------------------------------------------
   Memo
 ------------------------------------------------------------------------------
 
 2020-05-15
-
-* bash-5.0 以降で不完全なコマンドを実行するとシェルが終了する。
-  { a=1 } を無理やり実行するとシェルが終了する。
-  というより "for i; do echo $i" を強制的に実行してもそうなる。
-  これは防ぐ事はできるだろうか。
-
-  普通の bash セッションで eval 'for i; do echo $i' としてもシェルが終了する。
-  何故この様な振る舞いなのだろうか。どうも、bash-5.0 以降の振る舞いの様である。
-
-  先ず eval { だけでも再現する。bash-4.4 以前は終了しない。
-  試しに関数の中に入れて実行してみたがそれでも駄目。
 
 * ${ list; } に対応するには何処をどうすれば良いのか。
   Chet が patch があれば受け入れると言っている。
@@ -218,35 +208,6 @@
   Bugs
 ------------------------------------------------------------------------------
 
-2020-08-23
-
-* report17: PROMPT_COMMANDS と PROMPT_COMMAND を共存させるにはどうしたら良いのか。
-  ble.sh で --attach=prompt で PROMPT_COMMANDS に対応しようとして分からなくなった。
-  取り敢えずメールで質問を書いた。
-
-2020-04-20
-
-* hash_search が線形探索しているから遅いと主張する人が現れた
-  然し言っている事が良くわからない。実測してみた所、
-  確かに途中から自乗で計算時間が増えている。
-
-  調べてみると rehash が実装されていない。実装してみた所、高速になった気がする。
-  条件を等しくして計測しなければならないので計測し直す。
-
-  テスト用コード
-  | {
-  |   FILE*f=fopen("/dev/tty","a");
-  |   fprintf(f,"hash_insert\n");
-  |   fclose(f);
-  | }
-
-  取り敢えずファイルを整理する。
-
-  * test1.sh は移動して編集した。計測が終わり次第移動元は削除する。
-  * 計測データも移動する。 test1.txt.a と test1.txt.b である。
-  * gp を編集する。
-
-
 2019-12-17
 
 * shadow がそのままになってしまう。
@@ -275,6 +236,254 @@
 -------------------------------------------------------------------------------
   Done
 -------------------------------------------------------------------------------
+
+2020-08-28
+
+* report18: bash-5.0 以降で不完全なコマンドを実行するとシェルが終了する。
+  { a=1 } を無理やり実行するとシェルが終了する。
+  というより "for i; do echo $i" を強制的に実行してもそうなる。
+  これは防ぐ事はできるだろうか。
+
+  普通の bash セッションで eval 'for i; do echo $i' としてもシェルが終了する。
+  何故この様な振る舞いなのだろうか。どうも、bash-5.0 以降の振る舞いの様である。
+
+  先ず eval { だけでも再現する。bash-4.4 以前は終了しない。
+  試しに関数の中に入れて実行してみたがそれでも駄目。
+
+  * 取り敢えず何故このような変更がなされたのか調べる事にする。
+    先ず、どの commit でこれが発生したのかを調べる。
+
+    8a10051 犯人はこれ。
+    以下の変更が怪しい。実際に試したらそうだった。
+
+    > From 8a100514480a55ad73966e516e38778509f6ace6 Mon Sep 17 00:00:00 2001
+    > From: Chet Ramey <chet.ramey@case.edu>
+    > Date: Thu, 11 May 2017 14:45:50 -0400
+    > Subject: [PATCH] commit bash-20170511 snapshot
+    >
+    > diff --git a/CWRU/CWRU.chlog b/CWRU/CWRU.chlog
+    > index 7892ce94..8ea60a39 100644
+    > --- a/CWRU/CWRU.chlog
+    > +++ b/CWRU/CWRU.chlog
+    > @@ -13840,3 +13840,18 @@ builtins/read.def
+    >  	  a CTLESC the last time through the loop (skip_ctlesc == 0),
+    >  	  especially if i == 0. Another fuzzing bug from Eduardo Bustamante
+    >  	  <dualbus@gmail.com>
+    > +
+    > +				    5/9
+    > +				    ---
+    > +parse.y
+    > +	- token_is_assignment: use the allocated buffer approach in all cases,
+    > +	  not just if we're not using bash malloc. This avoids the assignment
+    > +	  to t[i+1] writing beyond the end of the allocated token if
+    > +	  i == token_buffer_size - 1. Another fuzzing bug
+    > +	- xparse_dolparen: if parse_string returns < 0, we clear out the
+    > +	  current shell_input_line before performing a longjmp, since we're
+    > +	  abandoning parsing of this command.  This is consistent with how
+    > +	  the parser resynchronizes after other syntax errors
+    > +	- GRAMMAR: add 'error yacc_EOF' production to handle a syntax error
+    > +	  that's immediately followed by an EOF after resynchronization.
+    > +	  Fixes another fuzzing bug
+    > diff --git a/parse.y b/parse.y
+    > index 7ca4a64e..dcc628e7 100644
+    > --- a/parse.y
+    > +++ b/parse.y
+    > @@ -411,7 +411,14 @@ inputunit:	simple_list simple_list_terminator
+    >  			      YYABORT;
+    >  			    }
+    >  			}
+    > +	|	error yacc_EOF
+    > +			{
+    > +			  /* EOF after an error.  Do ignoreeof or not.  Really
+    > +			     only interesting in non-interactive shells */
+    > +			  global_command = (COMMAND *)NULL;
+    > +			  handle_eof_input_unit ();
+    > +			  YYACCEPT;
+    > +			}
+    >  	|	yacc_EOF
+    >  			{
+    >  			  /* Case of EOF seen by itself.  Do ignoreeof or
+    > --
+    > 2.21.3
+
+    では何故この様に振る舞うのか。
+
+    | ? というより、コメントには
+    |   "really only interesting in non-interactive shells" と書いてあるので、
+    |   interative shell で振る舞いが変わってしまっているのは意図していない気がする。
+    |   →と思ったが handle_eof_input_unit の実装を見ると
+    |   interactive shell だけで意味のある操作をしている気がする。
+    |   このコメントの non-interactive は interactive の間違いだろうか。
+    |
+    | ? yacc の記法がよく分からないが、error yacc_EOF と yacc_EOF の両方があるのは何故。
+    |   別に error yacc_EOF と yacc_EOF の順序はどちらでも関係ないようである。
+    |   うーん。error yacc_EOF とは error が生じてから yacc_EOF が来た時の動作?
+    |   →実際にコメントにはその様に書かれている。
+    |
+    | 調べてみると中で呼び出されている handle_eof_input_unit で終了している様だ。
+    | 追加された部分がない時には代わりに yacc_EOF 節が呼び出される訳でもない様だ。
+    | 完全なコマンド eval '{ echo; }' 等を実行しても yacc_EOF に入るわけではない。
+    | どうも C-d で抜けたりすると yacc_EOF に入る様である。
+    |
+    | ? そもそもこの修正は何故行われたのか。fuzzing で見つかったという事になっている。
+    |   関係ありそうなのは以下のスレッドである。然しどれかは分からない。
+    |   https://lists.gnu.org/archive/html/bug-bash/2017-05/msg00076.html *
+    |   https://lists.gnu.org/archive/html/bug-bash/2017-05/msg00075.html
+    |   https://lists.gnu.org/archive/html/bug-bash/2017-05/msg00045.html
+    |   https://lists.gnu.org/archive/html/bug-bash/2017-05/msg00036.html
+    |
+    |   修正するにしても元々の問題が再現する様になる修正方法では駄目である。
+    |   例えば、error yacc_EOF で何も実行しない様にする事で例えば無限ループになるのだと駄目。
+    |
+    | ここでの正しい修正方法は何だろうか。
+    | eval の中で EOF が来た場合には勝手に終了する訳には行かない。
+
+  * 調べて分かった事。対話シェルのユーザコマンドでしか発生しない。
+    これは明らかに振る舞いとして不自然である。
+
+    * 普通のスクリプト実行では eval '{' しても其処で終了したりする事はない。
+    * bash --rcfile <(echo eval {) -i としても終了したりはしない。
+
+    ? 何故通常のコマンドの時にはこのエラーが発生しないのだろうか。
+      eval の中だったら起こるという訳でもない。
+      何が起こっているのだろうか。
+      と思ったが、唯単に終了しないというだけで通過はしているのかもしれない。
+      確認してみる事にする。
+
+      →確かめてみた所、普通のスクリプト実行時にもちゃんと error yacc_EOF は発生しているが、
+      対話シェルではないという事からその場で終了したりはしないという事らしい。
+
+      また、eval で完全なコマンドを提供した時には特に error yacc_EOF も yacc_EOF も発生しない。
+      評価している文字列の末端でエラーが起こった時に error yacc_EOF が発生し、
+      また評価しているスクリプトの末端で yacc_EOF が発生する。
+      それ以外の末端の場合には何も発生しない、という事のようである。不思議である。
+
+    * source の場合にも同じ問題が生じる? と思ったら何故か問題は生じない。
+      対話モードを一時的に抜けているという事なのだろうか。
+
+      調べてみると evalstring に SEVAL_NONINT または SEVAL_INTERACT を渡した時には
+      対応する対話モードに一時的に変更してコマンドを実行する様である。
+      source の場合には非対話モードで処理をするという事なのだろう。
+      なので急に終了したりはしない。
+
+  * 元の fuzz で発見された問題は何だったのか
+
+    | ? No: eval { で中途半端な状態にして解析中断するとスタックに何か残って問題が起こるという事?
+    |   と思って以下のコードを実行してみたが特にメモリを食らう様になるなどの事は内容に見える。
+    |
+    |   $ time for ((i=0;i<10000000;i++)); do eval {; done 2>/dev/null
+    |
+    |   メモリ使用量も増えていない。以下の1行目は上のループの実行前で、2行目は実行後。
+    |
+    |   $ ps uaxf | grep $$
+    |   murase    8850  0.0  0.0  16784  7196 pts/3    S    06:35   0:00  |   \_ bash-4.4 --norc
+    |   murase    8833 29.2  0.0  16888  7264 pts/3    S    06:32   0:44  |   \_ bash-4.4 --norc
+    |
+    | ? 元のメールにある報告で確認できないか。よく分からないと思ったが、
+    |   base64 で表示しているのが問題のある入力だったという事のようであ
+    |   る。中を見ると通常の bash スクリプトの一部を部分的に破壊した様な
+    |   内容になっている。成程、こういう物が fuzz の対象となるのである。
+    |
+    |   実際に bash-4.4 が segfault する事を確認する事ができた。
+    |   これが件の変更と関連するかどうかを調べれば良いのである。
+    |   →OK segfault にはならなかったが、無限ループになるという事を確認できた。
+    |   報告では確かに無限ループと書かれている。
+
+    問題は再現した。そして単にコメントアウトすれば問題は起こらない。
+
+  * まとめ
+
+    ? コメントの "really only interesting in non-interactive shells"
+      の意味はよく分からない。実際の動作は逆に interactive shells で何
+      か特別な操作をしている様に見える。
+
+    * "error yacc_EOF" は構文エラーの直後に EOF が来る時に発生する?
+      通常のスクリプトで発生する条件と
+      interactive session に於いて発生する条件が同じか確認が必要。
+
+      * 対話シェルではトップレベルで "error yacc_EOF" が実行される事はな
+        い。
+      * 関数内で実行されるということもないだろう。何故なら、そもそも
+        構文エラーを含む様な関数を定義できないので。
+      * source の末端では error yacc_EOF が発生する様だが、source は非
+        対話モードでファイルを読み込むので即座に終了するという事はない。
+      * eval の末端で起きているのが今回の問題。eval は対話モードで評価
+        する為に問題が発生する。
+
+      この現在の状況でそのまま報告すると Chet はおそらく、eval は対話
+      モードで評価するのだから { が来た時に終了するのは自然である等と
+      変な回答をして修正しないという事が予想される。ここはちゃんと調べ
+      て何が問題点でどの様に修正するべきかを提示する必要がある。
+
+    元々の問題は以下で報告されている物である。
+    当該変更によって以下の振る舞いが修正される事を確認した。
+     https://lists.gnu.org/archive/html/bug-bash/2017-05/msg00076.html
+
+    * どのように修正するべきだろうか。
+      単に global_command と handle_eof_input_unit() を
+      コメントアウトしただけだと eval { の終了ステータスが 0 になっている。
+      handle_eof_input_unit() だけをコメントアウトしてもだめ。
+      handle_eof_input_unit() の代わりに EOF_Reached = 1 を設定しても駄目。
+      YYACCEPT; の代わりに YYABORT; を実行すると問題ない。
+
+    * そもそも何故この修正で無限ループが修正されるのだろうか。
+      これは解析の無限ループではなくて実行の無限ループである。
+
+  * 問題点2: どうも元の報告に対しても bash -n の終了ステータスが変である。
+    構文エラーが報告されているのにも関わらず終了ステータス 0 になっている。
+    これはやはり終了ステータス 1 になるべきなのではないだろうか。
+    →と思ったらこれは bash-5.0 では既に修正されている。
+    つまり個の部分に対して更なる修正が追加されたという事を意味する。
+    確認する必要がある。
+
+    d7d836dfc (Chet Ramey 2017-06-20 10:38:13 -0400  424) に条件分岐で
+    YYABORT と YYACCEPT を切り替える様にしている。更に、
+    ab8ded9c3 (Chet Ramey 2018-12-17 14:53:06 -0500  421) で追加の条件で
+    何かの処理を追加している。うーん。
+
+    どうも prase_and_execute_level を見て振る舞いを変えれば良いのではないか?
+    実際に見てみた所、確かに prase_and_execute_level を見ればトップレベルで実行されているかどうか確認できる。
+    なので修正するとすれば handle_eof_input_unit を
+    if (interactive && parse_and_execute_level == 0) の条件下に移動するという事。
+
+    然し、そもそも何故 ignoreeof のチェックが evalstring の中で有効に
+    なっていたのだろうか。謎である。eval の中で何らかの理由で EOF が受
+    け取られた時に ignoreeof が設定されていない時には勝手に終了してし
+    まうという事なのだろうか。然し、実際には eval を実行している時には
+    EOF は受信されない様である。うーん。不思議である。まあ気にしなくて
+    良い気がする。
+
+  Bug report を作成する事にする。必要な情報を集める事にする。
+
+2020-08-23
+
+* report17: PROMPT_COMMANDS と PROMPT_COMMAND を共存させるにはどうしたら良いのか。
+  ble.sh で --attach=prompt で PROMPT_COMMANDS に対応しようとして分からなくなった。
+  取り敢えずメールで質問を書いた。
+
+2020-04-20
+
+* report16: hash_search が線形探索しているから遅いと主張する人が現れた
+  然し言っている事が良くわからない。実測してみた所、
+  確かに途中から自乗で計算時間が増えている。
+
+  調べてみると rehash が実装されていない。実装してみた所、高速になった気がする。
+  条件を等しくして計測しなければならないので計測し直す。
+
+  テスト用コード
+  | {
+  |   FILE*f=fopen("/dev/tty","a");
+  |   fprintf(f,"hash_insert\n");
+  |   fclose(f);
+  | }
+
+  取り敢えずファイルを整理する。
+
+  * test1.sh は移動して編集した。計測が終わり次第移動元は削除する。
+  * 計測データも移動する。 test1.txt.a と test1.txt.b である。
+  * gp を編集する。
+
+  2020-08-28 メモが書きかけになって残っていたが、これは既に merge されている。
 
 2020-04-17
 
@@ -349,7 +558,7 @@
 
   >            3/11
   >            ----
-  > 
+  >
   > builtins/common.c
   >   - get_exitstat: when running `return' in a trap action, and it is not
   >     supplied an argument, use the saved exit status in
@@ -360,7 +569,7 @@
 
   >            3/18
   >            ----
-  > 
+  >
   > builtins/common.c
   >   - get_exitstat: update fix of 3/11 to allow the DEBUG trap to use the
   >     current value of $? instead of the value it had before the trap
@@ -463,13 +672,13 @@
   |   これは source, . であろう。
   | * それから shell.c で array_push が実行されている。
   |   これは見た所は最初の初期化としてグローバルに対応する要素を設定しているだけである。
-  | 
+  |
   | と思ったら丁度 funcnest という変数がいい感じに管理されている。
   | 実はこれを記録すれば良いのではないだろうか。
   | * execute_cmd.c の execute_function では funcnest++ されている。
   | * shell.c では funcnest は設定されていない。
   | * evalfile.c では funcnest ではなくて sourcelevel++ が実行されている。
-  | 
+  |
   | よく見ると return_catch_flag++ されている様だ。
   | * evalfile.c で return_catch_flag++ されている。
   | * 実は evalstring.c でも return_catch_flag++ されている。
@@ -571,14 +780,14 @@
   然し中身を解釈する時には \C-\ が一つのまとまりと解釈される。
 
   % どちらが採用されるべきだろうか。
-  % 
+  %
   % a \C-\\ に統一する案。既存のコードに対する影響はどれほどだろうか。
   %   つまり \C-\ 前提で扱っているコードはあるだろうか。
   %   "\C-\" は使えない。何故なら \" をエスケープする為。
   %   "\C-\a" 等はどうだろうか。これは従来通りの解釈になる様にすればOK
   %   "\C-\\" はどうだろうか。従来は C-\ + \ だったのが今後は C-\ という意味に変わる。
   %   "\C-\\C-a" は C-\ C-a から "C-\ C - a" に意味が変わる。
-  % 
+  %
   % b 逆に \C-\ に統一する案。"\C-\" を accept する様に書き換えが必要である。
   %   また出力の際に \\ ではなく \ を出力する様に変更する必要がある。
 
@@ -587,13 +796,13 @@
 
   | 解釈の inconsistency についてはどうだろうか。
   | というか何故古い Bash で問題が発生していなかったのか。
-  | 
+  |
   | どうも解釈に関しては \C-\\ から \C-\ になったのは Bash 5 からの様だ。
   | どの瞬間から変化したのだろうか。もしかして自分が噛んでいたりする?
   | 動作を確認すると rl_parse_and_bind が呼び出されてその中で
   | "..." の中身が抽出されて、それから rl_bind_seq 及び rl_macro_bind に渡される。
   | これらの関数は rl_translate_keyseq を使っている。
-  | 
+  |
   | うーん。不思議だ rl_translate_keyseq の中は確かに最近変更されているが、
   | 該当部分は変更されていない様に見える。だとすれば渡す側に何か変更がある?
   | 切り出し部分を確認したが全く変更はない。という事はやはり rl_translate_keyseq である。
@@ -603,7 +812,7 @@
   |     20170505 変化。これが犯人である。
   |   20170407 の時点では未だ。20170421 未変化。20170428 未変化。
   | 20170106 の時点ででは未だ変化していない。
-  | 
+  |
   | commit af2a77f
   | | diff --git a/CWRU/CWRU.chlog b/CWRU/CWRU.chlog
   | | index 51e95ae3..7892ce94 100644
@@ -627,16 +836,16 @@
   | | +++ b/lib/readline/bind.c
   | | @@ -441,7 +441,10 @@ rl_translate_keyseq (const char *seq, char *array, int *len)
   | |            c = seq[++i];
-  | | 
+  | |
   | |            if (c == 0)
   | | +            {
   | | +              array[l++] = '\\';        /* preserve trailing backslash */
   | |                break;
   | | +            }
-  | | 
+  | |
   | |            /* Handle \C- and \M- prefixes. */
   | |            if ((c == 'C' || c == 'M') && seq[i + 1] == '-')
-  | 
+  |
   | 不思議だこれで振る舞いが変わるのは不思議だ。
   | あ。分かった。テストケースが悪いんだ。
   | 前から \C-\ だったのが、中途半端な \ を無視する事によって

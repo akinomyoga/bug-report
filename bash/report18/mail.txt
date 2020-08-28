@@ -1,0 +1,205 @@
+From: murase
+To: bug-bash@gnu.org
+Subject: Bash 5.0+: Interactive session closes with `eval {'
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -march=native -O3
+uname output: Linux chatoyancy 5.6.13-100.fc30.x86_64 #1 SMP Fri May
+15 00:36:06 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-pc-linux-gnu
+
+Bash Version: 5.1
+Patch Level: 0
+Release Status: release
+
+Description:
+
+  When a command string with an incomplete construct is supplied to
+  the `eval' builtin in interactive sessions, the process will be
+  terminated.  This does not happen before Bash 5.0.  This does not
+  happen in non-interactive modes.
+
+Repeat-By:
+
+  The entire interactive session ends with `eval {'.
+
+  bash-5.0$ eval {
+  bash-5.0: syntax error: unexpected end of file
+  exit
+
+  This does not happen in bash-4.4 and before.  The session will not
+  close, and one can enter and execute the next command.
+
+  bash-4.4$ eval {
+  bash-4.4: syntax error: unexpected end of file
+  bash-4.4$ echo $?
+  1
+  bash-4.4$
+
+  This also happens when `eval {' is executed in a function.  The
+  session closes.
+
+  bash-5.0$ function fun { eval {; }
+  bash-5.0$ fun
+  bash-5.0: syntax error: unexpected end of file
+  exit
+
+  This does not happen when `eval {' is executed in the
+  non-interactive mode.  The commands following `eval {' will be
+  executed as normal.
+
+  bash-5.0$ cat test18.sh
+  echo Begin eval
+  eval {
+  echo End eval
+  bash-5.0$ bash-5.0 test18.sh
+  Begin eval
+  test18.sh: eval: line 2: syntax error: unexpected end of file
+  End eval
+  bash-5.0$ . test18.sh
+  Begin eval
+  test18.sh: eval: line 2: syntax error: unexpected end of file
+  End eval
+
+Fix:
+
+* This behavior has been introduced in `parse.y' in commit 8a10051
+  (commit bash-20170511 snapshot) to solve the infinite loop found by
+  fuzzing reported at
+
+    https://lists.gnu.org/archive/html/bug-bash/2017-05/msg00076.html.
+
+  I extracted the related section of the commit change:
+
+  > From 8a100514480a55ad73966e516e38778509f6ace6 Mon Sep 17 00:00:00 2001
+  > From: Chet Ramey <chet.ramey@case.edu>
+  > Date: Thu, 11 May 2017 14:45:50 -0400
+  > Subject: [PATCH] commit bash-20170511 snapshot
+  >
+  > diff --git a/CWRU/CWRU.chlog b/CWRU/CWRU.chlog
+  > index 7892ce94..8ea60a39 100644
+  > --- a/CWRU/CWRU.chlog
+  > +++ b/CWRU/CWRU.chlog
+  > @@ -13840,3 +13840,18 @@ builtins/read.def
+  >  	  a CTLESC the last time through the loop (skip_ctlesc == 0),
+  >  	  especially if i == 0. Another fuzzing bug from Eduardo Bustamante
+  >  	  <dualbus@gmail.com>
+  > +
+  > +				    5/9
+  > +				    ---
+  > +parse.y
+  > +	- GRAMMAR: add 'error yacc_EOF' production to handle a syntax error
+  > +	  that's immediately followed by an EOF after resynchronization.
+  > +	  Fixes another fuzzing bug
+  > diff --git a/parse.y b/parse.y
+  > index 7ca4a64e..dcc628e7 100644
+  > --- a/parse.y
+  > +++ b/parse.y
+  > @@ -411,7 +411,14 @@ inputunit:	simple_list simple_list_terminator
+  >  			      YYABORT;
+  >  			    }
+  >  			}
+  > +	|	error yacc_EOF
+  > +			{
+  > +			  /* EOF after an error.  Do ignoreeof or not.  Really
+  > +			     only interesting in non-interactive shells */
+  > +			  global_command = (COMMAND *)NULL;
+  > +			  handle_eof_input_unit ();
+  > +			  YYACCEPT;
+  > +			}
+  >  	|	yacc_EOF
+  >  			{
+  >  			  /* Case of EOF seen by itself.  Do ignoreeof or
+  > --
+  > 2.21.3
+
+  The problem here is that `handle_eof_input_unit' terminates the
+  entire shell when it is in the interactive mode even when the shell
+  is processing the string passed to `eval' command.
+
+  The special treatment of EOF for exiting shell should be processed
+  only when the shell processes the top-level commands (i.e., not the
+  command strings executed through `eval', etc.)
+
+  I attach a patch for the devel branch (see
+  0001-Fix-a-bug-that-syntax-errors-in-eval-causes-the-inte.patch).  I
+  moved the position of the line `handle_eof_input_unit ();' so that
+  it is only executed when `parse_and_execute_level == 0'.
+
+  [ Note: The current code in `parse.y' has additional fixes after
+  2017-05-09, so the code looks slightly different from that in the
+  commit 2017-05-09 [for details, see Appendix A below], but the `eval
+  {' problem is still present. ]
+
+--
+Koichi
+
+----------------------------------------------------------------------
+
+Appendix A:
+
+  One of the fix has been made to solve another problem introduced by
+  2017-05-09 fix: Even in non-interactive modes, the exit status of
+  `eval {' becomes 0 althogh it prints the error messages of syntax
+  errors.  This second problem has been already reported by Martijn at
+
+    https://lists.gnu.org/archive/html/bug-bash/2017-06/msg00236.html
+
+  The fix to this second problem has been made in the commit d7d836dfc
+  (commit bash-snap-20170620 snapshot).  I extract the corresponding
+  section:
+
+  > From d7d836dfc55b937f463f601ba5117d6442053089 Mon Sep 17 00:00:00 2001
+  > From: Chet Ramey <chet.ramey@case.edu>
+  > Date: Tue, 20 Jun 2017 10:38:13 -0400
+  > Subject: [PATCH] commit bash-snap-20170620 snapshot
+  >
+  > diff --git a/CWRU/CWRU.chlog b/CWRU/CWRU.chlog
+  > index 31724be0..7dd09a3f 100644
+  > --- a/CWRU/CWRU.chlog
+  > +++ b/CWRU/CWRU.chlog
+  > @@ -14102,3 +14102,11 @@ parse.y
+  >  lib/readline/display.c
+  >  	- update_line: when wrapping multibyte characters, make sure we deal
+  >  	  with WCWIDTH returning -1. Fixes a fuzzing bug
+  > +
+  > +				   6/17
+  > +				   ----
+  > +parse.y
+  > +	- augment `error yacc_EOF' production to call YYABORT in non-interactive
+  > +	  shells or calls to parse_and_execute (eval, command substitution,
+  > +	  etc.) Fixes bug reported by Martijn Dekker <martijn@inlv.org>
+  > +
+  > diff --git a/parse.y b/parse.y
+  > index d8d8e885..92da96b9 100644
+  > --- a/parse.y
+  > +++ b/parse.y
+  > @@ -416,9 +416,16 @@ inputunit:	simple_list simple_list_terminator
+  >  			  /* EOF after an error.  Do ignoreeof or not.  Really
+  >  			     only interesting in non-interactive shells */
+  >  			  global_command = (COMMAND *)NULL;
+  > +			  last_command_exit_value = 1;
+  >  			  handle_eof_input_unit ();
+  > -			  YYACCEPT;
+  > +			  if (interactive && parse_and_execute_level == 0)
+  > +			    {
+  > +			      YYACCEPT;
+  > +			    }
+  > +			  else
+  > +			    {
+  > +			      YYABORT;
+  > +			    }
+  >  			}
+  >  	|	yacc_EOF
+  >  			{
+  > --
+  > 2.21.3
+
+  Further lines are added in the commit ab8ded9c3 (commit
+  bash-20181214 snapshot), but this change is not relevant for now, so
+  I skip the details of the commit.
+
+----------------------------------------------------------------------

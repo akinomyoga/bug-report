@@ -1,0 +1,28 @@
+From 2cb61ca546d6a9f4ebdd0bfec83d0874b350219e Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 28 Aug 2020 09:09:19 +0900
+Subject: [PATCH] Fix a bug that syntax errors in "eval" causes the interactive
+ shell termination
+
+---
+ parse.y | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/parse.y b/parse.y
+index 4b7363d6..471669c9 100644
+--- a/parse.y
++++ b/parse.y
+@@ -420,9 +420,9 @@ inputunit:	simple_list simple_list_terminator
+ 			  global_command = (COMMAND *)NULL;
+ 			  if (last_command_exit_value == 0)
+ 			    last_command_exit_value = EX_BADUSAGE;	/* force error return */
+-			  handle_eof_input_unit ();
+ 			  if (interactive && parse_and_execute_level == 0)
+ 			    {
++			      handle_eof_input_unit ();
+ 			      YYACCEPT;
+ 			    }
+ 			  else
+-- 
+2.21.3
+
