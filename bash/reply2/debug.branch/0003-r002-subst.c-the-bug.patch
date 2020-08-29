@@ -1,0 +1,27 @@
+From 5af334f5895b940994e507474f78dfbe8e1a276c Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sat, 29 Aug 2020 07:34:42 +0900
+Subject: [PATCH 3/3] r002 (subst.c): the bug
+
+---
+ subst.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/subst.c b/subst.c
+index 2f736d0e..51d24052 100644
+--- a/subst.c
++++ b/subst.c
+@@ -9374,6 +9374,10 @@ shell_expand_word_list (tlist, eflags)
+ 	    make_internal_declare (tlist->word->word, "-gA");
+ 	  else if (tlist->word->flags & W_ASSIGNASSOC)
+ 	    make_internal_declare (tlist->word->word, "-A");
++	  if ((tlist->word->flags & (W_ASSIGNARRAY|W_ASSNGLOBAL)) == (W_ASSIGNARRAY|W_ASSNGLOBAL))
++	    make_internal_declare (tlist->word->word, "-ga");
++	  else if (tlist->word->flags & W_ASSIGNARRAY)
++	    make_internal_declare (tlist->word->word, "-a");
+ 	  else if (tlist->word->flags & W_ASSNGLOBAL)
+ 	    make_internal_declare (tlist->word->word, "-g");
+ 
+-- 
+2.21.3
+

@@ -1,6 +1,6 @@
 From: murase
 To: bug-bash@gnu.org
-Subject: Bash 5.0+: Interactive session closes with `eval {'
+Subject: [PATCH] Bash 5.0+: Fix a problem that interactive sessions close with `eval {'
 
 Configuration Information [Automatically generated, do not change]:
 Machine: x86_64

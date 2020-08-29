@@ -1,0 +1,650 @@
+From 5488385817b81c2f1fabc86d894f58e02b7b4c26 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sat, 29 Aug 2020 07:12:49 +0900
+Subject: [PATCH 1/3] r002: add other files
+
+---
+ command.h          |   7 +-
+ eval.c             |   9 ++-
+ execute_cmd.c      |  22 ++++---
+ expr.c             |   2 +-
+ general.c          |  12 +++-
+ include/posixjmp.h |   2 +
+ input.c            |   2 +-
+ jobs.c             |  10 +--
+ parser-built       | 156 ++++++++++++++++++++++++---------------------
+ shell.c            |   8 +--
+ shell.h            |   6 +-
+ subst.h            |   7 +-
+ test.c             |   2 +-
+ trap.c             |   6 +-
+ variables.c        |  17 +++++
+ variables.h        |   1 +
+ 16 files changed, 162 insertions(+), 107 deletions(-)
+
+diff --git a/command.h b/command.h
+index c4875d5d..8f5ce7d7 100644
+--- a/command.h
++++ b/command.h
+@@ -96,9 +96,10 @@ enum command_type { cm_for, cm_case, cm_while, cm_if, cm_simple, cm_select,
+ #define W_NOPROCSUB	0x100000	/* don't perform process substitution */
+ #define W_HASCTLESC	0x200000	/* word contains literal CTLESC characters */
+ #define W_ASSIGNASSOC	0x400000	/* word looks like associative array assignment */
+-#define W_ARRAYIND	0x800000	/* word is an array index being expanded */
+-#define W_ASSNGLOBAL	0x1000000	/* word is a global assignment to declare (declare/typeset -g) */
+-#define W_NOBRACE	0x2000000	/* Don't perform brace expansion */
++#define W_ASSIGNARRAY	0x800000	/* word looks like a compound indexed array assignment */
++#define W_ARRAYIND	0x1000000	/* word is an array index being expanded */
++#define W_ASSNGLOBAL	0x2000000	/* word is a global assignment to declare (declare/typeset -g) */
++#define W_NOBRACE	0x4000000	/* Don't perform brace expansion */
+ 
+ /* Possible values for subshell_environment */
+ #define SUBSHELL_ASYNC	0x01	/* subshell caused by `command &' */
+diff --git a/eval.c b/eval.c
+index ed7a1edd..f1e7cadc 100644
+--- a/eval.c
++++ b/eval.c
+@@ -54,6 +54,10 @@ extern int need_here_doc;
+ extern int current_command_number, current_command_line_count, line_number;
+ extern int expand_aliases;
+ 
++#if defined (HAVE_POSIX_SIGNALS)
++extern sigset_t top_level_mask;
++#endif
++
+ static void send_pwd_to_eterm __P((void));
+ static sighandler alrm_catcher __P((int));
+ 
+@@ -75,7 +79,7 @@ reader_loop ()
+     {
+       int code;
+ 
+-      code = setjmp (top_level);
++      code = setjmp_nosigs (top_level);
+ 
+ #if defined (PROCESS_SUBSTITUTION)
+       unlink_fifo_list ();
+@@ -119,6 +123,9 @@ reader_loop ()
+ 		  dispose_command (current_command);
+ 		  current_command = (COMMAND *)NULL;
+ 		}
++#if defined (HAVE_POSIX_SIGNALS)
++	      sigprocmask (SIG_SETMASK, &top_level_mask, (sigset_t *)NULL);
++#endif
+ 	      break;
+ 
+ 	    default:
+diff --git a/execute_cmd.c b/execute_cmd.c
+index 98dad024..23499c61 100644
+--- a/execute_cmd.c
++++ b/execute_cmd.c
+@@ -1545,13 +1545,13 @@ execute_in_subshell (command, asynchronous, pipe_in, pipe_out, fds_to_close)
+   invert = (tcom->flags & CMD_INVERT_RETURN) != 0;
+   tcom->flags &= ~CMD_INVERT_RETURN;
+ 
+-  result = setjmp (top_level);
++  result = setjmp_nosigs (top_level);
+ 
+   /* If we're inside a function while executing this subshell, we
+      need to handle a possible `return'. */
+   function_value = 0;
+   if (return_catch_flag)
+-    function_value = setjmp (return_catch);
++    function_value = setjmp_nosigs (return_catch);
+ 
+   /* If we're going to exit the shell, we don't want to invert the return
+      status. */
+@@ -3744,13 +3744,13 @@ fix_assignment_words (words)
+ {
+   WORD_LIST *w, *wcmd;
+   struct builtin *b;
+-  int assoc, global;
++  int assoc, global, array;
+ 
+   if (words == 0)
+     return;
+ 
+   b = 0;
+-  assoc = global = 0;
++  assoc = global = array = 0;
+ 
+   wcmd = words;
+   for (w = words; w; w = w->next)
+@@ -3775,14 +3775,16 @@ fix_assignment_words (words)
+ #if defined (ARRAY_VARS)
+ 	if (assoc)
+ 	  w->word->flags |= W_ASSIGNASSOC;
++	if (array)
++	  w->word->flags |= W_ASSIGNARRAY;
++#endif
+ 	if (global)
+ 	  w->word->flags |= W_ASSNGLOBAL;
+-#endif
+       }
+ #if defined (ARRAY_VARS)
+     /* Note that we saw an associative array option to a builtin that takes
+        assignment statements.  This is a bit of a kludge. */
+-    else if (w->word->word[0] == '-' && (strchr (w->word->word+1, 'A') || strchr (w->word->word+1, 'g')))
++    else if (w->word->word[0] == '-' && (strchr (w->word->word+1, 'A') || strchr (w->word->word+1, 'a') || strchr (w->word->word+1, 'g')))
+ #else
+     else if (w->word->word[0] == '-' && strchr (w->word->word+1, 'g'))
+ #endif
+@@ -3799,6 +3801,8 @@ fix_assignment_words (words)
+ 	  }
+ 	if ((wcmd->word->flags & W_ASSNBLTIN) && strchr (w->word->word+1, 'A'))
+ 	  assoc = 1;
++	else if ((wcmd->word->flags & W_ASSNBLTIN) && strchr (w->word->word+1, 'a'))
++	  array = 1;
+ 	if ((wcmd->word->flags & W_ASSNBLTIN) && strchr (w->word->word+1, 'g'))
+ 	  global = 1;
+       }
+@@ -4454,7 +4458,7 @@ execute_function (var, words, flags, fds_to_close, async, subshell)
+   fc = tc;
+ 
+   return_catch_flag++;
+-  return_val = setjmp (return_catch);
++  return_val = setjmp_nosigs (return_catch);
+ 
+   if (return_val)
+     {
+@@ -4612,13 +4616,13 @@ execute_subshell_builtin_or_function (words, redirects, builtin, var,
+     {
+       /* Give builtins a place to jump back to on failure,
+ 	 so we don't go back up to main(). */
+-      result = setjmp (top_level);
++      result = setjmp_nosigs (top_level);
+ 
+       /* Give the return builtin a place to jump to when executed in a subshell
+          or pipeline */
+       funcvalue = 0;
+       if (return_catch_flag && builtin == return_builtin)
+-        funcvalue = setjmp (return_catch);
++        funcvalue = setjmp_nosigs (return_catch);
+ 
+       if (result == EXITPROG)
+ 	exit (last_command_exit_value);
+diff --git a/expr.c b/expr.c
+index 707aff23..20ee5a7c 100644
+--- a/expr.c
++++ b/expr.c
+@@ -378,7 +378,7 @@ evalexp (expr, validp)
+ 
+   FASTCOPY (evalbuf, oevalbuf, sizeof (evalbuf));
+ 
+-  c = setjmp (evalbuf);
++  c = setjmp_nosigs (evalbuf);
+ 
+   if (c)
+     {
+diff --git a/general.c b/general.c
+index 79e404b4..3948495e 100644
+--- a/general.c
++++ b/general.c
+@@ -984,7 +984,13 @@ bash_tilde_expand (s, assign_p)
+ 
+   old_immed = interrupt_immediately;
+   old_term = terminate_immediately;
+-  interrupt_immediately = terminate_immediately = 1;
++  /* We want to be able to interrupt tilde expansion. Ordinarily, we can just
++     jump to top_level, but we don't want to run any trap commands in a signal
++     handler context.  We might be able to get away with just checking for
++     things like SIGINT and SIGQUIT. */
++  if (any_signals_trapped () < 0)
++    interrupt_immediately = 1;
++  terminate_immediately = 1;
+ 
+   tilde_additional_prefixes = assign_p == 0 ? (char **)0
+   					    : (assign_p == 2 ? bash_tilde_prefixes2 : bash_tilde_prefixes);
+@@ -993,8 +999,12 @@ bash_tilde_expand (s, assign_p)
+ 
+   r = (*s == '~') ? unquoted_tilde_word (s) : 1;
+   ret = r ? tilde_expand (s) : savestring (s);
++
+   interrupt_immediately = old_immed;
+   terminate_immediately = old_term;
++
++  QUIT;
++
+   return (ret);
+ }
+ 
+diff --git a/include/posixjmp.h b/include/posixjmp.h
+index 49bfecf3..98cf7185 100644
+--- a/include/posixjmp.h
++++ b/include/posixjmp.h
+@@ -30,11 +30,13 @@
+ #  if !defined (__OPENNT)
+ #    undef setjmp
+ #    define setjmp(x)	sigsetjmp((x), 1)
++#    define setjmp_nosigs(x)	sigsetjmp((x), 0)
+ #    undef longjmp
+ #    define longjmp(x, n)	siglongjmp((x), (n))
+ #  endif /* !__OPENNT */
+ #else
+ #  define procenv_t	jmp_buf
++#  define setjmp_nosigs	setjmp
+ #endif
+ 
+ #endif /* _POSIXJMP_H_ */
+diff --git a/input.c b/input.c
+index 7db1686d..ad3ee513 100644
+--- a/input.c
++++ b/input.c
+@@ -83,7 +83,7 @@ getc_with_restart (stream)
+     {
+       while (1)
+ 	{
+-	  CHECK_TERMSIG;		/* XXX - QUIT? */
++	  QUIT;
+ 	  run_pending_traps ();
+ 
+ 	  local_bufused = read (fileno (stream), localbuf, sizeof(localbuf));
+diff --git a/jobs.c b/jobs.c
+index d1345c95..ad9b5ae8 100644
+--- a/jobs.c
++++ b/jobs.c
+@@ -932,7 +932,7 @@ realloc_jobs_list ()
+ 	  }
+       }
+ 
+-#if defined (DEBUG)
++#if 0
+   itrace ("realloc_jobs_list: resize jobs list from %d to %d", js.j_jobslots, nsize);
+   itrace ("realloc_jobs_list: j_lastj changed from %d to %d", js.j_lastj, (j > 0) ? j - 1 : 0);
+   itrace ("realloc_jobs_list: j_njobs changed from %d to %d", js.j_njobs, j);
+@@ -963,14 +963,14 @@ realloc_jobs_list ()
+   if (js.j_current == NO_JOB || js.j_previous == NO_JOB || js.j_current > js.j_lastj || js.j_previous > js.j_lastj)
+     reset_current ();
+ 
+-#ifdef DEBUG
++#if 0
+   itrace ("realloc_jobs_list: reset js.j_current (%d) and js.j_previous (%d)", js.j_current, js.j_previous);
+ #endif
+ 
+   UNBLOCK_CHILD (oset);
+ }
+ 
+-/* Compact the jobs list by removing dead jobs.  Assumed that we have filled
++/* Compact the jobs list by removing dead jobs.  Assume that we have filled
+    the jobs array to some predefined maximum.  Called when the shell is not
+    the foreground process (subshell_environment != 0).  Returns the first
+    available slot in the compacted list.  If that value is js.j_jobslots, then
+@@ -986,7 +986,7 @@ compact_jobs_list (flags)
+   reap_dead_jobs ();
+   realloc_jobs_list ();
+ 
+-#ifdef DEBUG
++#if 0
+   itrace("compact_jobs_list: returning %d", (js.j_lastj || jobs[js.j_lastj]) ? js.j_lastj + 1 : 0);
+ #endif
+ 
+@@ -3588,7 +3588,9 @@ run_sigchld_trap (nchild)
+   jobs_list_frozen = 1;
+   for (i = 0; i < nchild; i++)
+     {
++#if 0
+       interrupt_immediately = 1;
++#endif
+       parse_and_execute (savestring (trap_command), "trap", SEVAL_NOHIST|SEVAL_RESETLINE);
+     }
+ 
+diff --git a/parser-built b/parser-built
+index 0de3853c..bfff8119 100644
+--- a/parser-built
++++ b/parser-built
+@@ -1,14 +1,13 @@
+-/* A Bison parser, made by GNU Bison 2.3.  */
++/* A Bison parser, made by GNU Bison 3.0.5.  */
+ 
+-/* Skeleton interface for Bison's Yacc-like parsers in C
++/* Bison interface for Yacc-like parsers in C
+ 
+-   Copyright (C) 1984, 1989, 1990, 2000, 2001, 2002, 2003, 2004, 2005, 2006
+-   Free Software Foundation, Inc.
++   Copyright (C) 1984, 1989-1990, 2000-2015, 2018 Free Software Foundation, Inc.
+ 
+-   This program is free software; you can redistribute it and/or modify
++   This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+-   the Free Software Foundation; either version 2, or (at your option)
+-   any later version.
++   the Free Software Foundation, either version 3 of the License, or
++   (at your option) any later version.
+ 
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+@@ -16,9 +15,7 @@
+    GNU General Public License for more details.
+ 
+    You should have received a copy of the GNU General Public License
+-   along with this program; if not, write to the Free Software
+-   Foundation, Inc., 51 Franklin Street, Fifth Floor,
+-   Boston, MA 02110-1301, USA.  */
++   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+ 
+ /* As a special exception, you may create a larger work that contains
+    part or all of the Bison parser skeleton and distribute that work
+@@ -33,60 +30,69 @@
+    This special exception was added by the Free Software Foundation in
+    version 2.2 of Bison.  */
+ 
+-/* Tokens.  */
++#ifndef YY_YY_Y_TAB_H_INCLUDED
++# define YY_YY_Y_TAB_H_INCLUDED
++/* Debug traces.  */
++#ifndef YYDEBUG
++# define YYDEBUG 0
++#endif
++#if YYDEBUG
++extern int yydebug;
++#endif
++
++/* Token type.  */
+ #ifndef YYTOKENTYPE
+ # define YYTOKENTYPE
+-   /* Put the tokens into the symbol table, so that GDB and other debuggers
+-      know about them.  */
+-   enum yytokentype {
+-     IF = 258,
+-     THEN = 259,
+-     ELSE = 260,
+-     ELIF = 261,
+-     FI = 262,
+-     CASE = 263,
+-     ESAC = 264,
+-     FOR = 265,
+-     SELECT = 266,
+-     WHILE = 267,
+-     UNTIL = 268,
+-     DO = 269,
+-     DONE = 270,
+-     FUNCTION = 271,
+-     COPROC = 272,
+-     COND_START = 273,
+-     COND_END = 274,
+-     COND_ERROR = 275,
+-     IN = 276,
+-     BANG = 277,
+-     TIME = 278,
+-     TIMEOPT = 279,
+-     TIMEIGN = 280,
+-     WORD = 281,
+-     ASSIGNMENT_WORD = 282,
+-     REDIR_WORD = 283,
+-     NUMBER = 284,
+-     ARITH_CMD = 285,
+-     ARITH_FOR_EXPRS = 286,
+-     COND_CMD = 287,
+-     AND_AND = 288,
+-     OR_OR = 289,
+-     GREATER_GREATER = 290,
+-     LESS_LESS = 291,
+-     LESS_AND = 292,
+-     LESS_LESS_LESS = 293,
+-     GREATER_AND = 294,
+-     SEMI_SEMI = 295,
+-     SEMI_AND = 296,
+-     SEMI_SEMI_AND = 297,
+-     LESS_LESS_MINUS = 298,
+-     AND_GREATER = 299,
+-     AND_GREATER_GREATER = 300,
+-     LESS_GREATER = 301,
+-     GREATER_BAR = 302,
+-     BAR_AND = 303,
+-     yacc_EOF = 304
+-   };
++  enum yytokentype
++  {
++    IF = 258,
++    THEN = 259,
++    ELSE = 260,
++    ELIF = 261,
++    FI = 262,
++    CASE = 263,
++    ESAC = 264,
++    FOR = 265,
++    SELECT = 266,
++    WHILE = 267,
++    UNTIL = 268,
++    DO = 269,
++    DONE = 270,
++    FUNCTION = 271,
++    COPROC = 272,
++    COND_START = 273,
++    COND_END = 274,
++    COND_ERROR = 275,
++    IN = 276,
++    BANG = 277,
++    TIME = 278,
++    TIMEOPT = 279,
++    TIMEIGN = 280,
++    WORD = 281,
++    ASSIGNMENT_WORD = 282,
++    REDIR_WORD = 283,
++    NUMBER = 284,
++    ARITH_CMD = 285,
++    ARITH_FOR_EXPRS = 286,
++    COND_CMD = 287,
++    AND_AND = 288,
++    OR_OR = 289,
++    GREATER_GREATER = 290,
++    LESS_LESS = 291,
++    LESS_AND = 292,
++    LESS_LESS_LESS = 293,
++    GREATER_AND = 294,
++    SEMI_SEMI = 295,
++    SEMI_AND = 296,
++    SEMI_SEMI_AND = 297,
++    LESS_LESS_MINUS = 298,
++    AND_GREATER = 299,
++    AND_GREATER_GREATER = 300,
++    LESS_GREATER = 301,
++    GREATER_BAR = 302,
++    BAR_AND = 303,
++    yacc_EOF = 304
++  };
+ #endif
+ /* Tokens.  */
+ #define IF 258
+@@ -137,13 +143,13 @@
+ #define BAR_AND 303
+ #define yacc_EOF 304
+ 
+-
+-
+-
++/* Value type.  */
+ #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
+-typedef union YYSTYPE
+-#line 323 "/Users/chet/src/bash/src/parse.y"
++
++union YYSTYPE
+ {
++#line 323 "./parse.y" /* yacc.c:1910  */
++
+   WORD_DESC *word;		/* the word that we read. */
+   int number;			/* the number that we read. */
+   WORD_LIST *word_list;
+@@ -151,14 +157,18 @@ typedef union YYSTYPE
+   REDIRECT *redirect;
+   ELEMENT element;
+   PATTERN_LIST *pattern;
+-}
+-/* Line 1489 of yacc.c.  */
+-#line 157 "y.tab.h"
+-	YYSTYPE;
+-# define yystype YYSTYPE /* obsolescent; will be withdrawn */
+-# define YYSTYPE_IS_DECLARED 1
++
++#line 162 "y.tab.h" /* yacc.c:1910  */
++};
++
++typedef union YYSTYPE YYSTYPE;
+ # define YYSTYPE_IS_TRIVIAL 1
++# define YYSTYPE_IS_DECLARED 1
+ #endif
+ 
++
+ extern YYSTYPE yylval;
+ 
++int yyparse (void);
++
++#endif /* !YY_YY_Y_TAB_H_INCLUDED  */
+diff --git a/shell.c b/shell.c
+index 93b6b9b1..434ea691 100644
+--- a/shell.c
++++ b/shell.c
+@@ -381,7 +381,7 @@ main (argc, argv, env)
+ #endif
+ 
+   /* Catch early SIGINTs. */
+-  code = setjmp (top_level);
++  code = setjmp_nosigs (top_level);
+   if (code)
+     exit (2);
+ 
+@@ -447,7 +447,7 @@ main (argc, argv, env)
+ 	shell_name++;
+ 
+       shell_reinitialize ();
+-      if (setjmp (top_level))
++      if (setjmp_nosigs (top_level))
+ 	exit (2);
+     }
+ 
+@@ -1240,7 +1240,7 @@ run_wordexp (words)
+   int code, nw, nb;
+   WORD_LIST *wl, *tl, *result;
+ 
+-  code = setjmp (top_level);
++  code = setjmp_nosigs (top_level);
+ 
+   if (code != NOT_JUMPED)
+     {
+@@ -1315,7 +1315,7 @@ run_one_command (command)
+ {
+   int code;
+ 
+-  code = setjmp (top_level);
++  code = setjmp_nosigs (top_level);
+ 
+   if (code != NOT_JUMPED)
+     {
+diff --git a/shell.h b/shell.h
+index 82293a44..243e4678 100644
+--- a/shell.h
++++ b/shell.h
+@@ -173,9 +173,9 @@ typedef struct _sh_parser_state_t {
+ 
+ typedef struct _sh_input_line_state_t {
+   char *input_line;
+-  int input_line_index;
+-  int input_line_size;
+-  int input_line_len;
++  size_t input_line_index;
++  size_t input_line_size;
++  size_t input_line_len;
+ } sh_input_line_state_t;
+ 
+ /* Let's try declaring these here. */
+diff --git a/subst.h b/subst.h
+index 914fffeb..874e287b 100644
+--- a/subst.h
++++ b/subst.h
+@@ -42,9 +42,10 @@
+ #define Q_DOLBRACE	 0x80
+ 
+ /* Flag values controlling how assignment statements are treated. */
+-#define ASS_APPEND	0x01
+-#define ASS_MKLOCAL	0x02
+-#define ASS_MKASSOC	0x04
++#define ASS_APPEND	0x0001
++#define ASS_MKLOCAL	0x0002
++#define ASS_MKASSOC	0x0004
++#define ASS_MKGLOBAL	0x0008	/* force global assignment */
+ 
+ /* Flags for the string extraction functions. */
+ #define SX_NOALLOC	0x0001	/* just skip; don't return substring */
+diff --git a/test.c b/test.c
+index 240a8b00..786d7f07 100644
+--- a/test.c
++++ b/test.c
+@@ -822,7 +822,7 @@ test_command (margc, margv)
+ 
+   USE_VAR(margc);
+ 
+-  code = setjmp (test_exit_buf);
++  code = setjmp_nosigs (test_exit_buf);
+ 
+   if (code)
+     return (test_error_return);
+diff --git a/trap.c b/trap.c
+index 9b290458..db7bf117 100644
+--- a/trap.c
++++ b/trap.c
+@@ -787,11 +787,11 @@ run_exit_trap ()
+       retval = trap_saved_exit_value;
+       running_trap = 1;
+ 
+-      code = setjmp (top_level);
++      code = setjmp_nosigs (top_level);
+ 
+       /* If we're in a function, make sure return longjmps come here, too. */
+       if (return_catch_flag)
+-	function_code = setjmp (return_catch);
++	function_code = setjmp_nosigs (return_catch);
+ 
+       if (code == 0 && function_code == 0)
+ 	{
+@@ -868,7 +868,7 @@ _run_trap_internal (sig, tag)
+       if (return_catch_flag)
+ 	{
+ 	  COPY_PROCENV (return_catch, save_return_catch);
+-	  function_code = setjmp (return_catch);
++	  function_code = setjmp_nosigs (return_catch);
+ 	}
+ 
+       flags = SEVAL_NONINT|SEVAL_NOHIST;
+diff --git a/variables.c b/variables.c
+index 7df226be..5f41b4b0 100644
+--- a/variables.c
++++ b/variables.c
+@@ -2601,6 +2601,23 @@ bind_variable (name, value, flags)
+   return (bind_variable_internal (name, value, global_variables->table, 0, flags));
+ }
+ 
++SHELL_VAR *
++bind_global_variable (name, value, flags)
++     const char *name;
++     char *value;
++     int flags;
++{
++  SHELL_VAR *v, *nv;
++  VAR_CONTEXT *vc, *nvc;
++  int level;
++
++  if (shell_variables == 0)
++    create_variable_tables ();
++
++  /* bind_variable_internal will handle nameref resolution in this case */
++  return (bind_variable_internal (name, value, global_variables->table, 0, flags));
++}
++
+ /* Make VAR, a simple shell variable, have value VALUE.  Once assigned a
+    value, variables are no longer invisible.  This is a duplicate of part
+    of the internals of bind_variable.  If the variable is exported, or
+diff --git a/variables.h b/variables.h
+index 7f2d6b60..84540a44 100644
+--- a/variables.h
++++ b/variables.h
+@@ -253,6 +253,7 @@ extern SHELL_VAR *find_tempenv_variable __P((const char *));
+ extern SHELL_VAR *copy_variable __P((SHELL_VAR *));
+ extern SHELL_VAR *make_local_variable __P((const char *));
+ extern SHELL_VAR *bind_variable __P((const char *, char *, int));
++extern SHELL_VAR *bind_global_variable __P((const char *, char *, int));
+ extern SHELL_VAR *bind_function __P((const char *, COMMAND *));
+ 
+ extern void bind_function_def __P((const char *, FUNCTION_DEF *));
+-- 
+2.21.3
+

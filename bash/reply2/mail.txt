@@ -1,0 +1,147 @@
+----------------------------------------------------------------------
+以下は途中まで書いたが既に修正されている事が判明したので棄却
+
+> Description:
+> ------------
+>
+> Under certain circumstances, assignments of namerefs to local
+> variables in functions behaves in a way which makes namerefs
+> completely useless.  Furthermore, the behavior is not consistent.
+
+This is actually not related to namerefs and seems to be a regression
+that was once introduced in Bash 3.1, fixed in Bash 3.2 and again
+introduced in Bash 4.3.  Think about the following codes:
+
+  a=1; f1() { local a=$a; local; }; f1
+  a=2; f2() { local -a a=("$a"); local; }; f2
+
+The results for `f1' are the same for all the Bash versions
+2.0--devel, but the results for `f2' seems to vary in versions.  Here
+is the summary of the results from the different versions of Bash:
+
+- 2.0--3.0: f1: a=1, f2: a=([0]="1")
+- 3.1:      f2: a=1, f2: a=([0]="")
+- 3.2--4.2: f1: a=1, f2: a=([0]="1")
+- 4.3--5.0: f1: a=1, f2: a=([0]="")
+- 5.1--dev: f1: a=1, f2: a=([0]="1")
+
+[ Note: The output format of `local' has been changd in Bash 5.1 so
+that it prefixes `declare --' or `declare -a', but I omitted it in the
+above table. ]
+
+* For `f1', all the bash versions (2.0--devel) produces the same
+  result `a=1'.  This means that `local a=$a' first evaluates the
+  right-hand side, next create a placeholder of `a' in the local
+  scope, and finally assigns the value.  The older behavior of `f2'
+  can be understood in a similar way.
+
+* The current behavior `f2' implies that, `local -a a=(...)' first
+  create the placeholder `a' in the current scope with the `array'
+  attribute, next evaluates the right-hand side, and finally assigns
+  the values.
+
+The change between 3.1..3.2 is made in 8b35878f (commit
+bash-20060504 snapshot).  This is the related report:
+
+  https://lists.gnu.org/archive/html/bug-bash/2006-05/msg00025.html
+
+This is the related fix at that time:
+
+>             5/9
+>             ---
+> subst.c
+>   - in do_compound_assignment, call expand_compound_array_assignment
+>     before creating the local variable so a previous inherited value
+>     can be used when expanding the rhs of the compound assignment
+>     statement
+>
+> diff --git a/subst.c b/subst.c
+> index 543af5d5..04a24f72 100644
+> --- a/subst.c
+> +++ b/subst.c
+> @@ -2224,15 +2224,17 @@ do_compound_assignment (name, value, flags)
+>  {
+>    SHELL_VAR *v;
+>    int off, mklocal;
+> +  WORD_LIST *list;
+>
+>    mklocal = flags & ASS_MKLOCAL;
+>
+>    if (mklocal && variable_context)
+>      {
+> +      list = expand_compound_array_assignment (value, flags);
+>        v = find_variable (name);
+>        if (v == 0 || array_p (v) == 0 || v->context != variable_context)
+>          v = make_local_array_variable (name);
+> -      v = assign_array_var_from_string (v, value, flags);
+> +      assign_compound_array_list (v, list, flags);
+>      }
+>    else
+>      v = assign_array_from_string (name, value, flags);
+
+The regression in 4.3 has been introduced in 36eb585c (commit
+bash-20121221 snapshot).  In particular, the following hunk changed
+the behavior:
+
+> diff --git a/subst.c b/subst.c
+> index 6c836dbd..2ccdacea 100644
+> --- a/subst.c
+> +++ b/subst.c
+> @@ -9374,6 +9374,10 @@ shell_expand_word_list (tlist, eflags)
+>        make_internal_declare (tlist->word->word, "-gA");
+>      else if (tlist->word->flags & W_ASSIGNASSOC)
+>        make_internal_declare (tlist->word->word, "-A");
+> +    if ((tlist->word->flags & (W_ASSIGNARRAY|W_ASSNGLOBAL)) == (W_ASSIGNARRAY|W_ASSNGLOBAL))
+> +      make_internal_declare (tlist->word->word, "-ga");
+> +    else if (tlist->word->flags & W_ASSIGNARRAY)
+> +      make_internal_declare (tlist->word->word, "-a");
+>      else if (tlist->word->flags & W_ASSNGLOBAL)
+>        make_internal_declare (tlist->word->word, "-g");
+>
+
+This was again reported in the following thread and fixed in c6c7ae81b
+(commit bash-20200427 snapshot).
+
+  https://savannah.gnu.org/support/index.php?109669
+
+----------------------------------------------------------------------
+
+> Description:
+> ------------
+>
+> Under certain circumstances, assignments of namerefs to local
+> variables in functions behaves in a way which makes namerefs
+> completely useless.  Furthermore, the behavior is not consistent.
+
+This is actually not related to namerefs and has already been fixed in
+Bash 5.1 and the devel branch.  Think about the following codes:
+
+  a=1; f1() { local a=$a; local; }; f1
+  a=2; f2() { local -a a=("$a"); local; }; f2
+
+The results for `f1' are the same for all the Bash versions
+2.0..devel, but the results for `f2' varies in versions.  Here is the
+summary of the results from the different versions of Bash:
+
+- 2.0..3.0: f1: a=1, f2: a=([0]="1")
+- 3.1:      f2: a=1, f2: a=([0]="")
+- 3.2..4.2: f1: a=1, f2: a=([0]="1")
+- 4.3..5.0: f1: a=1, f2: a=([0]="")
+- 5.1..dev: f1: a=1, f2: a=([0]="1")
+
+I checked the detailed changes.  The behavior of `f2' in 3.1 was
+reported as a bug in the following thread.
+
+  https://lists.gnu.org/archive/html/bug-bash/2006-05/msg00025.html
+
+It was fixed in 8b35878f (commit bash-20060504 snapshot).  However,
+the bug seems to be introduced again in 36eb585c (commit bash-20121221
+snapshot).  This regression has been reported at
+
+  https://savannah.gnu.org/support/index.php?109669
+
+Finally, it was again fixed in c6c7ae81 (commit bash-20200427
+snapshot).
+
+--
+Koichi
