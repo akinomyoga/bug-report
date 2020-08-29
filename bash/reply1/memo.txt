@@ -1,0 +1,65 @@
+
+https://lists.gnu.org/archive/html/help-bash/2020-04/msg00042.html
+
+I guess you are asking the way to collect the exit statuses without
+rewriting the part `x=$(false)a$(true)b'.  I don't think there is a
+way to achieve this without rewriting. And, of course, if it is
+allowed to rewrite that part, you can easily collect the exit statuses.
+
+x1=$(false); STATUS[0]=$?
+x2=$(true); STATUS[1]=$?
+x=${x1}a${x2}b
+declare -p STATUS
+
+Or
+
+{ x=$(false;echo $? >&9)a$(true;echo $? >&9); } 9>tmpfile
+mapfile -t STATUS < tmpfile
+declare -p STATUS
+
+Or
+
+mkfifo tmp
+exec 9<> tmp
+rm tmp
+x=$(false;echo $? >&9)a$(true;echo $? >&9)b
+read 'STATUS[1]' <&9
+read 'STATUS[2]' <&9
+declare -p STATUS
+
+Or
+
+# Note: this is a simple implementation so
+#   you cannot use ( or ) inside of $()
+function csubstatus {
+  local __head= __tail=$1
+  local __reg='(\$\([^()]*\))(.*)'
+  local __i=0 __result
+  while [[ $__tail =~ $__reg ]]; do
+    eval "__result[__i]=${BASH_REMATCH[1]}"
+    CSUBSTATUS[__i]=$?
+    __head=$__head${__tail::${#__tail}-${#BASH_REMATCH}}\${__result[$__i]}
+    __tail=${BASH_REMATCH[2]}
+    ((__i++))
+  done
+  eval "$__head$__tail"
+}
+csubstatus 'x=$(false)a$(true)b'
+declare -p CSUBSTATUS
+
+------------------------------------------------------------------------------
+
+> The suggestions using temp files with a fixed name feel a bit racy
+> and brittle if two instances of the script run concurrently.
+
+Yes, thank you for your comment. They were just simplified examples to
+show ideas.  They are definitely racy and also has security problems
+if used in an inappropriate way.  Therefore it should be used with
+`mktemp' or something depending on the situation.  I just skipped such
+details because it is not directly related to the current question.
+Actually, I think there are still other problems in the examples if
+they are used directly.  For example, the implementation of
+`csubstatus' does not work with the case that the command specified
+command contains `return', uses the variable names such as `__head',
+or contains confusing strings such as `x="\$(escaped)"', etc.  So,
+please use them only when you understand what you are doing.
