@@ -1,3 +1,5 @@
+# https://lists.gnu.org/archive/html/bug-bash/2020-08/msg00154.html
+
 ----------------------------------------------------------------------
 以下は途中まで書いたが既に修正されている事が判明したので棄却
 
@@ -142,6 +144,304 @@ snapshot).  This regression has been reported at
 
 Finally, it was again fixed in c6c7ae81 (commit bash-20200427
 snapshot).
+
+--
+Koichi
+
+----------------------------------------------------------------------
+
+Thank you very much for your effort, testing and support!
+
+On 29.08.2020 01:46, Koichi Murase wrote:
+> 2020-08-28 22:04 Binarus <address@hidden>:
+>> Description:
+>> ------------
+>>
+>> Under certain circumstances, assignments of namerefs to local variables
+>> in functions behaves in a way which makes namerefs completely useless.
+>> Furthermore, the behavior is not consistent.
+>
+> This is actually not related to namerefs and has already been fixed in
+> Bash 5.1 and the devel branch.  Think about the following codes:
+>
+>   a=1; f1() { local a=$a; local; }; f1
+>   a=2; f2() { local -a a=("$a"); local; }; f2
+>
+> The results for `f1' are the same for all the Bash versions
+> 2.0..devel, but the results for `f2' varies in versions.  Here is the
+> summary of the results from the different versions of Bash:
+>
+> - 2.0..3.0: f1: a=1, f2: a=([0]="1")
+> - 3.1:      f2: a=1, f2: a=([0]="")
+> - 3.2..4.2: f1: a=1, f2: a=([0]="1")
+> - 4.3..5.0: f1: a=1, f2: a=([0]="")
+> - 5.1..dev: f1: a=1, f2: a=([0]="1")
+
+This is very interesting. I never have written code like that and
+therefore had my problem not before making heavy use of namerefs. So I
+have tested my code in three different bash versions which all are buggy ...
+
+I am surprised that a bug of such severity could survive several years.
+I don't know when 4.3 came out, but my version of 4.4 is from 2016, and
+5.1 is not out yet, so the bug survived at least 4 years (not taking
+into account devel or beta versions, which are not an option for most
+people).
+
+> I checked the detailed changes.  The behavior of `f2' in 3.1 was
+> reported as a bug in the following thread.
+>
+>   https://lists.gnu.org/archive/html/bug-bash/2006-05/msg00025.html
+>
+> It was fixed in 8b35878f (commit bash-20060504 snapshot).  However,
+> the bug seems to be introduced again in 36eb585c (commit bash-20121221
+> snapshot).  This regression has been reported at
+>
+>   https://savannah.gnu.org/support/index.php?109669
+>
+> Finally, it was again fixed in c6c7ae81 (commit bash-20200427
+> snapshot).
+
+Thank you very much again for that invaluable information! I am
+wondering when debian will include bash 5.1. It looks like debian
+testing and debian unstable are on bash 5.0, so it will probably take
+several years.
+
+Best regards,
+
+Binarus
+
+----------------------------------------------------------------------
+
+> I am wondering when debian will include bash 5.1. It looks like
+> debian testing and debian unstable are on bash 5.0, so it will
+> probably take several years.
+
+Actually the problem of the function `Dummy' will not be solved even
+in bash 5.1.  There is another but similar problem with your function.
+A user might specify `namerefArray' as the name of an outer array,
+which results in a circular-reference error.
+
+  $ cat testR2c.sh
+  function Dummy {
+    local -n namerefArray="$1"
+    local -a -i myArray=("${namerefArray[@]}")
+    local -p
+  }
+  declare -a -i namerefArray=('1' '2' '3')
+  Dummy namerefArray
+
+  $ bash-5.1-alpha testR2c.sh
+  testR2c.sh: line 4: local: warning: namerefArray: circular name reference
+  testR2c.sh: line 4: warning: namerefArray: circular name reference
+  testR2c.sh: line 5: warning: namerefArray: circular name reference
+  testR2c.sh: line 5: warning: namerefArray: circular name reference
+  declare -a myArray=([0]="1" [1]="2" [2]="3")
+  declare -n namerefArray="namerefArray"
+
+If you want to work around the problem, there are several ways.
+
+* One of the simplest ways is to use different variable names as
+  already suggested by other people.  However, when the variable name
+  is not under control for some reason (that, e.g., the functon is
+  provided to users who may use it in an arbitrary way, or it imports
+  different shell-script frameworks), the probability of the name
+  collision is not 0%.
+
+* Another way is to copy to the local array only when the name is
+  different from `myArray':
+
+  function Dummy {
+    [[ $1 == myArray ]] ||
+      eval "local -a myArray=(\"\${$1[@]}\")"
+    declare -p myArray
+  }
+
+  When you want to add `-i' attribute to the array or to modify the
+  array without affecting the original outer array, you may first save
+  the value to another local array and next copy the array to the
+  array that you want to edit.
+
+  function Dummy {
+    [[ $1 == inputArray ]] ||
+      eval "local -a inputArray=(\"\${$1[@]}\")"
+    local -ia myArray=("${inputArray[@]}")
+    declare -p myArray
+  }
+
+* If you want to use namerefs to eliminate the use of `eval', maybe
+  you could do like the following but I think it is more natural and
+  readable to use eval:
+
+  function Dummy {
+    [[ $1 == refArray ]] || local -n refArray=$1
+    [[ $1 == inputArray ]] || local -i inputArray=("${refArray[@]}")
+    local -ia myArray=("${inputArray[@]}")
+    declare -p myArray
+  }
+
+
+----------------------------------------------------------------------
+
+> Actually, this is what first happened to me and what led me to the
+> problem described in my original post.
+>
+> [...]
+
+Thank you for your explanation! Now I see your situation.
+
+>> * Another way is to copy to the local array only when the name is
+>>   different from `myArray':
+>>
+>>   [...]
+>
+> However, eval is evil. If I ever had to provide that function to
+> other users (which currently is not the case), then I would have a
+> problem if another user would call it like that:
+
+Yes, I recognize the problem when the function isn't properly used.
+But, the use of eval itself is not fatal.  When another user can call
+the function as in your example,
+
+  Dummy 'myArray1[@]}"); echo Gotcha!; #'
+
+that means that the user can already run arbitrary commands.  The user
+could have directly written
+
+  echo 'Gotcha!'
+
+The real problems occur when the user write like
+
+  Dummy "$input_to_program"
+
+with `input_to_program' provided by the third user who should not be
+able to run arbitrary commands, and the input is not checked nor
+sanitized.  In this case, the problem should be evaded by checking or
+sanitizing the input.  This check can be made inside the function
+Dummy, but it is also possible to make it at the time when the shell
+receives the input.
+
+> declare -a -i myArray1=('1' '2' '3')
+> Dummy 'myArray1[@]}"); echo Gotcha!; #'
+> 
+> Output:
+> 
+> root@cerberus:~/scripts# ./test6
+> Gotcha!
+> declare -a myArray=([0]="1" [1]="2" [2]="3")
+
+Unfortunately, your original function `Dummy' also has the same
+vulnerability.  As Greg has written, there are many other places that
+cause the command execution in the shell because that is the purpose
+of the shell.  With your original method,
+
+  $ cat testR2d.sh
+  function Dummy {
+    local -n namerefArray="$1"
+    local -a -i myArray=("${namerefArray[@]}")
+  }
+  myArray1=("$@")
+  Dummy 'myArray1'
+  $ bash testR2d.sh 'a[$(echo Gotcha1 >/dev/tty)]'
+  Gotcha1
+
+This is caused by the arithmetic evaluation caused by `-i' flag.  In
+arithmetic evaluations, the array subscripts are subject to the extra
+expansions so that the string $(echo Gotcha1 >/dev/tty) is expanded as
+a command substitution.
+
+Actually, the nameref also has the same behavior, so the use of
+`nameref' is not much safer than the use of `eval'.
+
+  $ cat testR2e.sh
+  function Dummy2 {
+    local -n namerefScalar=$1
+    local var=$namerefScalar
+  }
+  Dummy2 "$1"
+  $ bash testR2e.sh 'a[$(echo Gotcha2 >/dev/tty)]'
+  Gotcha2
+
+
+Yes, I guess it would be a valid strategy to disallow any use of
+`eval' because humans will make mistakes no matter how careful we are.
+But, there are still different traps, so anyway we need to carefully
+check or sanitize inputs even when we don't use `eval'.
+
+> I guess it would be very complicated, if possible at all, to protect
+> the code inside eval against every sort of such attacks.
+
+I think the standard way is to check the input before passing it to
+`eval' and is not complicated.  You can just check if the array name
+has an expected form:
+
+  function is-valid-array-name {
+    local reg='^[_[:alpha:]][_[:alnum:]]*$'
+    [[ $1 =~ $reg ]]
+  }
+
+  # Check it inside Dummy
+  function Dummy {
+    is-valid-array-name "$1" || return 1
+    [[ $1 == myArray ]] || eval "local -a myArray=(\"\${$1[@]}\")"
+    declare -p myArray
+  }
+
+  # Or check it when it receives the array name (I prefer this)
+  is-valid-array-name "$1" || exit 1
+  input_data=$1
+  Dummy "$input_data"
+
+>> * If you want to use namerefs to eliminate the use of `eval', maybe
+>>   you could do like the following [...]
+>
+> However (hoping that I don't get flamed for a dumb question), I
+> don't understand why we need inputArray at all in that code.
+
+Sorry, I should have explained it in detail.  The step of `inputArray'
+is only needed when you want to modify `myArray' locally in the
+function `Dummy' keeping the original array unmodified.  Without
+`inputArray',
+
+  $ cat testR2f.sh
+  function Dummy {
+    [[ $1 == refArray ]] || local -n refArray=$1
+    [[ $1 == myArray ]] || local -ia myArray=("${refArray[@]}")
+    myArray[0]=${myArray[0]%/}
+  }
+  myArray=(my/dir/)
+  declare -p Dummy
+  Dummy myArray
+  declare -p Dummy
+  $ bash testR2f.sh
+  declare -a myArray=([0]="my/dir/")
+  declare -a myArray=([0]="my/dir")
+
+This is because, when the outer array has the same name `myArray', the
+function Dummy sees the outer array directly instead of the local
+copy.
+
+> Wouldn't the following function be sufficient?
+>
+> function Dummy {
+>   [[ $1 == refArray ]] || local -n refArray=$1
+>   local -ia myArray=("${refArray[@]}")
+>   declare -p myArray
+> }
+
+No, that function solve the problem of the collision with `refArray'
+(the circular reference) but not the problem of the collision with
+`myArray' (the problem in your original post).
+
+> Unfortunately, these solutions (while solving the circular reference
+> problem) don't solve my original problem.
+
+Have you tried?  In the examples in my previous reply, I intended to
+solve both problems with older versions of Bash.
+
+> I think I'll stick with my current (extremely ugly, but reliable)
+> solution
+
+Yes, I think that is the simplest solution in your case.
 
 --
 Koichi
