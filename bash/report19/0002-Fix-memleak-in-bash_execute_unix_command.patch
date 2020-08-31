@@ -1,0 +1,25 @@
+From 57d2525f509ce0083a66a463487346737f1dbe23 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 31 Aug 2020 10:22:13 +0900
+Subject: [PATCH 2/2] Fix memleak in bash_execute_unix_command
+
+---
+ bashline.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/bashline.c b/bashline.c
+index de1d7b49..f1fb4dfa 100644
+--- a/bashline.c
++++ b/bashline.c
+@@ -4340,7 +4340,7 @@ bash_execute_unix_command (count, key)
+ 
+   save_parser_state (&ps);
+   rl_clear_signals ();
+-  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
++  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST);
+   rl_set_signals ();
+   restore_parser_state (&ps);
+ 
+-- 
+2.21.3
+

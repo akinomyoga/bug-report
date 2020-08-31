@@ -1,0 +1,165 @@
+From: murase
+To: bug-bash@gnu.org
+Subject: [PATCH] Fix segv by self-modifying array PROMPT_COMMAND
+
+Hi, I hit a segmentation fault with the array PROMPT_COMMAND.  Here is
+the report.
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -march=native -O3
+uname output: Linux chatoyancy 5.6.13-100.fc30.x86_64 #1 SMP Fri May
+15 00:36:06 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-pc-linux-gnu
+
+Bash Version: 5.1
+Patch Level: 0
+Release Status: release
+
+Description:
+
+  In the devel branch (e4d38c2d: commit bash-20200819 snapshot),
+  segmentation fault occurs when a prompt command stored in the array
+  version of PROMPT_COMMAND unsets the corresponding element in
+  PROMPT_COMMAND.
+
+  The same happens for Bash 5.1-alpha with PROMPT_COMMANDS.
+
+  This is caused because the original array element data is free'd in
+  the evaluation process of the command string.  The array scan and
+  the copy of all the command strings in PROMPT_COMMAND need to be
+  finished before executing the command strings.
+
+Repeat-By:
+
+  For devel branch (PROMPT_COMMAND),
+
+    $ cat test19-devel.bashrc
+    my-prompt-command() { unset 'PROMPT_COMMAND[0]'; }
+    PROMPT_COMMAND=(my-prompt-command)
+    $ bash-dev --rcfile test19-devel.bashrc
+    Segmentation fault (core dumped)
+
+  For 5.1-alpha (PROMPT_COMMANDS),
+
+    $ cat test19-5.1.bashrc
+    my-prompt-command() { unset 'PROMPT_COMMANDS[0]'; }
+    PROMPT_COMMANDS=(my-prompt-command)
+    $ bash-5.1-alpha --rcfile test19-5.1.bashrc
+    Segmentation fault (core dumped)
+
+  As a related behavior, when one of the prompt commands assigns new
+  elements to the array PROMPT_COMMAND, the subsequent prompt commands
+  will not be executed.  With the devel branch,
+
+    $ cat test19b.bashrc
+    function unregister-prompt_command {
+      local -a new=() cmd
+      for cmd in "${PROMPT_COMMAND[@]}"; do
+        [[ $cmd != "$1" ]] && new+=("$cmd")
+      done
+      PROMPT_COMMAND=("${new[@]}")
+    }
+    function my-prompt_command {
+      echo "$FUNCNAME"
+
+      # remove itself from PROMPT_COMMAND
+      unregister-prompt_command "$FUNCNAME"
+    }
+    PROMPT_COMMAND+=('echo test1')
+    PROMPT_COMMAND+=(my-prompt_command)
+    PROMPT_COMMAND+=('echo test2')
+    $ bash-dev --rcfile test19b.bashrc
+    test1
+    my-prompt_command       # <-- test2 is expected but missing
+    bash-dev$
+    test1
+    test2                   # <-- test2 is correctly called for the
+    bash-dev$               #     next execution of PROMPT_COMMAND
+
+Fix:
+
+  There is no problem with the scalar PROMPT_COMMAND.  For the scalar
+  PROMPT_COMMAND, it uses the function `execute_variable_command'
+  (parse.y) which first copies the command string using
+  `savestring(cmd)' and pass it to `parse_and_execute'.  This process
+  can be illustrated in the following schematic code.
+
+    {
+      Copy the value of PROMPT_COMMAND;
+      Execute the copy; /* this can modify the original variable */
+      Free the copy;
+    }
+
+  In this way, it doesn't cause problem even when the variable
+  PROMPT_COMMAND is rewritten in the processing of the command string
+  because the executed string is a copy of the original
+  PROMPT_COMMAND.
+
+  In the case of the array PROMPT_COMMAND, it uses the utility
+  `execute_variable_command' for each element, so the schematic code
+  would be:
+
+    for (PROMPT_COMMAND array_elements)
+      {
+        Copy the element;
+        Execute the copy; /* this can modify the array */
+        Free the copy;
+      }
+
+  This is robust for the case that the executed command modifies just
+  the string of the corresponding element, but vulnerable for the case
+  that the array structure is changed.  This should be modified in the
+  following way:
+
+    {
+      Copy all the elements of PROMPT_COMMAND.
+      for (copied strings)
+        Execute the command strings.
+      Free the copied strings.
+    }
+
+  In the patch
+  `0001-Fix-a-segmentation-fault-of-array-PROPMT_COMMAND.patch', I
+  have added a function `execute_array_command' which is the array
+  version of `execute_variable_command'.
+
+  ----
+
+  By the way, I suspect there is a memory leak in `bashline.c'.
+
+    bashline.c:4343:  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
+
+  It appears to me that SEVAL_NOFREE shouldn't be specified here [see
+  the patch `0002-Fix-memleak-in-bash_execute_unix_command.patch'], or
+  otherwise, the string allocated by `savestring' will not be free'd.
+  In fact, I can observe that the memory use of the process is
+  monotonically increasing with the following operation:
+
+    $ bash --norc
+    $ arr=({1..100000})
+    $ bind -x "\"\C-t\":: '${arr[*]}"
+    (hit C-t many times)
+
+  Actually I have sent a related patch two years ago at
+
+    https://lists.gnu.org/archive/html/bug-bash/2018-05/msg00020.html
+
+  In the patch, I added `savestring' and removed `SEVAL_NOFREE' as well.
+
+  -  r = parse_and_execute (cmd, "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
+  +  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST);
+
+  However, it seems only the change to `savestring' was picked up at
+  that time, and the change of SEVAL_NOFREE was dropped in applying
+  the patch to the devel branch.
+
+  --- dfc21851b commit bash-20090723 snapshot
+  +++ 96b7e2687 commit bash-20180504 snapshot
+  -  r = parse_and_execute (cmd, "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
+  +  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
+
+--
+Koichi

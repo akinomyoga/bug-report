@@ -1,0 +1,136 @@
+From f1dd7c703cba1c5a0916b97a68b3a258264ffcc6 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 31 Aug 2020 08:55:03 +0900
+Subject: [PATCH] Fix a segmentation fault of array PROPMT_COMMAND
+
+---
+ array.h |  4 ++--
+ eval.c  | 20 ++-----------------
+ parse.y | 59 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 63 insertions(+), 20 deletions(-)
+
+diff --git a/array.h b/array.h
+index a610de7c..93f31127 100644
+--- a/array.h
++++ b/array.h
+@@ -121,7 +121,7 @@ extern ARRAY *array_from_string PARAMS((char *, char *));
+ 
+ #define ALL_ELEMENT_SUB(c)	((c) == '@' || (c) == '*')
+ 
+-/* In eval.c, but uses ARRAY_ELEMENT * */
+-extern int execute_array_command PARAMS((ARRAY_ELEMENT *, void *));
++/* In parse.y, the array version of execute_variable_command accepting ARRAY * */
++extern void execute_array_command PARAMS((ARRAY *, char *));
+ 
+ #endif /* _ARRAY_H_ */
+diff --git a/eval.c b/eval.c
+index ed3b0f24..e4444f1f 100644
+--- a/eval.c
++++ b/eval.c
+@@ -262,22 +262,6 @@ send_pwd_to_eterm ()
+   free (f);
+ }
+ 
+-#if defined (ARRAY_VARS)
+-int
+-execute_array_command (ae, v)
+-     ARRAY_ELEMENT *ae;
+-     void *v;
+-{
+-  char *tag, *command;
+-
+-  tag = (char *)v;
+-  command = element_value (ae);
+-  if (command && *command)
+-    execute_variable_command (command, tag);
+-  return 0;
+-}
+-#endif
+-  
+ static void
+ execute_prompt_command ()
+ {
+@@ -293,8 +277,8 @@ execute_prompt_command ()
+ #if defined (ARRAY_VARS)
+   if (array_p (pcv))
+     {
+-      if ((pcmds = array_cell (pcv)) && array_num_elements (pcmds) > 0)
+-	array_walk (pcmds, execute_array_command, "PROMPT_COMMAND");
++      if (pcmds = array_cell (pcv))
++	execute_array_command (pcmds, "PROMPT_COMMAND");
+       return;
+     }
+   else if (assoc_p (pcv))
+diff --git a/parse.y b/parse.y
+index 4b7363d6..26222df6 100644
+--- a/parse.y
++++ b/parse.y
+@@ -2743,6 +2743,65 @@ execute_variable_command (command, vname)
+     token_to_read = 0;
+ }
+ 
++#if defined (ARRAY_VARS)
++static int
++collect_array_command (ae, v)
++     ARRAY_ELEMENT *ae;
++     void *v;
++{
++  char ***ppcmdstr, *command;
++
++  ppcmdstr = (char ***)v;
++  command = element_value (ae);
++  if (command && *command)
++    *(*ppcmdstr)++ = savestring(command);
++  return 0;
++}
++
++void
++execute_array_command (a, vname)
++     ARRAY *a;
++     char *vname;
++{
++  int ncmds;
++  char **cmdstrs, **pcmdstr;
++  char *last_lastarg;
++  sh_parser_state_t ps;
++
++  if ((ncmds = array_num_elements (a)) <= 0)
++    return;
++
++  /* copy command strings in the array */
++  cmdstrs = (char **)xmalloc(sizeof(char *) * (ncmds + 1));
++  pcmdstr = cmdstrs;
++  array_walk (a, collect_array_command, &pcmdstr);
++  *pcmdstr = NULL;
++
++  last_lastarg = get_string_value ("_");
++  if (last_lastarg)
++    last_lastarg = savestring (last_lastarg);
++
++  /* execute command strings */
++  for (pcmdstr = cmdstrs; *pcmdstr; pcmdstr++)
++    {
++      save_parser_state (&ps);
++      parse_and_execute (*pcmdstr, vname, SEVAL_NONINT|SEVAL_NOHIST);
++      restore_parser_state (&ps);
++
++      bind_variable ("_", last_lastarg, 0);
++      if (token_to_read == '\n')	/* reset_parser was called */
++	token_to_read = 0;
++    }
++
++  FREE (last_lastarg);
++
++  /* free command strings.  Note: each element of cmdstrs is already
++     free()'d by parse_and_execute.
++  */
++  free(cmdstrs);
++}
++#endif
++
+ void
+ push_token (x)
+      int x;
+-- 
+2.21.3
+
