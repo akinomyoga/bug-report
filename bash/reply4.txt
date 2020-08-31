@@ -1,0 +1,131 @@
+# https://lists.gnu.org/archive/html/help-bash/2020-08/msg00014.html
+
+Hi,
+
+`declare -p` can tell whether a variable is declared. But it can not
+tell whether the variable is declared with the current function or
+outside the current function. Is there a way to do so? Thanks.
+
+--
+Regards,
+Peng
+
+----------------------------------------------------------------------
+改めて読んだら "current function" と言っているので local | grep '^a$'
+で十分である。或いは 5.1 ならば local -p a を使う事ができる。
+
+You can use the fact that readonly global variable prevents the
+creation of function-scope variables with the same name while readonly
+function-scope variable does not.
+
+is-global() {
+  [[ ${1+set} ]] && (readonly "$1"; ! local "$1")
+} &>/dev/null
+
+a=1
+f1() {
+  local b=1
+  is-global a; echo "a $?"
+  is-global b; echo "b $?"
+  is-global c; echo "c $?"
+}
+a1
+
+In this function (is-global), the existence of the variable is first
+checked, the variable is made `readonly', and a new variable with the
+same name is tried to create.  In order not to make the variable
+really readonly, the latter part should be processed in a subshell.  I
+don't know the way to do it without the subshell.
+
+----------------------------------------------------------------------
+
+First, I naively think you should already know whether the variable
+name is declared in the current function because the function is
+written by you, and all the current-function variables are declared by
+you, so there is no need to dynamically test if the variable exists or
+not.  If you declare a variable under certain conditions, you can
+create another variable holding the state whether the variable exists
+or not:
+
+  local is_varname_set=no
+  if some-conditoin; then
+    local varname
+    is_varname_set=yes
+  fi
+
+  # You can check the value of another variable
+  [[ $is_varname_set == yes ]]
+
+
+----------
+
+I recommend you to write in the above way if there is no particular
+reason, but if you really need to dynamically test a variable, in Bash
+5.1, you can use `local -p':
+
+  local -p varname &>/dev/null
+
+In other versions of Bash, you can use `local' as Marco wrote.
+Although the command `local' doesn't set the exit status that you
+expect, you can always read and process the output of `local' for your
+purpose.  I think
+
+  local | grep '^varname='
+
+would be probably the most straightforward way.  If you want to reduce
+the number of fork/exec, you may test the output using the conditional
+command `[[ ... ]]'.  For example,
+
+  [[ $'\n'$(local) == *$'\n'varname=* ]]
+
+Another way would be to use the fact that the local variable is
+initialized to be unset when it is newly created:
+
+  (varname=1; local varname; [[ ${varname+set} ]])
+
+The above command first makes `varname' a `set' state by assigning a
+value `1'. Next, it tries to create a new local variable by `local
+varname'.  If there is already a local variable in the current
+function, this doesn't have any effect, and the variable `varname'
+remains in a `set' state.  If there is no local variable in the
+current function, a variable is newly created in the current function
+and initialized to be the `unset' state.  Finally one can check if the
+variable has a `set' or `unset' state.  These processes break the
+state of the variable, so need to be performed in a subshell.  For
+this technique to work, the shell option `localvar_inherit' (available
+with Bash 5.0+) needs to be turned off, i.e., `shopt -u
+localvar_inherit'.
+
+Note that the above methods cannot be encapsulated in a function
+because the builtin `local' needs to be performed in the function
+scope that you want to test with.  Instead, maybe you can store the
+code in a variable and evaluated it by `eval'.  For example,
+
+  # Prepare a global variable at the beginning of the script
+  is_current_function_local_variable='(VAR=1; local VAR; [[ ${VAR+set} ]])'
+
+  # Use the variable in a function scope
+  eval "${is_current_function_local_variable//VAR/varname}"
+
+----------
+
+If you don't need to distinguish the current-function local variable
+and the previous-function local variable and just want to test if the
+variable is a global variable or a function-scope variable, there is
+another way.  You can use the fact that a readonly global variable
+prevents the creation of function-scope variables with the same name
+while a readonly function-scope variable does not:
+
+  # Prepare a function
+  is-global() (readonly "$1"; ! local "$1") &>/dev/null
+
+  # Use a function to test if a variable is function-scope variable.
+  ! is-global varname
+
+This function `is-global' first make the variable `readonly' and then
+try to create a new variable with the same name.  Because this changes
+the `readonly' attribute of the variable, it should be processed in a
+subshell.
+
+--
+Koichi

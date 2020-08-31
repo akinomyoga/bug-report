@@ -1,0 +1,145 @@
+# https://lists.gnu.org/archive/html/bug-bash/2020-08/msg00171.html
+
+> Description:
+>         Bash parameter expansion (remove largest trailing match,
+> remove largest leading match, pattern replacement) does not work
+
+In short, (1) ``octal escape \057'' doesn't have special meaning in
+Bash glob patterns.  `[\057]' means just one of a literal backslash or
+digits 0, 5, or 7.  (2) You need to set `shopt -s extglob` to use
+extended glob patterns like `+(...)' and `*(...)'.  Please look at the
+paragraph above the list of extended patterns in the manual.
+
+--
+Koichi
+
+----------------------------------------------------------------------
+
+> Please don't assume that something output by printf (without
+> quoting) for clarity is representative of actual expansion by the
+> shell when properly quoted.
+
+Please don't assume that I have assumed something strange.  To begin
+with, you didn't provide the script `shellbug', so something needs to
+be assumed anyway.  Since it seems you are aware that your original
+post would be unclear and confuse others, you could have just included
+the contents of the file `shellbug'.  Anyway, I did NOT assume that
+you have literally written broken quoting like
+
+  separator2(octal escape)=\057
+  pattern1=${number1}(${separator1})
+
+I assumed that you have written like
+
+  separator2='\057'
+  pattern1="${number1}(${separator1})"
+
+because otherwise, it doesn't work with ksh93 either.
+
+
+To explain it in more detail, first, these parameter expansions work
+for me with separator1='/'.  The pattern that you constructed from
+separator2='\057' is just not supported by Bash.  Next, you specify
+exactly the same script `shellbug' to both Bash and ksh93, so I could
+assume that you are missing the Bash-specific `shopt -s extglob' in
+the script because otherwise, ksh93 would have complained it.  That is
+all what I can guess from your original post.
+
+--
+Koichi
+
+----------------------------------------------------------------------
+
+> Unfortunately, because bash is GPL, I can't post the copyrighted
+> script which is covered by a non-GPL license.
+
+Don't worry.  In this case, the GPL doesn't apply.  Please read the
+following Q&A.
+
+https://www.gnu.org/licenses/gpl-faq.en.html#IfInterpreterIsGPL
+
+Even if your original `shellbug' is licensed under something other,
+and it prohibits to make it public, you can still create another
+script to reproduce the same issue.  Actually, it is considered to be
+better practice in reporting bugs to create ``a reduced test case''
+which is a minimal script that reproduces the problem rather than
+sending the original script.
+
+--
+Koichi
+
+----------------------------------------------------------------------
+
+2020-08-30 4:54 Bruce Lilly <bruce.lilly@gmail.com>:
+> On Sat, Aug 29, 2020, 15:40 Koichi Murase <myoga.murase@gmail.com> wrote:
+>> Don't worry.  In this case, the GPL doesn't apply.  Please read the
+>> following Q&A.
+>>
+>> https://www.gnu.org/licenses/gpl-faq.en.html#IfInterpreterIsGPL
+>>
+>> Even if your original `shellbug' is licensed under something other,
+>> and it prohibits to make it public, you can still create another
+>> script to reproduce the same issue.  [...]
+
+I'm sorry if I have confused you, but first, let me clarify that I
+meant by `create another script' that you can create a completely new
+script from scratch instead of extracting the relevant part of the
+original script.
+
+> It's a bit more complicated than that; if, for example, some excerpt
+> ended up in regression tests, there would be a question about
+> whether or not there was a copyright violation.  As I understand the
+> GPL (IANAL), it requires all parts of a "work" to be GPL'd, and that
+> wouldn't be possible for any parts of the script that ended up in
+> bash regression tests.
+
+That's an interesting discussion.  I don't know how you define the
+"work", but basically GPL only affects the derivative
+programs/software but not all the "work" including the output of the
+programs or the knowledge obtained in running/developing the code.
+
+How about thinking in this way: You have gotten the knowledge that the
+parameter expansions do not behave as you expected, and that knowledge
+is not licensed by GPL.  Then you create a new script from scratch
+based on the knowledge by trying to encode the idea directly and not
+to be affected by the style of the original script as much as
+possible.  I don't know but something like this reduced case:
+
+  text=AABBCC patA='*(A)' patC='+(C)'
+  echo "${text##$patA}, ${text%%$patC}"
+
+I believe this shouldn't be considered GPL'd.  Otherwise, anyone who
+read a GPL code in the past cannot write any non-GPL programs because
+one cannot prove the experience of reading the GPL code doesn't affect
+any code that he/she writes thereafter.  I sometimes hear that someone
+avoids hiring programmers who have read a GPL code in the past for
+defensive purposes, but I believe it's a matter of degree.
+
+2020-08-30 5:07 Bruce Lilly <bruce.lilly@gmail.com>:
+> That's surprising, as octal and hexadecimal escapes are fairly
+> common.
+
+Yes, I know that it is confusing to those who are familiar with modern
+Perl-style regular expressions.  But historically, POSIX regular
+expressions do not support the backslash escape sequences in bracket
+expressions `[...]'.  The backslash escape sequences in bracket
+expressions were the extension historically.  As far as I know, in
+POSIX, only awk supports backslash sequences in regular expressions.
+
+> Yes, I'm still looking into that (along with updating a couple of
+> FreeBSD machines, eating lunch, and monitoring a couple of
+> downloads).  I'll obviously have to wrap the "shopt" bit in a
+> wrapper; is there some minimum bash version that supports it?
+
+Bash 2.02 supports `shopt -s extglob', so you can assume every Bash
+has the support.  If you are still failing to get an expected
+behavior, you can just put the line `shopt -s extglob' in the
+beginning of the script.  In the case of the above mentioned reduced
+case, you can write like this:
+
+  shopt -s extglob
+  text=AABBCC patA='*(A)' patC='+(C)'
+  echo "${text##$patA}, ${text%%$patC}"
+
+--
+Koichi
