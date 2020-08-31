@@ -1,9 +1,9 @@
 From: murase
 To: bug-bash@gnu.org
-Subject: [PATCH] Fix segv by self-modifying array PROMPT_COMMAND
+Subject: [PATCH] Fix segfault with self-modifying array PROMPT_COMMAND
 
-Hi, I hit a segmentation fault with the array PROMPT_COMMAND.  Here is
-the report.
+Hi, I hit a segmentation fault with the array PROMPT_COMMAND.  Here is
+the report and a patch. There is also another trivial patch.
 
 Configuration Information [Automatically generated, do not change]:
 Machine: x86_64
@@ -20,7 +20,7 @@ Release Status: release
 
 Description:
 
-  In the devel branch (e4d38c2d: commit bash-20200819 snapshot),
+  In the devel branch (e4d38c2d: commit bash-20200819 snapshot), a
   segmentation fault occurs when a prompt command stored in the array
   version of PROMPT_COMMAND unsets the corresponding element in
   PROMPT_COMMAND.
@@ -93,7 +93,7 @@ Fix:
       Free the copy;
     }
 
-  In this way, it doesn't cause problem even when the variable
+  In this way, it doesn't cause problems even when the variable
   PROMPT_COMMAND is rewritten in the processing of the command string
   because the executed string is a copy of the original
   PROMPT_COMMAND.
@@ -147,13 +147,14 @@ Fix:
 
     https://lists.gnu.org/archive/html/bug-bash/2018-05/msg00020.html
 
-  In the patch, I added `savestring' and removed `SEVAL_NOFREE' as well.
+  In the patch at that time, I added `savestring' and removed
+  `SEVAL_NOFREE' as well.
 
   -  r = parse_and_execute (cmd, "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
   +  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST);
 
-  However, it seems only the change to `savestring' was picked up at
-  that time, and the change of SEVAL_NOFREE was dropped in applying
+  However, it seems that only the change to `savestring' was picked up
+  at that time, and the change of SEVAL_NOFREE was dropped in applying
   the patch to the devel branch.
 
   --- dfc21851b commit bash-20090723 snapshot

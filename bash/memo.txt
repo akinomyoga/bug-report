@@ -208,29 +208,6 @@
   Bugs
 ------------------------------------------------------------------------------
 
-2020-08-31
-
-* bashline.c で savestring した後で自動で free する様にしていたと思ったが、
-  実際に確認してみると SEVAL_NOFREE が指定されている。
-  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
-  自分の patch ではこれを削除する様にしたと思ったが残っている。何故?
-  経緯について確認する必要がある。
-
-  これについては先ず前に自分がした報告を探す。
-  https://lists.gnu.org/archive/html/bug-bash/2018-05/msg00020.html である。
-  確かにこの時点では　SEVAL_NOFREE を設定している。blame してみる。
-
-  --- dfc21851b commit bash-20090723 snapshot
-  +++ 96b7e2687 commit bash-20180504 snapshot
-  -  r = parse_and_execute (cmd, "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
-  +  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
-
-  どうもこちらの送った patch をちゃんと適用しなかった様だ。
-  或いは、意図的に SEVAL_NOFREE を残した?
-  然し、やはりそれは改めて考えてみても変である。
-  やっぱりちゃんと patch を見ないで適用したのだとしか考えられない。
-
-
 2019-12-17
 
 * shadow がそのままになってしまう。
@@ -261,6 +238,26 @@
 -------------------------------------------------------------------------------
 
 2020-08-31
+
+* report19b: bashline.c で savestring した後で自動で free する様にしていたと思ったが、
+  実際に確認してみると SEVAL_NOFREE が指定されている。
+  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
+  自分の patch ではこれを削除する様にしたと思ったが残っている。何故?
+  経緯について確認する必要がある。
+
+  これについては先ず前に自分がした報告を探す。
+  https://lists.gnu.org/archive/html/bug-bash/2018-05/msg00020.html である。
+  確かにこの時点では　SEVAL_NOFREE を設定している。blame してみる。
+
+  --- dfc21851b commit bash-20090723 snapshot
+  +++ 96b7e2687 commit bash-20180504 snapshot
+  -  r = parse_and_execute (cmd, "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
+  +  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
+
+  どうもこちらの送った patch をちゃんと適用しなかった様だ。
+  或いは、意図的に SEVAL_NOFREE を残した?
+  然し、やはりそれは改めて考えてみても変である。
+  やっぱりちゃんと patch を見ないで適用したのだとしか考えられない。
 
 * report19: PROMPT_COMMAND を実行中に書き換えると変な事になるという問題
 
