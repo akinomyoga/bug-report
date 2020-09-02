@@ -60,4 +60,6 @@
 
 ## help-bash
 
+- 2020-09-02 reply5: Re: How to do if any (if no so a feature request) to do break continue
+  - https://lists.gnu.org/archive/html/bug-bash/2020-09/msg00004.html
 - 2021-03-13 H0005: A. f. Ratchev の ogt に対するコメント
