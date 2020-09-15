@@ -1,0 +1,189 @@
+https://lists.gnu.org/archive/html/bug-bash/2020-09/msg00039.html
+
+> simply run a readline function among lines codes of bash script such
+> a menu-complete, or previous-history repeated thrice, or etc
+
+What is not clear is not how you call the readline function, but what
+kind of ``script'' do you assume?
+
+a. If it is the normal executable script which can be used as
+  `./script.sh', the question doesn't make sense because there is no
+  command line and no readline.  Readline is only enabled in a
+  interactive session of Bash.  So one can guess that you are either
+  asking how to enable the readline in a script, or talking about some
+  other type of scripts that you haven't explained.
+
+b. If you want to enable readline and accept user inputs, you can use
+  `read -e' as Greg's wrote.  If you want to control the detailed
+  behavior of `read -e' (i.e., how it behaves for each keystroke) by
+  Bash scripts, the answer is it's not possible.
+
+c. Maybe you are thinking of sourcing a script in an interactive
+  shell, such like
+
+  $ source script.sh
+
+  In this case, it is still unclear what you want to do because the
+  readline is inactive on the command execution.  There is no prompt
+  or command line when the user command is not shown.
+
+d. Another possibility is that you are talking about the shell
+  commands executed in `bind -x '"keyseq":unix-command''.  In this
+  case, it is impossible to invoke a readline function directly from
+  the shell commands.  But some limited class of mixed operations can
+  be implemented by using the `bind '"...":"..."'` macro.
+
+e. Or maybe you are thinking of a completely different type of
+  ``script''?
+
+--
+Koichi
+
+| But, some limited class of mixed operations (i.e,. fixed sequences
+| of readline functions and shell commands) can be run by using the
+| macro defined by `bind '"...":"..."''.  For example, let's consider
+| running the following commands in order by pressing `\C-t':
+|
+|   1. shell-command-1
+|   2. readline-function-1
+|   3. shell-command-2
+|   4. readline-function-2
+|   5. shell-command-3
+|
+| You can setup your bashrc in the following way.
+|
+|   bind '"\C-t":"\e[?1~\e[?2~\e[?3~\e[?4~\e[?5~"'
+|   bind -x '"\e[?1~": shell-command-1'
+|   bind    '"\e[?2~": readline-function-1'
+|   bind -x '"\e[?3~": shell-command-2'
+|   bind    '"\e[?4~": readline-function-2'
+|   bind -x '"\e[?5~": shell-command-3'
+|
+| Here \e[?1~..\e[?5~ are some arbitrary *unused escape sequences* you
+| like.
+|
+| [ Note on Compatibility: In older versions of Bash, there are many
+| bugs related to `bind -x', so you want to use a recent version of
+| Bash.  At least, you need to use Bash 4.3+ because the keyseq in
+| `bind -x' with more than two bytes will not work in Bash 4.2 and
+| before and the codespace of two-byte *unused escape sequence* is
+| limited. ]
+|
+| I haven't tried, but I think, in principle, this technique can be
+| extended to handle dynamically chaging sequence of operations by
+| dynamically redefining the key bindings inside the shell commands
+| while running the macro, but it will be really involved.
+
+----------------------------------------------------------------------
+https://lists.gnu.org/archive/html/help-bash/2020-09/msg00003.html
+
+2020-09-10 8:04 Chris Elvidge <celvidge001@gmail.com>:
+> I've recently come across a crontab line:
+> 0 */6 * * *     /usr/bin/modprobed-db store &> /dev/null
+
+`&>' is an extension to the POSIX shell, and the default setting of
+cron doesn't necessarily contain SHELL=/bin/bash.  For example, Ubuntu
+by default seems to use /bin/sh (dash) to run crontab.  If you want to
+use `&>' in crontab, you need to make it sure that "SHELL=/bin/bash"
+is set in the crontab.
+
+> I've also read that '&> /dev/null' is outdated and should be replaced
+> with '>/dev/null 2>&1'
+>
+> True? And exactly why?
+
+I'm also interested in whether it is really outdated and should not be
+used.
+
+I can find some discussion on the first item on the page
+https://wiki.bash-hackers.org/scripting/obsolete .  The page says that
+it is because `&>' has a different unintended meaning in POSIX shell,
+but I think the discussion doesn't apply when one consciously writes
+Bash scripts (but not POSIX scripts).  If you cannot use any
+constructs that have a different meaning in the POSIX shell, you can
+never use arithmetic commands `((...))'  for example.
+
+I don't know other sources of the recommendation.  AFAIK, the Bash
+manual doesn't mark it as deprecated nor obsolete.  Bash even added a
+new variant `&>>' in version 4.0, so I guess they are not considered
+outdated by the developer side.
+
+--
+Koichi
+
+------------------------------------------------------------------------------
+
+2020-09-10 9:10 Chris Elvidge <celvidge001@gmail.com>:
+> I've used 'return $((!$#))' and 'return $[!$#]' to return an error
+> if no parameters given to function.
+
+You can use
+
+  (($#)) || return
+
+With the above command, (($#)) fails with no parameters so that the
+next command `return' is executed.  When `return' is called without
+arguments, it uses $?, the exit status of the previous command, for
+the function's exit status.  If you want to use the function in trap
+handlers you need to explicitly specify the exit status as
+
+  (($#)) || return "$?"
+
+because, in trap handlers, `return' without arguments returns the exit
+status of the previous command *outside the trap handler* in Bash
+4.4+.
+
+> However 'N=0; echo $((!$N))' gives an error at the bash prompt. 'echo
+> $[!$N]' echo's 1 as expected.
+
+This is because the construct `!...' is subject to history expansions
+in interactive sessions.  You command `echo $((!$N))' will be first
+expanded to `echo $((<LAST_ARGUMENT_IN_HISTORY>N))', and then the
+arithmetic evaluation will be performed.  If you don't use history
+expansions, you can turn it off by putting `set +H'.
+
+The reason why `$[!$N]' didn't cause history expansions was just
+because the history expansion skips the string of the form `[!...]'
+which resembles the glob pattern.  It is an accidental pattern
+coincidence, and $[...] cannot be always used to suppress history
+expansions.  For example, `echo $[a=!$N]' is a target of the history
+expansion and will cause errors.
+
+> My question - is $[...] actually obsolete? If so, what should I use at
+> the bash prompt to get the same effect?
+
+Yes, it is obsolete.  It is a Bash-1 feature and not documented in the
+current Bash manuals (Bash-2.0+).
+
+--
+Koichi
+
+----------------------------------------------------------------------
+https://lists.gnu.org/archive/html/help-bash/2020-09/msg00000.html
+
+2020-09-05 14:19 Peng Yu <pengyu.ut@gmail.com>:
+> I use homebrew to install bash. But I don't find a way to
+> automatically install bash loadables and set the corresponding
+> enviroment in homebrew. Does anybody know if this is possible?
+> Thanks.
+
+I'm not sure because I don't have macOS, but I guess the loadable
+builtins are already installed when you installed the latest bash with
+homebrew because it seems the brew formula for bash just runs
+`make install'.
+
+  https://github.com/Homebrew/homebrew-core/blob/master/Formula/bash.rb#L65-L66
+
+I guess the loadable builtins are located in some path like
+
+  /usr/local/Cellar/bash/5.0.18/lib/bash
+
+If the loadables are located in the above path, I think you can use
+the following setting:
+
+  BASH_LOADABLES_PATH=/usr/local/Cellar/bash/5.0.18/lib/bash
+
+--
+Koichi
+
+----------------------------------------------------------------------
