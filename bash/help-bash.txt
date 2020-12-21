@@ -1,3 +1,44 @@
+https://lists.gnu.org/archive/html/help-bash/2020-12/msg00013.html
+
+The bottleneck here is not `while read`.  Although `while read` is a
+relatively slow one among the bash builtin features, it is still
+faster than spawning processes.  Using a separate Bash script even
+increases the number of spawns so will eventually slow down the whole
+processing.
+
+To improve the performance, one should first reduce the number of
+spawns (i.e., the number of the calls of external commands).  For
+example, if you can use Bash-specific features in your script, you may
+write it something like the following way (see Note below):
+
+  #!/bin/bash
+  shopt -s lastpipe
+  find "$WIKI_DIR" -type f -print0 | # 1 fork, 1 exec
+    mapfile -d '' -t filenames
+  printf '%s\0' "${filenames[@]}" |  # 1 fork
+    xargs -0 -P 1 file -b |          # 1 fork, 1 exec
+    mapfile -t filetypes
+  executables=()
+  normalfiles=()
+  for ((i=0;i<${#filenames[@]};i++)); do
+    case ${filetypes[i]} in
+    (*executable*|*script*) executables+=("${filenames[i]}") ;;
+    (*)                     normalfiles+=("${filenames[i]}") ;;
+    esac
+  done
+  ((${#executables[@]})) && echo chmod u=rwx,g=rx,o= "${executables[@]}" # 1 fork
+  ((${#normalfiles[@]})) && echo chmod u=rw,g=r,o=   "${normalfiles[@]}" # 1 fork
+
+Note: I haven't tested the above code thoroughly, and also it uses
+"mapfile -d ''" (separate stdin by \0) of Bash 4.4.  Since the Bash
+version in CentOS 7 seems to be Bash 4.2, it needs to be adjusted
+anyway.  If the filenames can be assumed not to contain newlines,
+\n's, one can just separate the result of find by newlines.
+
+--
+Koichi
+
+----------------------------------------------------------------------
 https://lists.gnu.org/archive/html/bug-bash/2020-09/msg00039.html
 
 > simply run a readline function among lines codes of bash script such
