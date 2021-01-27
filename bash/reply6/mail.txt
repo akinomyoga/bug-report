@@ -1,0 +1,40 @@
+
+
+2021年1月26日(火) 23:46 Chet Ramey <chet.ramey@case.edu>:
+>
+> [...]
+>
+> 4. Readline notes there is pending input (the second newline), collects it,
+>     calls accept-line again, and goes through the process of cleaning up and
+>     calling the line handler. Unfortunately, this time, the application has
+>     already removed the line handler, and readline attempts to call through
+>     a NULL function pointer. This is where the core dump happens.
+
+Python crashes with [RET + other byte] as well. In this case, I think
+the second "accept-line" isn't called, so something different is
+happening.
+
+$ cat .inputrc
+"\ra": self-insert
+$ python3
+>>>        /*** <---- For example, hit RET and "b" ***/
+Segmentation fault (core dumped)
+
+
+> On 1/26/21 7:33 AM, Matthias Klose wrote:
+> > This was reported for Debian in https://bugs.debian.org/968703 for the
+> > interactive Python interpreter, however I also see it with gdb, e.g. trying to
+> > run ls in gdb. readline 8.1 is in use.
+
+I cannot reproduce it with gdb.
+
+$ gdb ls
+GNU gdb (GDB) Fedora 8.3-7.fc30
+Copyright (C) 2019 Free Software Foundation, Inc.
+[...]
+Reading symbols from ls...
+Reading symbols from .gnu_debugdata for /usr/bin/ls...
+(No debugging symbols found in .gnu_debugdata for /usr/bin/ls)
+Missing separate debuginfos, use: dnf debuginfo-install coreutils-8.31-6.fc30.x86_64
+(gdb)        /*** <---- hit RET twice. ***/
+(gdb)        /*** no segfault. ***/
