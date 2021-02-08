@@ -1,0 +1,13 @@
+
+2021-01-01
+
+  * fzf の binding で bash-3.0 でどの様にしているかを改めて調べる。
+
+    bind -m emacs-standard '"\C-t": " \C-b\C-k \C-u`__fzf_select__`\e\C-e\er\C-a\C-y\C-h\C-e\e \C-y\ey\C-x\C-x\C-f"'
+
+    " \C-b\C-k \C-u" ... これによりコマンドラインが aaa@bbb となって居た時に、
+      …うーん。これは何だろう。kill-ring の機能を使っているという事か。
+    "`__fzf_select__`\e\C-e" ... これで `...` を展開させている。
+    "\er\C-a\C-y\C-h" ... これで先頭に C-y の内容を挿入している。
+    "\C-e\e \C-y\ey" ... これで kill-ring[2] の内容を挿入できる
+    "\C-x\C-x\C-f" ... カーソル位置の修正
