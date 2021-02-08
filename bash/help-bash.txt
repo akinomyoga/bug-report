@@ -1,3 +1,170 @@
+----------------------------------------------------------------------
+2021-02-07 Bash minifiers [H0003]
+
+以下は書きかけて止めた文章
+
+https://lists.gnu.org/archive/html/help-bash/2021-02/msg00013.html
+
+# In this sense, in compiler languages, it is even easier to change
+# variable and function names because everything can be statically
+# analyzed usually (if one ignores the effects on reflections, the
+# feature some languages have), but I think the corresponding
+# minifiers are less popular because one can just distribute binaries
+# if one wants to hide the source code.
+
+----------------------------------------------------------------------
+2021年1月18日(月) 12:32 IFo Hancroft <lists@ifohancroft.com>:
+> What you want (the ability to reposition the cursor in the terminal
+> with a mouse click) can be done with just the terminal itself.
+
+I think Mike wanted to move the current text insertion point in
+Readline (or, in other words, the command line of Bash) but not just
+move the current cursor position in the terminal.  If the terminal
+just moves its cursor position without sharing the information with
+the application (i.e., Bash in this case), the result would be just
+broken rendering.
+
+So, this does have something to do with Bash or any text editors
+working in terminals.  In fact, recent versions of Emacs and Vim
+supports mouse using the mouse escape sequences of terminals.  A
+terminal application (such as Bash or text editors) could receive from
+the terminal the mouse events encoded in terminal sequences, move its
+internal cursor position, render the updated text content and move
+the terminal cursor position by sending escape sequences to the
+terminal.
+
+There has been some attempt to support the mouse in zsh:
+
+https://unix.stackexchange.com/questions/444601/any-terminal-shell-with-mouse-support
+
+but I think this implementation is not robust.  For example, I think
+this doesn't work when there are wide characters in the command line
+or the text content doesn't fit into a single terminal line.
+
+Actually, there is some practical problem of supporting mouse by
+shells: the shell is not a full-screen terminal application so that
+it cannot handle the mouse events that occurred outside the command
+line.  So, one needs to compromise with some features or integrate
+something like terminal multiplexers in the shell to manage all the
+terminal contents in the shell.  There were some discussions in Oil
+Shell:
+
+https://oilshell.zulipchat.com/#narrow/stream/121539-oil-dev/topic/Playing.20With.20Debuggers
+https://oilshell.zulipchat.com/#narrow/stream/121540-oil-discuss/topic/non-linear.20shell.20UI
+
+--
+Koichi
+
+----------------------------------------------------------------------
+https://lists.gnu.org/archive/html/bug-bash/2021-01/msg00031.html
+
+This topic actually pops up occasionally.  FYI, you can also see the
+following discussions:
+
+https://lists.gnu.org/archive/html/bug-bash/2014-06/msg00003.html
+https://lists.gnu.org/archive/html/bug-bash/2014-10/msg00154.html
+https://lists.gnu.org/archive/html/bug-bash/2015-02/msg00066.html
+
+2021年1月8日(金) 18:21 Oğuz <oguzismailuysal@gmail.com>:
+> `(( assoc[\$key]++ ))' works as usual, but this is not documented as
+> far as I know,
+
+This is explained in the first link above by quoting two sentences in
+the document, but I agree with you that this is so non-trivial that
+it's worth explicitly documenting IMHO.
+
+> Considering that the following two works, it doesn't make much sense
+> that `(( assoc[$key]++ ))' doesn't.
+
+I think the POSIX expansion order should be applied to, for example,
+$((assoc[$key]++)).  In this case the arithmetic evalution of the
+whole expression should be performed only after $key in
+$((assoc[$key]++)) is expanded.  There is no reason to introduce a
+different expansion rule of `((...))' from that of `$((...))'.  So, it
+feels a bit strange to me to expand `$key' in `(( assoc[$key]++ ))'
+after determining the arithmetic structure thinking the normal
+expansion order.
+
+> It would be better if at least quoting the key by means of parameter
+> transformation or `printf %q' worked, because these are the first
+> workarounds that come to mind;
+
+This is maybe a good idea.  From Bash 5.1, the single quotation "'" is
+not a subject to the quote removal of `(( ... ))', so we can use the
+single quotation as a part of the arithmetic expression.  We can just
+introduce the string literal of the form '...' or $'...' in the
+arithmetic evaluator.
+
+--
+Koichi
+
+----------------------------------------
+
+2021年1月8日(金) 20:07 Oğuz <oguzismailuysal@gmail.com>:
+> On Fri, Jan 8, 2021 at 2:14 PM Koichi Murase <myoga.murase@gmail.com> wrote:
+>> There is no reason to introduce a different expansion rule of
+>> `((...))' from that of `$((...))'.
+>
+> But there already is a different expansion rule. While `((
+> assoc['$key']++ ))' works, `: $(( assoc['$key']++ ))' fails with a
+> bad subscript error.
+
+Actually, that inconsistency has been fixed in Bash 5.1 to match with
+the behavior of `$(( assoc['$key']++ ))', i.e., now in Bash 5.1, `((
+assoc['$key']++ ))' doesn't work either.  So, `(( assoc[\$key]++ ))'
+is the only working way to access the associative array in the
+arithmetic command of the form `(( ... ))'.  Or, maybe you could write
+`let 'assoc[$key]++'`.
+
+--
+Koichi
+
+----------------------------------------------------------------------
+https://lists.gnu.org/archive/html/bug-bash/2021-01/msg00005.html
+
+Happy new year!
+
+2021年1月2日(土) 20:44 felix <felix@f-hauri.ch>:
+> ( Under 4.2.37(1)-release, I get: ``-bash: a[$i]: bad array subscript'' )
+>
+> But with ``my'' 5.0.3(1)-release, as with new 5.1.4(1)-release, no
+> error...
+
+Negative array subscripts are indeed a new feature of Bash 4.3.  From
+the changelog (http://tiswww.case.edu/php/chet/bash/CHANGES):
+
+> This document details the changes between this version,
+> bash-4.3-alpha, and the previous version, bash-4.2-release.
+>
+>
+> [...]
+>
+> 3.  New Features in Bash
+>
+> [...]
+>
+> x.  The shell now allows assigning, referencing, and unsetting
+>     elements of indexed arrays using negative subscripts (a[-1]=2,
+>     echo ${a[-1]}) which count back from the last element of the
+>     array.
+
+----
+
+> Where 5th value is 45 instead of -12 and 6th is 36 instead of -21
+>  45 + 12 = 57,  36 + 21 = 57 ... (highest submited value was 56!)??
+
+The index -1 corresponds to the highest index, so a negative index
+"-O" corresponds to the index "H-O+1" where H is the highest index, so
+the behavior that -12 and -21 correspond to 56-12+1=45 and 56-21+1=36,
+respectively, is the correct one. Or in another way of thinking, when
+the highest index is 56, the number of elements in a hypothetical
+dense array a[0]..a[56] is N=57, so -12 and -21 correspond to N-12=45
+and N-21=36.
+
+--
+Koichi
+
+----------------------------------------------------------------------
 https://lists.gnu.org/archive/html/help-bash/2020-12/msg00013.html
 
 The bottleneck here is not `while read`.  Although `while read` is a
