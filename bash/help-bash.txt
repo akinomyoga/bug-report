@@ -165,6 +165,26 @@ and N-21=36.
 Koichi
 
 ----------------------------------------------------------------------
+2020-12-23 Bash quirks for write attempts to readonly variables [H0002]
+
+これは Oil での議論である。readonly にアクセスした時の bash の振る舞い
+がおかしくないかという話。
+
+https://oilshell.zulipchat.com/#narrow/stream/121540-oil-discuss/topic/quirk.20in.20bash.20error.20handling.20between.20simple.20.2F.20list
+https://gist.github.com/abathur/8d18853e06f2a8cf3a97e45acda17f68
+https://gist.github.com/akinomyoga/d5225097548fdb97450c9a6748f63884
+
+報告されている振る舞いは丁度 alias の時と同じ状況で起こっている様だ。
+つまり、readonly 変数に対する代入によって停止する処理は、parse のレベ
+ルで起こるという事である。
+
+set -u による停止や ${var?error} による停止も同様に振る舞っているので
+はないか? と考えたが、これらは完全にスクリプトを終了する様である。osh
+のテストに依ると他のシェルもスクリプトを完全に終了する様に動作している。
+
+POSIX を調べたら readonly な変数に代入を試みると
+
+----------------------------------------------------------------------
 2020-12 Reduce forks for batch chmod [H0001]
 
 https://lists.gnu.org/archive/html/help-bash/2020-12/msg00013.html
