@@ -1,0 +1,361 @@
+From 10e784337238e6081ca5f9bdc8c21492f7b89388 Mon Sep 17 00:00:00 2001
+From: Chet Ramey <chet@caleb.ins.cwru.edu>
+Date: Mon, 4 Mar 2013 08:10:00 -0500
+Subject: [PATCH] commit bash-20130208 snapshot
+
+---
+ CHANGES-4.3             |   32 +-
+ CWRU/CWRU.chlog         |   20 +
+ builtins/read.def       |   19 +-
+ configure.ac            |    4 +-
+ jobs.c                  |    2 +-
+ parse.y                 |   69 +-
+ quit.h                  |    6 +
+ test.c                  |    2 +
+ trap.c                  |   15 +-
+ 17 files changed, 4207 insertions(+), 1756 deletions(-)
+ create mode 100644 builtins/read.def~
+ create mode 100644 quit.h~
+ create mode 100644 trap.c~
+
+diff --git a/CWRU/CWRU.chlog b/CWRU/CWRU.chlog
+index 04c629e7..59759f24 100644
+--- a/CWRU/CWRU.chlog
++++ b/CWRU/CWRU.chlog
+@@ -4502,3 +4502,23 @@ variables.c
+ 	  but create them as (invisible) exported variables so they pass
+ 	  through the environment.  Print an error message so user knows
+ 	  what's wrong.  Fixes bug reported by Tomas Trnka <ttrnka@mail.muni.cz>
++
++				    2/9
++				    ---
++
++builtins/read.def
++	- sigalrm_seen, alrmbuf: now global so the rest of the shell (trap.c)
++	  can use them
++	- sigalrm: just sets flag, no longer longjmps to alrmbuf; problem was
++	  longjmp without manipulating signal mask, leaving SIGALRM blocked
++
++quit.h
++	- move CHECK_ALRM macro here from builtins/read.def so trap.c:
++	  check_signals() can call it
++
++trap.c
++	- check_signals: add call to CHECK_ALRM before QUIT
++	- check_signals_and_traps: call check_signals() instead of including
++	  CHECK_ALRM and QUIT inline.  Integrating check for read builtin's
++	  SIGALRM (where zread call to check_signals_and_traps can see it)
++	  fixes problem reported by Mike Frysinger <vapier@gentoo.org>
+diff --git a/builtins/read.def b/builtins/read.def
+index ea2667bb..7a1dff6f 100644
+--- a/builtins/read.def
++++ b/builtins/read.def
+@@ -136,27 +136,26 @@ static void ttyrestore __P((struct ttsave *));
+ static sighandler sigalrm __P((int));
+ static void reset_alarm __P((void));
+ 
+-static procenv_t alrmbuf;
+-static int sigalrm_seen, reading;
++/* Try this to see what the rest of the shell can do with the information. */
++procenv_t alrmbuf;
++int sigalrm_seen;
++
++static int reading;
+ static SigHandler *old_alrm;
+ static unsigned char delim;
+ 
+-/* In most cases, SIGALRM just sets a flag that we check periodically.  This
++/* In all cases, SIGALRM just sets a flag that we check periodically.  This
+    avoids problems with the semi-tricky stuff we do with the xfree of
+    input_string at the top of the unwind-protect list (see below). */
+-#define CHECK_ALRM \
+-  do { \
+-    if (sigalrm_seen) \
+-      longjmp (alrmbuf, 1); \
+-  } while (0)
+ 
++/* Set a flag that CHECK_ALRM can check.  This relies on zread calling
++   trap.c:check_signals_and_traps(), which knows about sigalrm_seen and
++   alrmbuf. */
+ static sighandler
+ sigalrm (s)
+      int s;
+ {
+   sigalrm_seen = 1;
+-  if (reading)		/* do the longjmp if we get SIGALRM while in read() */
+-    longjmp (alrmbuf, 1);
+ }
+ 
+ static void
+diff --git a/configure.ac b/configure.ac
+index 563ba291..27aa1973 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -21,7 +21,7 @@ dnl Process this file with autoconf to produce a configure script.
+ #   You should have received a copy of the GNU General Public License
+ #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 
+-AC_REVISION([for Bash 4.3, version 4.054])dnl
++AC_REVISION([for Bash 4.3, version 4.055])dnl
+ 
+ define(bashvers, 4.3)
+ define(relstatus, alpha)
+@@ -79,6 +79,7 @@ sparc-linux*)	opt_bash_malloc=no ;;	# sparc running linux; requires ELF
+ *-mirbsd*)	opt_bash_malloc=no ;;	# they claim it needs eight-bit alignment
+ *-aix*)		opt_bash_malloc=no ;;	# AIX machines
+ *-nextstep*)	opt_bash_malloc=no ;;	# NeXT machines running NeXTstep
++*-openstep*)	opt_bash_malloc=no ;;	# i386/Sparc/HP machines running Openstep
+ *-macos*)	opt_bash_malloc=no ;;	# Apple MacOS X
+ *-rhapsody*)	opt_bash_malloc=no ;;	# Apple Rhapsody (MacOS X)
+ *-darwin*)	opt_bash_malloc=no ;;	# Apple Darwin (MacOS X)
+@@ -1075,6 +1076,7 @@ linux*)		LOCAL_LDFLAGS=-rdynamic		 # allow dynamic loading
+ powerux*)	LOCAL_LIBS="-lgen" ;;
+ cygwin*)	LOCAL_CFLAGS=-DRECYCLES_PIDS ;;
+ opennt*|interix*) LOCAL_CFLAGS="-DNO_MAIN_ENV_ARG -DBROKEN_DIRENT_D_INO -D_POSIX_SOURCE -D_ALL_SOURCE -DRECYCLES_PIDS" ;;
++*openstep*)	LOCAL_CFLAGS="-D__APPLE_CC__" ;;
+ esac
+ 
+ dnl Stanza for OS/compiler pair-specific flags
+diff --git a/jobs.c b/jobs.c
+index 9227638c..472f585f 100644
+--- a/jobs.c
++++ b/jobs.c
+@@ -3261,7 +3261,7 @@ waitchld (wpid, block)
+       child = find_process (pid, 1, &job);	/* want living procs only */
+ 
+ #if defined (COPROCESS_SUPPORT)
+-      coproc_pidchk (pid, status);
++      coproc_pidchk (pid, WSTATUS(status));
+ #endif
+ 
+       /* It is not an error to have a child terminate that we did
+diff --git a/parse.y b/parse.y
+index 98f62645..61f0f7c5 100644
+--- a/parse.y
++++ b/parse.y
+@@ -2196,7 +2196,6 @@ shell_getc (remove_quoted_newline)
+       /* Let's not let one really really long line blow up memory allocation */
+       if (shell_input_line && shell_input_line_size >= 32768)
+ 	{
+-itrace("shell_getc: freeing shell_input_line");
+ 	  free (shell_input_line);
+ 	  shell_input_line = 0;
+ 	  shell_input_line_size = 0;
+@@ -3247,11 +3246,7 @@ parse_matched_pair (qc, open, close, lenp, flags)
+ 	    }
+ 
+ 	  RESIZE_MALLOCED_BUFFER (ret, retind, 2, retsize, 64);
+-#if 0
+-	  if MBTEST(ch == CTLESC || ch == CTLNUL)
+-#else
+ 	  if MBTEST(ch == CTLESC)
+-#endif
+ 	    ret[retind++] = CTLESC;
+ 	  ret[retind++] = ch;
+ 	  continue;
+@@ -3550,10 +3545,10 @@ eof_error:
+ 	  ret[retind++] = ch;
+ 
+ 	  if ((tflags & LEX_INCOMMENT) && ch == '\n')
+-{
++	    {
+ /*itrace("parse_comsub:%d: lex_incomment -> 0 ch = `%c'", line_number, ch);*/
+-	    tflags &= ~LEX_INCOMMENT;
+-}
++	      tflags &= ~LEX_INCOMMENT;
++	    }
+ 
+ 	  continue;
+ 	}
+@@ -3570,11 +3565,7 @@ eof_error:
+ 	    }
+ 
+ 	  RESIZE_MALLOCED_BUFFER (ret, retind, 2, retsize, 64);
+-#if 0
+-	  if MBTEST(ch == CTLESC || ch == CTLNUL)
+-#else
+ 	  if MBTEST(ch == CTLESC)
+-#endif
+ 	    ret[retind++] = CTLESC;
+ 	  ret[retind++] = ch;
+ 	  continue;
+@@ -3699,15 +3690,15 @@ eof_error:
+ 	  else if MBTEST(lex_rwlen == 4 && shellbreak (ch))
+ 	    {
+ 	      if (STREQN (ret + retind - 4, "case", 4))
+-{
+-		tflags |= LEX_INCASE;
++		{
++		  tflags |= LEX_INCASE;
+ /*itrace("parse_comsub:%d: found `case', lex_incase -> 1 lex_reswdok -> 0", line_number);*/
+-}
++		}
+ 	      else if (STREQN (ret + retind - 4, "esac", 4))
+-{
+-		tflags &= ~LEX_INCASE;
++		{
++		  tflags &= ~LEX_INCASE;
+ /*itrace("parse_comsub:%d: found `esac', lex_incase -> 0 lex_reswdok -> 0", line_number);*/
+-}	        
++		}
+ 	      tflags &= ~LEX_RESWDOK;
+ 	    }
+ 	  else if MBTEST((tflags & LEX_CKCOMMENT) && ch == '#' && (lex_rwlen == 0 || ((tflags & LEX_INWORD) && lex_wlen == 0)))
+@@ -3719,33 +3710,33 @@ eof_error:
+ 			  (isblank(ch) || ch == '\n') &&
+ 			  lex_rwlen == 2 &&
+ 			  STREQN (ret + retind - 2, "do", 2))
+-{
++	    {
+ /*itrace("parse_comsub:%d: lex_incase == 1 found `%c', found \"do\"", line_number, ch);*/
+-	    lex_rwlen = 0;
+-}
++	      lex_rwlen = 0;
++	    }
+ 	  else if MBTEST((tflags & LEX_INCASE) && ch != '\n')
+ 	    /* If we can read a reserved word and we're in case, we're at the
+ 	       point where we can read a new pattern list or an esac.  We
+ 	       handle the esac case above.  If we read a newline, we want to
+ 	       leave LEX_RESWDOK alone.  If we read anything else, we want to
+ 	       turn off LEX_RESWDOK, since we're going to read a pattern list. */
+-{
+-	    tflags &= ~LEX_RESWDOK;
++	    {
++	      tflags &= ~LEX_RESWDOK;
+ /*itrace("parse_comsub:%d: lex_incase == 1 found `%c', lex_reswordok -> 0", line_number, ch);*/
+-}
++	    }
+ 	  else if MBTEST(shellbreak (ch) == 0)
+-{
+-	    tflags &= ~LEX_RESWDOK;
++	    {
++	      tflags &= ~LEX_RESWDOK;
+ /*itrace("parse_comsub:%d: found `%c', lex_reswordok -> 0", line_number, ch);*/
+-}
++	    }
+ #if 0
+ 	  /* If we find a space or tab but have read something and it's not
+ 	     `do', turn off the reserved-word-ok flag */
+ 	  else if MBTEST(isblank (ch) && lex_rwlen > 0)
+-{
+-	    tflags &= ~LEX_RESWDOK;
++	    {
++	      tflags &= ~LEX_RESWDOK;
+ /*itrace("parse_comsub:%d: found `%c', lex_reswordok -> 0", line_number, ch);*/
+-}
++	    }
+ #endif
+ 	}
+ 
+@@ -3784,10 +3775,10 @@ eof_error:
+ 	    ch = peekc;		/* fall through and continue XXX */
+ 	}
+       else if MBTEST((tflags & LEX_CKCOMMENT) && (tflags & LEX_INCOMMENT) == 0 && ch == '#' && (((tflags & LEX_RESWDOK) && lex_rwlen == 0) || ((tflags & LEX_INWORD) && lex_wlen == 0)))
+-{
++	{
+ /*itrace("parse_comsub:%d: lex_incomment -> 1 (%d)", line_number, __LINE__);*/
+-	tflags |= LEX_INCOMMENT;
+-}
++	  tflags |= LEX_INCOMMENT;
++	}
+ 
+       if MBTEST(ch == CTLESC || ch == CTLNUL)	/* special shell escapes */
+ 	{
+@@ -3801,15 +3792,15 @@ eof_error:
+         tflags &= ~LEX_INCASE;		/* XXX */
+ #endif
+       else if MBTEST(ch == close && (tflags & LEX_INCASE) == 0)		/* ending delimiter */
+-{
+-	count--;
++	{
++	  count--;
+ /*itrace("parse_comsub:%d: found close: count = %d", line_number, count);*/
+-}
++	}
+       else if MBTEST(((flags & P_FIRSTCLOSE) == 0) && (tflags & LEX_INCASE) == 0 && ch == open)	/* nested begin */
+-{
+-	count++;
++	{
++	  count++;
+ /*itrace("parse_comsub:%d: found open: count = %d", line_number, count);*/
+-}
++	}
+ 
+       /* Add this character. */
+       RESIZE_MALLOCED_BUFFER (ret, retind, 1, retsize, 64);
+diff --git a/quit.h b/quit.h
+index 8df01e1f..7d447ab2 100644
+--- a/quit.h
++++ b/quit.h
+@@ -36,6 +36,12 @@ extern volatile int terminating_signal;
+     if (interrupt_state) throw_to_top_level (); \
+   } while (0)
+ 
++#define CHECK_ALRM \
++  do { \
++    if (sigalrm_seen) \
++      longjmp (alrmbuf, 1); \
++  } while (0)
++
+ #define SETINTERRUPT interrupt_state = 1
+ #define CLRINTERRUPT interrupt_state = 0
+ 
+diff --git a/test.c b/test.c
+index 786d7f07..016763a0 100644
+--- a/test.c
++++ b/test.c
+@@ -395,9 +395,11 @@ binary_test (op, arg1, arg2, flags)
+     return (patmatch ? patcomp (arg1, arg2, EQ) : STREQ (arg1, arg2));
+   else if ((op[0] == '>' || op[0] == '<') && op[1] == '\0')
+     {
++#if defined (HAVE_STRCOLL)
+       if (shell_compatibility_level > 40 && flags & TEST_LOCALE)
+ 	return ((op[0] == '>') ? (strcoll (arg1, arg2) > 0) : (strcoll (arg1, arg2) < 0));
+       else
++#endif
+ 	return ((op[0] == '>') ? (strcmp (arg1, arg2) > 0) : (strcmp (arg1, arg2) < 0));
+     }
+   else if (op[0] == '!' && op[1] == '=' && op[2] == '\0')
+diff --git a/trap.c b/trap.c
+index d60a7fb4..b030747b 100644
+--- a/trap.c
++++ b/trap.c
+@@ -88,6 +88,9 @@ static void reset_or_restore_signal_handlers __P((sh_resetsig_func_t *));
+ extern int last_command_exit_value;
+ extern int line_number;
+ 
++extern int sigalrm_seen;
++extern procenv_t alrmbuf;
++
+ extern char *this_command_name;
+ extern sh_builtin_func_t *this_shell_builtin;
+ extern procenv_t wait_intr_buf;
+@@ -456,18 +459,20 @@ any_signals_trapped ()
+   return -1;
+ }
+ 
+-/* Convenience functions the rest of the shell can use */
+ void
+-check_signals_and_traps ()
++check_signals ()
+ {
++  CHECK_ALRM;		/* set by the read builtin */
+   QUIT;
+-  run_pending_traps ();
+ }
+ 
++/* Convenience functions the rest of the shell can use */
+ void
+-check_signals ()
++check_signals_and_traps ()
+ {
+-  QUIT;
++  check_signals ();
++
++  run_pending_traps ();
+ }
+ 
+ #if defined (JOB_CONTROL) && defined (SIGCHLD)
+-- 
+2.21.3
+

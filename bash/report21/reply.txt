@@ -1,0 +1,210 @@
+From: myoga.murase@gmail.com
+To: bug-bash@gnu.org
+Subject: [PATCH] Fix blocking read timeouts at a small probability
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -g -O2 -Wno-parentheses -Wno-format-security
+uname output: Linux chatoyancy 5.6.13-100.fc30.x86_64 #1 SMP Fri May 15 00:36:06 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-pc-linux-gnu
+
+Bash Version: 5.1
+Patch Level: 4
+Release Status: release
+
+Description:
+
+  From Bash 4.3 to the `devel' branch, `read -t timeout' fails to time
+  out and blocks the execution forever at a small probability.  The
+  current implementation tries to stop the execution of read(2) by
+  SIGALRM which is arranged by setitimer(2) or alarm(2).  The problem
+  is that SIGALRM can arrive when Bash is not calling read(2) or, when
+  read(2) is called but still trying to set up the file descriptor for
+  read.
+
+  This problem of timeout failure depends on a race condition, and the
+  probability of the timeout failure largely depends on the following
+  conditions:
+
+  - Operating system, CPU, etc.
+  - Bash versions, Bash release status (release, maint, etc.)
+  - Constructs (subshell, etc.) used near `read -t'. Commands executed
+    before `read -t'
+  - The type of file descriptors, such as files, pipes, and sockets.
+
+  Usually, the probability is very low, but I found that sometimes the
+  probability of the timeout failure can be about several percents,
+  which is not negligible.
+
+Repeat-By:
+
+  Originally, this issue was reported to a devel branch of my shell
+  program by `eximus (3ximus)' in the following comment:
+
+  https://github.com/akinomyoga/ble.sh/issues/82#issuecomment-770390986
+
+  Here is the reduced test case I created:
+
+    #!/bin/bash
+    rm -f a.pipe
+    mkfifo a.pipe
+    exec 9<> a.pipe
+    rm -f a.pipe
+    for c in {0..2000}; do
+      (eval "echo {0..$c}" & read -u 9 -t 0.001) >/dev/null
+      printf $'\r\e[Kok %d' "$c"
+    done
+    echo
+
+  The expected behavior is to count up to 2000 without stopping, but
+  the actual Bash's behavior is to randomly stop at some number before
+  reaching 2000.  I've tested with various versions of Bash in various
+  systems.  Here are the observations:
+
+  - The problem starts to occur in Bash 4.3. The devel branch of Bash
+    also exhibits the same problem.
+
+  - The release status (which is specified in `configure.ac') largely
+    matters.  As far as `maint' is used, the failure probability is
+    quite small.  However, once the release status is changed to
+    `release', the probability rises very much.
+
+  - I could consistently reproduce it in Linux, FreeBSD, and Cygwin.
+    I couldn't reproduce it in Minix.  Among them, the probability is
+    largest in Cygwin.
+
+  - It also occurs with different setups of stdin for the `read'
+    builtin including `exec 9< <(sleep 100)', `exec 9<
+    /dev/udp/0.0.0.0/80', etc.  Each setup results in a different
+    probability of the timeout failure.
+
+  - The failure probability also depends on the amount of output from
+    `echo' in the above test case.  There is a certain range of the
+    amount where the failure probability becomes large.  The range
+    depends on other conditions.
+
+  - The above construct `(COMMAND & read -t TIMEOUT) < SLOWFD' caused
+    a significantly large probability of the timeout failure, but the
+    timeout failures were also observed in simpler constructs very
+    rarely in past (particularly in Cygwin).
+
+  I've summarized the detailed tests and investigations at the
+  following comment.
+
+  https://github.com/akinomyoga/ble.sh/issues/82#issuecomment-774770516
+
+  I just briefly summarize it in this mail.
+
+Fix:
+
+  I first checked the commit where the problem starts to occur, which
+  was the following one:
+
+  > commit 10e784337238e6081ca5f9bdc8c21492f7b89388
+  > Author: Chet Ramey <chet@caleb.ins.cwru.edu>
+  > Date:   Mon Mar 4 08:10:00 2013 -0500
+  > 
+  >     commit bash-20130208 snapshot
+  >
+
+  This is the relevant log in ChangeLog:
+
+  >            2/9
+  >            ---
+  > 
+  > builtins/read.def
+  >  - sigalrm_seen, alrmbuf: now global so the rest of the shell (trap.c)
+  >    can use them
+  >  - sigalrm: just sets flag, no longer longjmps to alrmbuf; problem was
+  >    longjmp without manipulating signal mask, leaving SIGALRM blocked
+  > 
+  > quit.h
+  >  - move CHECK_ALRM macro here from builtins/read.def so trap.c:
+  >    check_signals() can call it
+  > 
+  > trap.c
+  >  - check_signals: add call to CHECK_ALRM before QUIT
+  >  - check_signals_and_traps: call check_signals() instead of including
+  >    CHECK_ALRM and QUIT inline.  Integrating check for read builtin's
+  >    SIGALRM (where zread call to check_signals_and_traps can see it)
+  >    fixes problem reported by Mike Frysinger <vapier@gentoo.org>
+
+  In the older code, `longjmp' was called in the signal handler for
+  SIGALRT, but it was changed to be called from `check_signals'.  This
+  was introduced after the discussion at:
+
+  https://lists.gnu.org/archive/html/bug-bash/2013-02/msg00016.html
+
+  Actually, another report in 2018 has already the same issue as
+  follows:
+
+  https://lists.gnu.org/archive/html/bug-bash/2018-01/msg00114.html
+
+  The corresponding fix was at
+
+  > commit 0275a139abe94c198eb04b05b39ca74c137bfc65
+  > Author: Chet Ramey <chet.ramey@case.edu>
+  > Date:   Mon Feb 5 10:34:47 2018 -0500
+  > 
+  >     commit bash-20180202 snapshot
+
+  The relevant ChangeLog is
+
+  >                    1/31
+  >                    ----
+  > lib/sh/zread.c
+  >     - zread,zreadintr: call check_signals() before calling read() to
+  >       minimize the race window between signal delivery, signal handling,
+  >       and a blocking read(2). Partial fix for FIFO read issue reported by
+  >       Oyvind Hvidsten <oyvind.hvidsten@dhampir.no>
+
+  In this commit, a line `check_signals ()' has been added immediately
+  before the call of read(2) in `zread (lib/sh/zread.c)' to check the
+  arrival of SIGALRM.  However, this is mere `a partial fix' (as in
+  the above ChangeLog), and there is still a possibility that SIGALRM
+  arrives between the check and the call of `read(2)' as explained in
+  the following comment:
+
+  https://lists.gnu.org/archive/html/bug-bash/2018-01/msg00128.html
+
+  I examined the effect of the above change, but it seems it doesn't
+  have much effect on the above test case (in Repeat-By section of
+  this mail).  Considering the fact that the failure probability
+  depends on the type of the file descriptor, I guess read(2) takes
+  some time to set up the file descriptor before it starts to accept
+  signals to cancel the read with EINTR.
+
+  I suspect that the implementation by `SIGALRT' has too strong
+  limitation to solve this issue.
+
+  a Maybe one could revert the strategy to the one before the 20130209
+    change, but it actually leads to an undefined behavior to use
+    `longjmp' in signal handlers [e.g., see the following link].
+
+    https://wiki.sei.cmu.edu/confluence/display/c/SIG30-C.+Call+only+asynchronous-safe+functions+within+signal+handlers
+
+  b Maybe one could recursively generate `SIGALRM' by calling
+    `raise(2)' in the signal handler so that `read(2)' wouldn't miss
+    `SIGALRM', but it doesn't look a good solution and is also an
+    undefined behavior in C standard (though it seems to be allowed in
+    the POSIX standard, I'm not sure whether all the existing systems
+    do exactly follow the POSIX for this particular one).
+
+  Instead, I believe, it is more natural to use `select(2)', which is
+  already used to implement `read -t 0'.  In the attached patch
+  `0001-Use-select-2-for-the-read-timeout.patch', I used `select(2)'
+  to implement the timeout of `read(2)'.  When `select(2)' is
+  unavailable (i.e., `HAVE_SELECT' is defined in `config.h'), it still
+  falls back to the old strategy with `SIGALRM', but I believe most of
+  modern systems support `select(2)'.  I tested the behavior with the
+  above test case, and also tested the behavior by hand.  Could you
+  take a look at the patch?
+
+  By the way, is there a reason that SIGINT is written by its value
+  `2' in `bash_event_hook (bashline.c)'?  I suggest to replace it with
+  `SIGINT' as in the second patch `0002-replace-2-by-SIGINT.patch'.
+
+--
+Koichi

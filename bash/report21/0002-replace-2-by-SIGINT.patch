@@ -1,0 +1,25 @@
+From 60d2836db53793433a7be6c2ca83d3b9ec560328 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 8 Feb 2021 23:33:30 +0900
+Subject: [PATCH 2/2] replace 2 by SIGINT
+
+---
+ bashline.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/bashline.c b/bashline.c
+index 89ef83e0..3e609f86 100644
+--- a/bashline.c
++++ b/bashline.c
+@@ -4641,7 +4641,7 @@ bash_event_hook ()
+   bashline_reset_event_hook ();
+ 
+   /* posix mode SIGINT during read -e. We only get here if SIGINT is trapped. */
+-  if (posixly_correct && this_shell_builtin == read_builtin && sig == 2)
++  if (posixly_correct && this_shell_builtin == read_builtin && sig == SIGINT)
+     {
+       last_command_exit_value = 128|SIGINT;
+       throw_to_top_level ();
+-- 
+2.21.3
+

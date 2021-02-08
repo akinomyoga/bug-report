@@ -1,0 +1,131 @@
+From 10e784337238e6081ca5f9bdc8c21492f7b89388 Mon Sep 17 00:00:00 2001
+From: Chet Ramey <chet@caleb.ins.cwru.edu>
+Date: Mon, 4 Mar 2013 08:10:00 -0500
+Subject: [PATCH] commit bash-20130208 snapshot
+
+---
+ CWRU/CWRU.chlog         |   20 +
+ builtins/read.def       |   12 +-
+ quit.h                  |    5 +
+ trap.c                  |    4 +
+ 17 files changed, 4207 insertions(+), 1756 deletions(-)
+ create mode 100644 builtins/read.def~
+ create mode 100644 quit.h~
+ create mode 100644 trap.c~
+
+diff --git a/CWRU/CWRU.chlog b/CWRU/CWRU.chlog
+index 04c629e7..59759f24 100644
+--- a/CWRU/CWRU.chlog
++++ b/CWRU/CWRU.chlog
+@@ -4502,3 +4502,23 @@ variables.c
+ 	  but create them as (invisible) exported variables so they pass
+ 	  through the environment.  Print an error message so user knows
+ 	  what's wrong.  Fixes bug reported by Tomas Trnka <ttrnka@mail.muni.cz>
++
++				    2/9
++				    ---
++
++builtins/read.def
++	- sigalrm_seen, alrmbuf: now global so the rest of the shell (trap.c)
++	  can use them
++	- sigalrm: just sets flag, no longer longjmps to alrmbuf; problem was
++	  longjmp without manipulating signal mask, leaving SIGALRM blocked
++
++quit.h
++	- move CHECK_ALRM macro here from builtins/read.def so trap.c:
++	  check_signals() can call it
++
++trap.c
++	- check_signals: add call to CHECK_ALRM before QUIT
++	- check_signals_and_traps: call check_signals() instead of including
++	  CHECK_ALRM and QUIT inline.  Integrating check for read builtin's
++	  SIGALRM (where zread call to check_signals_and_traps can see it)
++	  fixes problem reported by Mike Frysinger <vapier@gentoo.org>
+diff --git a/builtins/read.def b/builtins/read.def
+index ea2667bb..7a1dff6f 100644
+--- a/builtins/read.def
++++ b/builtins/read.def
+@@ -136,27 +136,21 @@ static void ttyrestore __P((struct ttsave *));
+ static sighandler sigalrm __P((int));
+ static void reset_alarm __P((void));
+ 
+-static procenv_t alrmbuf;
+-static int sigalrm_seen, reading;
++procenv_t alrmbuf;
++int sigalrm_seen;
++static int reading;
+ static SigHandler *old_alrm;
+ static unsigned char delim;
+ 
+ /* In most cases, SIGALRM just sets a flag that we check periodically.  This
+    avoids problems with the semi-tricky stuff we do with the xfree of
+    input_string at the top of the unwind-protect list (see below). */
+-#define CHECK_ALRM \
+-  do { \
+-    if (sigalrm_seen) \
+-      longjmp (alrmbuf, 1); \
+-  } while (0)
+ 
+ static sighandler
+ sigalrm (s)
+      int s;
+ {
+   sigalrm_seen = 1;
+-  if (reading)		/* do the longjmp if we get SIGALRM while in read() */
+-    longjmp (alrmbuf, 1);
+ }
+ 
+ static void
+diff --git a/quit.h b/quit.h
+index 8df01e1f..7d447ab2 100644
+--- a/quit.h
++++ b/quit.h
+@@ -36,6 +36,11 @@ extern volatile int terminating_signal;
+     if (interrupt_state) throw_to_top_level (); \
+   } while (0)
+ 
++#define CHECK_ALRM \
++  do { \
++    if (sigalrm_seen) \
++      longjmp (alrmbuf, 1); \
++  } while (0)
+ #define SETINTERRUPT interrupt_state = 1
+ #define CLRINTERRUPT interrupt_state = 0
+ 
+diff --git a/trap.c b/trap.c
+index d60a7fb4..b030747b 100644
+--- a/trap.c
++++ b/trap.c
+@@ -88,6 +88,8 @@ static void reset_or_restore_signal_handlers __P((sh_resetsig_func_t *));
+ extern int last_command_exit_value;
+ extern int line_number;
+ 
++extern int sigalrm_seen;
++extern procenv_t alrmbuf;
+ extern char *this_command_name;
+ extern sh_builtin_func_t *this_shell_builtin;
+ extern procenv_t wait_intr_buf;
+@@ -456,18 +459,20 @@ any_signals_trapped ()
+   return -1;
+ }
+ 
+ /* Convenience functions the rest of the shell can use */
+ void
+ check_signals_and_traps ()
+ {
++  check_signals ();
+   QUIT;
+   run_pending_traps ();
+ }
+ 
+ void
+ check_signals ()
+ {
++  CHECK_ALRM;		/* set by the read builtin */
+   QUIT;
+ }
+ 
+ #if defined (JOB_CONTROL) && defined (SIGCHLD)
+-- 
+2.21.3
+

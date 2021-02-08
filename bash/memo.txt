@@ -237,9 +237,511 @@
   Done
 -------------------------------------------------------------------------------
 
+* 2021-02-06 report21: read -t がブロックしてしまう [#D0021]
+
+  取り敢えず以下の構成で高確率で timeout に失敗するのが見られる。
+
+  | #!/bin/bash
+  |
+  | rm -f a.pipe
+  | mkfifo a.pipe
+  | exec 9<> a.pipe
+  | rm -f a.pipe
+  | for c in {0..2000}; do
+  |   (eval "echo {0..$c}" & read -u 9 -t 0.001) >/dev/null
+  |   printf $'\r\e[Kok %d' "$c"
+  | done
+  | echo
+
+
+  色々なシステムで計測してみたが少なくとも Linux, FreeBSD, Cygwin で確率的に再
+  現している。Minix では再現しなかったがこれは偶々だろう。起こる頻度はシステム
+  にも依存するし、bash version にも依存するし、コンパイル時の relstatus にも依
+  存する。timeout の時間の長さにも依存するし、直前のプロセスが吐く標準出力の量
+  にも依存する。状況に応じて特定の標準出力の量の時に起こりやすいなどの事がある
+  様だ。
+
+  | chatoyancy
+  |   MACHTYPE: x86_64-unknown-linux-gnu (Fedora release 30 (Thirty))
+  |   CPU: Intel(R) Core(TM) i7-7700 CPU @ 3.60GHz
+  |
+  |   * OK - GNU bash, 4.0.44(2)-release (x86_64-unknown-linux-gnu)
+  |   * OK - GNU bash, 4.1.17(2)-release (x86_64-unknown-linux-gnu)
+  |   * OK - GNU bash, 4.2.53(2)-release (x86_64-unknown-linux-gnu)
+  |   * Fail - GNU bash, 4.3.48(1)-release (x86_64-unknown-linux-gnu)
+  |   * Fail - GNU bash, 4.4.23(1)-release (x86_64-unknown-linux-gnu)
+  |   * Fail - GNU bash, 5.0.18(1)-release (x86_64-pc-linux-gnu)
+  |   * Fail - GNU bash, 5.0.7(1)-release (x86_64-pc-linux-gnu)
+  |   * Fail - GNU bash, 5.0.16(1)-release (x86_64-pc-linux-gnu)
+  |   * Fail - GNU bash, 5.0.18(1)-release (x86_64-pc-linux-gnu)
+  |   * Fail - GNU bash, 5.1.0(1)-alpha (x86_64-pc-linux-gnu)
+  |   * Fail - GNU bash, 5.1.0(1)-release (x86_64-pc-linux-gnu)
+  |   * Fail - GNU bash, 5.1.4(2)-maint (x86_64-pc-linux-gnu) (Current devel fcad1d1)
+  |
+  | hp2019
+  |   CPU: Intel(R) Core(TM) i5-8500 CPU @ 3.00GHz
+  |   MACHTYPE: x86_64-unknown-linux-gnu (Fedora release 30 (Thirty))
+  |
+  |   * OK - GNU bash, 4.0.44(2)-release (x86_64-unknown-linux-gnu)
+  |   * OK - GNU bash, 4.1.17(2)-release (x86_64-unknown-linux-gnu)
+  |   * OK - GNU bash, 4.2.53(2)-release (x86_64-unknown-linux-gnu)
+  |   * Fail - GNU bash, 4.3.48(1)-release (x86_64-unknown-linux-gnu)
+  |   * Fail - GNU bash, 4.4.23(1)-release (x86_64-unknown-linux-gnu)
+  |   * Fail - GNU bash, 5.0.7(1)-release (x86_64-redhat-linux-gnu)
+  |   * Fail - GNU bash, 5.0.18(1)-release (x86_64-pc-linux-gnu)
+  |   * Fail - GNU bash, 5.1.0(1)-release (x86_64-pc-linux-gnu)
+  |
+  | letsnote2019
+  |   CPU: Intel(R) Core(TM) i5-7200U CPU @ 2.50GHz
+  |   MACHTYPE: x86_64-unknown-cygwin (Cygwin)
+  |
+  |   * Fail - GNU bash, 4.4.12(3)-release (x86_64-unknown-cygwin)
+  |
+  |   MACHTYPE: x86_64-pc-linux-gnu (Arch Linux on VirtualBox)
+  |
+  |   * Fail - GNU bash, 5.1.4(1)-release (x86_64-pc-linux-gnu)
+  |
+  |   MACHTYPE: i386-portbld-freebsd12.0 (FreeBSD 12.0)
+  |
+  |   * Fail - GNU bash, 5.0.11(0)-release (i386-portbld-freebsd12.0)
+  |
+  |   MACHTYPE: i386-elf32-minix (Minix)
+  |   Note: exec 9< <(sleep 60)
+  |
+  |   * OK - GNU bash, 4.3.0(1)-release (i386-elf32-minix)
+  |
+  |   MACHTYPE: i386-pc-solaris2.11 (Solaris)
+  |
+  |   * OK - GNU bash, 4.1.17(1)-release (i386-pc-solaris2.11)
+  |
+  | ln26
+  |   MACHTYPE: x86_64-redhat-linux-gnu (CentOS Linux release 7.8.2003 (Core))
+  |   CPU: Intel(R) Xeon(R) CPU E5-2678 v3 @ 2.50GHz
+  |
+  |   * OK - GNU bash, 4.2.46(2)-release (x86_64-redhat-linux-gnu)
+  |   * Fail - GNU bash, 5.0.18(1)-release (x86_64-pc-linux-gnu)
+
+  然し、再現条件がかなり特殊であることから単純にコードを見ても解決しないだろう
+  という気がする。取り敢えず bisect をしかける事にしようか。bisect の使い方に浮
+  いて先ずは調べる必要がある。
+
+  | 10e784337238e6081ca5f9bdc8c21492f7b89388 is the first bad commit
+  | commit 10e784337238e6081ca5f9bdc8c21492f7b89388
+  | Author: Chet Ramey <chet@caleb.ins.cwru.edu>
+  | Date:   Mon Mar 4 08:10:00 2013 -0500
+  |
+  |     commit bash-20130208 snapshot
+  |
+  | :100644 100644 8b579a4a679d56ebc1d7883764712356a4783295 33f721be4ad8a667c9c61114997ee5c8814380de M      CHANGES-4.3
+  | :040000 040000 7835bcfa78a2e08722ed510cac2a5c21821808a8 96f9df818407352b01ed77f34139ef2d5af20f35 M      CWRU
+  | :040000 040000 b9ba7671f57a49ffc7bca6820f7bd3af95fd3ed0 63edacf96a6b00e7af7de94cfecae953621f3cc3 M      autom4te.cache
+  | :040000 040000 3ad1df80fbada3bf4f5ca1cd22b407fb22b4c4ab c2cc5e9932a325c450fa6c199daa324f43b29d10 M      builtins
+  | :100755 100755 91c869da60ea7719d9f8b221ff39fd7d2261e34d a3ef6123574d724a9d084e50caa9fa720d729301 M      configure
+  | :100644 100644 563ba2916172b09adde4f78265492104bfd08685 27aa19733651c0a05d9ef70e528a7bab0fa1247c M      configure.ac
+  | :100644 100644 9227638c3c3eb56f1e1fe0394ab7db2a35911a4b 472f585fe1dd82292e6fa9ff1dad55048c4a24fa M      jobs.c
+  | :100644 100644 98f62645939a72218dea89cb921a48394a64fe8d 61f0f7c5a8eeb1d0b848662bf7cc4d3961795e21 M      parse.y
+  | :100644 100644 8df01e1fe9bcf3aafa0918cc54980e88a6002d72 7d447ab2b9b38cd05623a058c9e6527e22f47e61 M      quit.h
+  | :000000 100644 0000000000000000000000000000000000000000 2f127da9927a053b69dde2f9bfef9a5b769eb862 A      quit.h~
+  | :100644 100644 786d7f07a9f6304776eea0a01d9293fd6fab5084 016763a077d9cf8c33f3efb9b5ad0a5bf40f38a6 M      test.c
+  | :100644 100644 d60a7fb45e71f484cbe105d6c14f02f4932695fd b030747ba37156b90edb4b4fc94974cf2f89efb2 M      trap.c
+  | :000000 100644 0000000000000000000000000000000000000000 dcc3851d9b7dbad06e12e7e287f0d3c8c2df45b4 A      trap.c~
+  | bisect run success
+
+  でも余り信用していない。何度か試してみる事にする。
+
+  | # bad: [df8375c37c241d6bad23d5c3af5c4233e363b7d5] commit bash-20140221 snapshot
+  | # good: [987daba4c451dc7e467c26bb953a308289a6f8b6] bash-4.2 20110622 more stray file cleanup
+  | git bisect start 'df8375c' '987daba'
+  | # good: [f37a40a43235e39f3f24bb556293b530c106de2f] commit bash-20121102 snapshot
+  | git bisect good f37a40a43235e39f3f24bb556293b530c106de2f
+  | # bad: [ef5b315f179ae98665c621879ef8c43c08db2ee7] commit bash-20130705 snapshot
+  | git bisect bad ef5b315f179ae98665c621879ef8c43c08db2ee7
+  | # bad: [bd0a00589fe830b605aa3adca6266f1f95743a73] bash-20130222 remove leftover and stray files
+  | git bisect bad bd0a00589fe830b605aa3adca6266f1f95743a73
+  | # good: [279b7ea101f99f7ba052fd6f7f04f0ea388f3e55] bash-20121228 additional cleanup
+  | git bisect good 279b7ea101f99f7ba052fd6f7f04f0ea388f3e55
+  | # good: [4d68afdae9947822df503a6d25a82b2d6b94ca39] bash-20130125 remove leftover and stray files
+  | git bisect good 4d68afdae9947822df503a6d25a82b2d6b94ca39
+  | # bad: [10e784337238e6081ca5f9bdc8c21492f7b89388] commit bash-20130208 snapshot
+  | git bisect bad 10e784337238e6081ca5f9bdc8c21492f7b89388
+  | # good: [208fdb509e072977ae7a621e916dfcd32c76047d] commit bash-20130201 snapshot
+  | git bisect good 208fdb509e072977ae7a621e916dfcd32c76047d
+  | # first bad commit: [10e784337238e6081ca5f9bdc8c21492f7b89388] commit bash-20130208 snapshot
+
+  うーん。どうもちゃんと動くようだ。取り敢えず 208fdb5 は問題ない。そして
+  10e7843 はちゃんとコンパイルできて、その上で途中で止まってしまう。取り敢えず
+  特に問題を引き起こしている変更まで抽出できた。
+
+  * 元の bug-bash の議論
+
+    そもそもこの変更が行われたのは problem reported by Mike Frysinger
+    <vapier@gentoo.org> によると書かれている。以下の報告の様だ。
+
+    https://lists.gnu.org/archive/html/bug-bash/2013-02/msg00016.html
+
+    紹介されているスクリプトで再現しない。bash-4.1 では再現する。と思ったら、こ
+    の時点の devel では再現していなかったが、代わりに timeout しないという問題
+    があった様である。しかし、こちらの方が寧ろ再現しない。修正によってより
+    timeout が効かなくなる様になったという形である。
+
+    この感じだと元のテストケースは使えない。真面目にどういう事になっているのか
+    調べて修正する必要があるのではないか。或いはここまで報告したら後は適当にやっ
+    てくれるだろうか。
+
+  問題が起こった時の振る舞いを見てみると、sigalrm は呼び出されるがその後の
+  check_signals は呼び出されないというのが問題の様である。
+
+  * 止まっている時のスタックの状態はどうなっているのか。
+    以下の様に zread.c 51 で止まっている。
+
+    #0  0x00007f71518f4145 in read () from /lib64/libc.so.6
+    #1  0x000000000048f665 in zread (fd=9, buf=0x7fff0fd32c3a "", len=1) at zread.c:51
+    #2  0x000000000047f995 in read_builtin (list=0x0) at ./read.def:513
+    #3  0x00000000004328df in execute_builtin (builtin=builtin@entry=0x47ecb0 <read_builtin>,
+    #4  0x00000000004363f9 in execute_builtin_or_function (flags=<optimized out>, fds_to_close
+    #5  execute_simple_command (fds_to_close=<optimized out>, async=<optimized out>, pipe_out=
+    #6  execute_command_internal (command=<optimized out>, asynchronous=<optimized out>, pipe_
+    #7  0x0000000000434498 in execute_command_internal (command=0x2529208, asynchronous=0, pip
+    #8  0x00000000004379d5 in execute_in_subshell (command=command@entry=0x25280c8, asynchrono
+    #9  0x000000000043401e in execute_command_internal (command=0x25280c8, asynchronous=0, pip
+    #10 0x0000000000436ba2 in execute_command (command=0x25280c8) at execute_cmd.c:390
+    #11 0x0000000000438b90 in execute_connection (command=0x252b748, asynchronous=0, pipe_in=-
+    #12 0x0000000000434498 in execute_command_internal (command=0x252b748, asynchronous=0, pip
+    #13 0x0000000000436ba2 in execute_command (command=0x252b748) at execute_cmd.c:390
+    #14 0x0000000000435420 in execute_for_command (for_command=<optimized out>) at execute_cmd
+    #15 execute_command_internal (command=0x252b588, asynchronous=<optimized out>, pipe_in=<op
+    #16 0x0000000000436ba2 in execute_command (command=0x252b588) at execute_cmd.c:390
+    #17 0x00000000004212c9 in reader_loop () at eval.c:160
+    #18 0x000000000041f927 in main (argc=2, argv=0x7fff0fd336d8, env=0x7fff0fd336f0) at shell.
+
+    ssize_t
+    zread (fd, buf, len)
+         int fd;
+         char *buf;
+         size_t len;
+    {
+      ssize_t r;
+
+      while ((r = read (fd, buf, len)) < 0 && errno == EINTR) ★
+        check_signals_and_traps (); /* XXX - should it be check_signals()? */
+      return r;
+    }
+
+    これを見ると check_signals が呼び出されるのはここ経由なのであろう。
+
+  * check_signals が呼び出される時にはどのように呼び出されるのか
+
+    $ gdb ./bash
+    > set style enabled off
+    > b r21bp_check_signals
+    > set follow-fork-mode child
+    > set detach-on-fork off
+    > r bisect_read_timeout1.sh
+    > inferior 1
+    > c
+    > inferior 1
+    > c
+    > inferior 1
+    > c
+    > inferior 5
+    > c
+    ここで gdb がクラッシュする→これは style enabled off にしたら動いた。
+    > bt
+
+    #0  r21bp_check_signals () at trap.c:475
+    #1  check_signals () at trap.c:475
+    #2  0x000000000045b9ab in check_signals_and_traps () at trap.c:465
+    #3  0x000000000048f667 in zread (fd=9, buf=0x7fffffffcdfa "", len=1) at zread.c:52
+    #4  0x000000000047f9a5 in read_builtin (list=0x0) at ./read.def:516
+    #5  0x00000000004328df in execute_builtin (builtin=builtin@entry=0x47ecc0 <read_builtin>, flags=flags@entry
+    #6  0x00000000004363f9 in execute_builtin_or_function (flags=<optimized out>, fds_to_close=0x5df1c8, redire
+        words=<optimized out>) at execute_cmd.c:4717
+    #7  execute_simple_command (fds_to_close=<optimized out>, async=<optimized out>, pipe_out=<optimized out>,
+    #8  execute_command_internal (command=<optimized out>, asynchronous=<optimized out>, pipe_in=<optimized out
+    #9  0x0000000000434498 in execute_command_internal (command=0x595508, asynchronous=0, pipe_in=-1, pipe_out=
+    #10 0x00000000004379d5 in execute_in_subshell (command=command@entry=0x595708, asynchronous=asynchronous@en
+        fds_to_close=fds_to_close@entry=0x5df1c8) at execute_cmd.c:1567
+    #11 0x000000000043401e in execute_command_internal (command=0x595708, asynchronous=0, pipe_in=-1, pipe_out=
+    #12 0x0000000000436ba2 in execute_command (command=0x595708) at execute_cmd.c:390
+    #13 0x0000000000438b90 in execute_connection (command=0x596508, asynchronous=0, pipe_in=-1, pipe_out=-1, fd
+    #14 0x0000000000434498 in execute_command_internal (command=0x596508, asynchronous=0, pipe_in=-1, pipe_out=
+    #15 0x0000000000436ba2 in execute_command (command=0x596508) at execute_cmd.c:390
+    #16 0x0000000000435420 in execute_for_command (for_command=<optimized out>) at execute_cmd.c:2668
+    #17 execute_command_internal (command=0x596808, asynchronous=<optimized out>, pipe_in=<optimized out>, pipe
+    #18 0x0000000000436ba2 in execute_command (command=0x596808) at execute_cmd.c:390
+    #19 0x00000000004212c9 in reader_loop () at eval.c:160
+    #20 0x000000000041f927 in main (argc=2, argv=0x7fffffffd898, env=0x7fffffffd8b0) at shell.c:755
+
+    結局予想は正しかった。
+
+  * 関係ない: sigalrm の戻り値は何も返さなくても良いのか。
+
+    signal handler の戻り値の sighandler は何だろうか。
+    set_signal_handler を調べてみると sigaction という関数でシグナルを登録している。
+    うーん。sigaction の man を見る限りは void(int) の筈。
+    然し sigalrm は sighandler(int) である何でエラーにならないのだろうか。
+
+    ./sig.h:32:#define sighandler RETSIGTYPE
+    ./sig.h:33:typedef RETSIGTYPE SigHandler __P((int));
+
+    うーん。試しに SIG_DFL を返してみたがやはり問題は生じる。
+    return 0 をしても問題は生じる。なので戻り値の問題ではない様に思われる。
+
+  これはどういう事なのだろうか。多くのシステムで再現する事から何らかの理由があ
+  ると期待できる? そもそも SIGALRM で read が失敗するという事が保証されていない
+  可能性?
+
+  或いは select を用いて実装し直すのがここは正しいのではないだろうか。
+  https://stackoverflow.com/questions/2917881/how-to-implement-a-timeout-in-read-function-call
+
+  色々試した。何が起こっているのかというと (1) read の外で SIGALRM を受信すると
+  SIGALRM を逃して無限に待つ事になる(2) read の中であっても pipe を開いて読み取
+  り始めるまでは恐らくシグナルを逃す。という事なのだろう。これの対策として read
+  の直前に check_signals() の呼び出しが追加されている。然し、それでも
+  check_signals と read の呼び出しの間に SIGALRM が現れる可能性もあるし、上記の
+  様に read の中で pipe を用意している間に SIGALRM が現れた場合にも対応できない。
+
+  * check_signals が read の直前に追加された経緯を調べる。
+
+    ------------------------------------------------------------------------------
+
+    bb70624e9 (Jari Aalto 2000-03-17 21:46:59 +0000  59)
+    0275a139a (Chet Ramey 2018-02-05 10:34:47 -0500  60)   check_signals ();        /* check for signals before a blocking read */
+    bb70624e9 (Jari Aalto 2000-03-17 21:46:59 +0000  61)   while ((r = read (fd, buf, len)) < 0 && errno == EINTR)
+    e34adc2c3 (Chet Ramey 2020-04-06 09:52:11 -0400  62)     {
+    e34adc2c3 (Chet Ramey 2020-04-06 09:52:11 -0400  63)       int t;
+    e34adc2c3 (Chet Ramey 2020-04-06 09:52:11 -0400  64)       t = errno;
+    e34adc2c3 (Chet Ramey 2020-04-06 09:52:11 -0400  65)       /* XXX - bash-5.0 */
+    e34adc2c3 (Chet Ramey 2020-04-06 09:52:11 -0400  66)       /* We check executing_builtin and run traps here for backwards compatibility */
+    e34adc2c3 (Chet Ramey 2020-04-06 09:52:11 -0400  67)       if (executing_builtin)
+    e34adc2c3 (Chet Ramey 2020-04-06 09:52:11 -0400  68)         check_signals_and_traps ();     /* XXX - should it be check_signals()? */
+    e34adc2c3 (Chet Ramey 2020-04-06 09:52:11 -0400  69)       else
+    e34adc2c3 (Chet Ramey 2020-04-06 09:52:11 -0400  70)         check_signals ();
+    e34adc2c3 (Chet Ramey 2020-04-06 09:52:11 -0400  71)       errno = t;
+    e34adc2c3 (Chet Ramey 2020-04-06 09:52:11 -0400  72)     }
+    df8375c37 (Chet Ramey 2014-03-07 16:10:54 -0500  73)
+
+    ------------------------------------------------------------------------------
+
+    Commit 64a7a6249 2016-10-19 15:13:16
+
+    >                    9/29
+    >                    ----
+    >
+    > trap.h
+    >     - check_signals: new extern declaration
+    >     - trapped_signal_received: new extern declaration
+    >
+    > builtins/read.def
+    >     - read_builtin: if one of the zread* functions returns < 0 (which
+    >       usually only happens in Posix mode), make sure we call check_signals()
+    >       before eventually calling run_pending_traps() because zread() isn't
+    >       going to call it
+    >     - include trap.h for correct extern functions and variable declarations
+    >
+    > lib/sh/zread.c
+    >     - zread: if executing a builtin, call check_signals_and_traps() for
+    >       backwards compatibility.  If not, call check_signals() only, because
+    >       we don't want to run traps during, for instance, reading command
+    >       substitution output.  Fixes race condition bug reported by Luiz Angelo
+    >       Daros de Luca <luizluca@gmail.com>
+    > diff --git a/lib/sh/zread.c b/lib/sh/zread.c
+    > index 868f9705..496f20b8 100644
+    > --- a/lib/sh/zread.c
+    > +++ b/lib/sh/zread.c
+    > @@ -37,7 +37,10 @@ extern int errno;
+    >  #  define SEEK_CUR 1
+    >  #endif
+    >
+    > +extern int executing_builtin;
+    > +
+    >  extern void check_signals_and_traps (void);
+    > +extern void check_signals (void);
+    >  extern int signal_is_trapped (int);
+    >
+    >  /* Read LEN bytes from FD into BUF.  Retry the read on EINTR.  Any other
+    > @@ -50,8 +53,13 @@ zread (fd, buf, len)
+    >  {
+    >    ssize_t r;
+    >
+    >    while ((r = read (fd, buf, len)) < 0 && errno == EINTR)
+    > +    /* XXX - bash-5.0 */
+    > +    /* We check executing_builtin and run traps here for backwards compatibility */
+    > +    if (executing_builtin)
+    >        check_signals_and_traps ();^I/* XXX - should it be check_signals()? */
+    > +    else
+    > +      check_signals ();
+    >
+    >    return r;
+    >  }
+
+    https://lists.gnu.org/archive/html/bug-bash/2016-09/msg00092.html
+
+    ------------------------------------------------------------------------------
+
+    Commit 0275a139a 2018-02-05 10:34:47
+
+    >                    1/31
+    >                    ----
+    > lib/sh/zread.c
+    >     - zread,zreadintr: call check_signals() before calling read() to
+    >       minimize the race window between signal delivery, signal handling,
+    >       and a blocking read(2). Partial fix for FIFO read issue reported by
+    >       Oyvind Hvidsten <oyvind.hvidsten@dhampir.no>
+    >
+    > diff --git a/lib/sh/zread.c b/lib/sh/zread.c
+    > index 14b66381..8b7ecedf 100644
+    > --- a/lib/sh/zread.c
+    > +++ b/lib/sh/zread.c
+    > @@ -53,6 +53,7 @@ zread (fd, buf, len)
+    >  {
+    >    ssize_t r;
+    >
+    > +  check_signals ();^I/* check for signals before a blocking read */
+    >    while ((r = read (fd, buf, len)) < 0 && errno == EINTR)
+    >      /* XXX - bash-5.0 */
+    >      /* We check executing_builtin and run traps here for backwards compatibility */
+
+    https://lists.gnu.org/archive/html/bug-bash/2018-01/msg00114.html
+    https://lists.gnu.org/archive/html/bug-bash/2018-01/msg00128.html
+
+    ------------------------------------------------------------------------------
+
+    Commit e34adc2c3 2020-04-06 09:52:11
+
+    >                     4/3
+    >                     ---
+    > builtins/read.def
+    >     - read_builtin: if a read in posix mode is interrupted by a signal,
+    >       make sure to preserve the value of errno around calls to
+    >       check_signals and run_pending_traps so any error message isn't quite
+    >       as confusing. Issue reported by Stan Marsh <gazelle@xmission.com>
+    >
+    > lib/sh/zread.c
+    >     - zread: preserve value of errno (always EINTR) around calls to
+    >       check_signals or check_signals_and_traps
+    >
+    > diff --git a/lib/sh/zread.c b/lib/sh/zread.c
+    > index 8b7ecedf..8dd78102 100644
+    > --- a/lib/sh/zread.c
+    > +++ b/lib/sh/zread.c
+    > @@ -55,12 +55,17 @@ zread (fd, buf, len)
+    >
+    >    check_signals ();^I/* check for signals before a blocking read */
+    >    while ((r = read (fd, buf, len)) < 0 && errno == EINTR)
+    > +    {
+    > +      int t;
+    > +      t = errno;
+    >        /* XXX - bash-5.0 */
+    >        /* We check executing_builtin and run traps here for backwards compatibility */
+    >        if (executing_builtin)
+    >          check_signals_and_traps ();^I/* XXX - should it be check_signals()? */
+    >        else
+    >          check_signals ();
+    > +      errno = t;
+    > +    }
+    >
+    >    return r;
+    >  }
+
+    ------------------------------------------------------------------------------
+
+  これを解決する方法は果たして存在するのだろうか。
+
+  a 一つの方法は以前の様に sigalrt の中で longjmp を実行する方向で、但し様々の
+    問題を解決する方法である。というか結局何が問題だったのかよく分からない。
+
+    もしその問題について解決したら patch を受け入れてくれるのだろうか。分からな
+    い。そもそも signal handler の中から longjmp した時に何が起こるのかは微妙。
+    signal handler の呼び出しはシステムからの特別な呼び出しによる物ではないのか。
+    それを乗っ取ってその中で動作し続けて大丈夫なのだろうか。
+
+    と思って検索してみたら正に signal handler の中から longjmp はしては行けない
+    というページがあった。この点を指摘されるともう駄目である。
+    https://www.jpcert.or.jp/sc-rules/c-sig32-c.html
+
+  b もう一つの方法は何か上手な方法で read が絶対にブロックしないという事を保証
+    するという事。select があれば事前に調べる事にすれば良い。但し、この時には
+    non-blocking read が必要になる。fd に non-blocking を毎回設定して大丈夫なの
+    か。うーん。ソースコードを調べたが O_NONBLOCK は大して使っていない。何か別の手法があるのだったか。
+
+    https://www.geekpage.jp/programming/linux-network/select.php
+
+    このページを見ると blocking のままで使えると書いている。
+    うーん。この方法が良いのではないだろうか。
+
+  c reject: SIGALRM を trap したらどうなるか? と思ったが run_pending_traps は
+    signal handler の中で即座に呼び出される事はない。という事を考えると SIGALRM
+    を trap したとしてもどうにもならない。
+
+    念の為 SIGALRM が呼び出されるか確認する。
+
+    →trap '...' ALRM としても中身が実行される事は決してない。考えてみれば当た
+    り前である。というのも、read.def では一時的に signal handler を置き換えるの
+    であるから。read が終了しない限りは singal handler は復元されない。なので、
+    trap ALRM で設置した handler が read -t の最中に呼び出されるという事はあり
+    えない。
+
+  d read の中でシグナルを取り逃がすのだとしたら例えば、sigalrt の中でもうひとつ
+    のシグナルを投げて、read が catch しない限り無限にシグナルを投げ続けるのは
+    どうだろう。と思ったが、SIGALRT をもう一度投げるとすると、最初の SIGALRT を
+    正しく read が捕まえて signal handler を復元した後で、再び SIGALRT が受信さ
+    れて元々のハンドラが実行されてしまう。
+
+    % これを防ぐ為には SIGALRT を投げた回数と受信した回数をちゃんと数えて処理しな
+    % ければならない。
+    %
+    % 受信した回数は sigalrt の中で数えれば良い。然し、ちゃんと数えることにしたと
+    % してどの様に処理するべきなのかは謎である。うーん。sigalrt は受信する度に新
+    % しく SIGALRT を投げる事にする。つまり、常に SIGALRT が飛んでいる状態にする。
+    % この様にしておけば read は必ずいつかの時点で中断するのでブロックする事はな
+    % くなる。問題は read からタイムアウトした時にどう振る舞うべきかという事。何
+    % も考えずにそのまま抜けてしまうと復元後に SIGALRT が来て変な事になる。なので、
+    % 最初に SIGALRT ループを停止して、停止を確認した後で初めて処理を抜ける事がで
+    % きる。
+    %
+    % a 例えば sigalrt は放置する事にして、何か処理が停止した事を表すフラグを立て
+    %   て、そのフラグが経っていた時に sigalrt 自身にシグナルハンドラーを復元させ
+    %   る。同時にシグナルハンドラーを呼ばせる。
+    %
+    %   この方法を取った時には、もし次の SIGALRT が来る前に再び read -t が呼び出
+    %   されたらどうするのかというのが疑問である。一応、ちゃんと状態を管理すれば
+    %   問題ない筈だが面倒そうである。
+
+    と思ったが、どうやら単に falarm(0,0) を実行しておけばちゃんと SIGALRT をキャ
+    ンセルする事ができる様である。
+
+    改めて調べるとシグナルハンドラーの中で raise を投げるのは難しそう。一回だけ
+    は投げても良いかもしれないが再帰的に投げるのは駄目という事になっている。
+
+    https://www.jpcert.or.jp/sc-rules/c-sig33-c.html
+
+    然しこれは廃止されて SIG30-C に統合されたそうだ。
+
+    https://wiki.sei.cmu.edu/confluence/display/c/SIG30-C.+Call+only+asynchronous-safe+functions+within+signal+handlers
+
+    言っている事をまとめると、raise() は C では未定義 (raise によって呼び出され
+    た sighandler の中で raise は駄目) だが、POSIX では raise() は
+    async-sig-safe 関数として sighandler の中で呼び出してもOKという事になってい
+    る。POSIX を信じれば一応呼び出しても OK という事になっている。実際のシステ
+    ムがどの様に振る舞うのかは微妙である。
+
+    うーん。実際に動くとしてもかなり危ない感じの手法になるのは確かである。
+
+2021-01-11
+
+* bash-completion: 変なファイルが作られる [#D0020]
+
+  echo '$1>xxx{xxx}' とすると変なファイルが作成される。
+  これは ble.sh でやると auto-complete で沢山ファイルが作られるが、
+  ble.sh なしでも TAB を推すとファイルが作られる。
+  bash-completion の中で行われている展開が何か問題を起こしているのだろう。
+
+  これは bash-completion に PR を出した。
+
 2020-08-31
 
-* report19b: bashline.c で savestring した後で自動で free する様にしていたと思ったが、
+* report19b: bashline.c で savestring した後で自動で free する様にしていたと思ったが [#D0019]
   実際に確認してみると SEVAL_NOFREE が指定されている。
   r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST|SEVAL_NOFREE);
   自分の patch ではこれを削除する様にしたと思ったが残っている。何故?
@@ -259,7 +761,7 @@
   然し、やはりそれは改めて考えてみても変である。
   やっぱりちゃんと patch を見ないで適用したのだとしか考えられない。
 
-* report19: PROMPT_COMMAND を実行中に書き換えると変な事になるという問題
+* report19: PROMPT_COMMAND を実行中に書き換えると変な事になるという問題 [#D0018]
 
   スカラーの時には execute_variable_command を呼び出していて、
   この関数の中では savestring を用いて実行コマンドを
@@ -271,7 +773,7 @@
 
 2020-08-28
 
-* report18: bash-5.0 以降で不完全なコマンドを実行するとシェルが終了する。
+* report18: bash-5.0 以降で不完全なコマンドを実行するとシェルが終了する [#D0017]
   { a=1 } を無理やり実行するとシェルが終了する。
   というより "for i; do echo $i" を強制的に実行してもそうなる。
   これは防ぐ事はできるだろうか。
@@ -489,13 +991,13 @@
 
 2020-08-23
 
-* report17: PROMPT_COMMANDS と PROMPT_COMMAND を共存させるにはどうしたら良いのか。
+* report17: PROMPT_COMMANDS と PROMPT_COMMAND を共存させるにはどうしたら良いのか [#D0016]
   ble.sh で --attach=prompt で PROMPT_COMMANDS に対応しようとして分からなくなった。
   取り敢えずメールで質問を書いた。
 
 2020-04-20
 
-* report16: hash_search が線形探索しているから遅いと主張する人が現れた
+* report16: hash_search が線形探索しているから遅いと主張する人が現れた [#D0015]
   然し言っている事が良くわからない。実測してみた所、
   確かに途中から自乗で計算時間が増えている。
 
@@ -519,7 +1021,7 @@
 
 2020-04-17
 
-* また別の議論で Bash の変な振る舞いを見つけた。
+* また別の議論で Bash の変な振る舞いを見つけた [#D0014]
   https://github.com/akinomyoga/ble.sh/issues/48
 
   | $ test_command='f1() { false; return; }; trap "f1 && echo unexpected" WINCH; kill -WINCH 0'
@@ -732,7 +1234,7 @@
 
 2019-01-22
 
-* report14: ble.sh #D1078 についても。
+* report14: ble.sh #D1078 についても [#D0013]
 
   | 症状は何だったか。
   |
@@ -921,7 +1423,7 @@
 
 2019-12-18
 
-* report11: 何と test case 2 が直っていないではないか。
+* report11: 何と test case 2 が直っていないではないか [#D0012]
   何が問題かというと→これについては緊急で直した。
   後で追加パッチとして送る必要がある。
 
@@ -941,7 +1443,7 @@
   後は送信するだけである。
   Done: 送信
 
-* report13: shadow `bind -X' が削除されない
+* report13: shadow `bind -X' が削除されない [#D0011]
 
   $ bind '"\C-t\C-t\C-t\C-t":"hello"'
   $ bind -x '"\C-t":echo world'
@@ -965,7 +1467,7 @@
 
   Done: 送信
 
-* report12: 以前に作った patch を送るにあたって再現する方法はないか考える。
+* report12: 以前に作った patch を送るにあたって再現する方法はないか考える [#D0010]
 
   | rl_bind_key
   |   rl_add_defun
@@ -997,7 +1499,7 @@
   結果を作文した。
   Done: 送信
 
-* 2019-02-19 OK: rl_generic_bind に "" を渡した時の振る舞いが気になる。
+* 2019-02-19 OK: rl_generic_bind に "" を渡した時の振る舞いが気になる [#D0009]
   変な事にはならないのだろうか…。printf して見る事にする。
 
   | うーん。そもそも bind -r '' だと一番下まで制御が行かない。
@@ -1032,7 +1534,7 @@
   "bind -x different keymaps" に対する処置が終わってからという事にしたい。
   丁度そのタイミングで、既存のスレッドに対する追加パッチという形でお願いすれば良い。
 
-* report11: また新しいバグを見つけてしまった。
+* report11: また新しいバグを見つけてしまった [#D0008]
 
   $ LANG=C ./bash-3a7c642e --norc
   $ bind -s '"\C-t\C-t":"hello"'
@@ -1167,7 +1669,7 @@
 
 2019-02-11
 
-* report10: 取り敢えず mail を作成する事にする
+* report10: 取り敢えず mail を作成する事にする [#D0007]
 
   | 2016-11-09
   |
@@ -1371,7 +1873,7 @@
   |   $ bind -m emacs-ctlx '"A":"hello world"'
   |   $ exit
 
-* report9: convert-meta と unmeta について
+* report9: convert-meta と unmeta について [#D0006]
 
   まとめ始めたが何だか分からなくなった。
   というか unmeta を if の中に入れるだけでは治らない。
@@ -1453,16 +1955,16 @@
 
   取り敢えず patch を作った。
 
-* report7: 序でなのでこれも報告する事にする。
+* report7: 序でなのでこれも報告する事にする [#D0005]
   ref ble.sh/memo.txt#D0920
 
-* report8: 改めてバグ報告をする事にする。
+* report8: 改めてバグ報告をする事にする [#D0004]
   ref ble.sh/memo.txt#D0918
   簡単なバグなのですぐ送ってしまう事にする。
 
 2018-05-03
 
-* report6: 月を跨いだので現在分かっている最後のバグについて patch を送る事にする。
+* report6: 月を跨いだので現在分かっている最後のバグについて patch を送る事にする [#D0003]
   このバグについてのメモは何処かにあるはずだと思ったが、
   確認してみると何処にも見つからない。
   仕方がないので改めて際限コードを作成する事にする。
@@ -1473,7 +1975,7 @@
 
 2018-03-23
 
-* READLINE_POINT が bytes 単位である事について。
+* READLINE_POINT が bytes 単位である事について [#D0002]
 
   これは ble.sh の方にメモがあるかと思ったら何もなかった。そういう仕様だという前提で書かれたのであろう。
   READLINE_POINT が bytes 単位である事を認識して書いているコードはどれぐらいあるだろうか。
@@ -1526,7 +2028,7 @@
 
 2018-03-21
 
-* 改めて C-@ の問題について patch を送る事にした。
+* 改めて C-@ の問題について patch を送る事にした [#D0001]
 
   関連して他の問題もある。`rl_bind_keyseq_if_unbound_in_map' 287 lib/readline/bind.c で、
   引数 keyseq を rl_function_of_keyseq と rl_bind_keyseq_in_map に渡している。
