@@ -1,0 +1,26 @@
+From: murase
+To: bug-bash@gnu.org
+Subject: [50 character or so descriptive subject here (for reference)]
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -g -O2 -Wno-parentheses -Wno-format-security
+uname output: Linux chatoyancy 5.6.13-100.fc30.x86_64 #1 SMP Fri May 15 00:36:06 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-pc-linux-gnu
+
+Bash Version: 5.1
+Patch Level: 4
+Release Status: release
+
+Description:
+	[Detailed description of the problem, suggestion, or complaint.]
+
+Repeat-By:
+	[Describe the sequence of events that causes the problem
+	to occur.]
+
+Fix:
+	[Description of how to fix the problem.  If you don't know a
+	fix for the problem, don't include this section.]
