@@ -210,6 +210,775 @@
   Bugs
 ------------------------------------------------------------------------------
 
+2021-02-08
+
+* bash-completion: #D0020 で報告した問題の返事を待っている状態
+
+2020-12-21
+
+* report20: builtin eval pipeline の中で tempenv が消える
+
+  A=1 builtin eval ':|echo $A'
+
+  試したが bash-3.0..5.1 で再現する。
+  更に遡って見ると bash-2.01 以降で現在の振る舞いになっている。
+  bash-2.0 では builtin が外れていても $A が消滅する振る舞いになっている。
+  2.0..2.01 の間の変更で問題を解決しようとしたが部分的な解決に留まったという事か。
+
+  bash-2.0..2.01 の diff で見つけた。
+  うーん。builtin_builtin の場合も条件分岐に加えるか、
+  或いは builtin_builtin の時には builtin で呼び出されるコマンドも確認する。
+
+  | diff -bwur bash-2.0/execute_cmd.c bash-2.01/execute_cmd.c
+  | --- bash-2.0/execute_cmd.c  2020-04-23 14:26:09.000000000 +0900
+  | +++ bash-2.01/execute_cmd.c  2020-04-23 14:14:23.000000000 +0900
+  | @@ -2344,12 +2448,15 @@
+  |        begin_unwind_frame ("eval_builtin");
+  |        unwind_protect_int (exit_immediately_on_error);
+  |        exit_immediately_on_error = 0;
+  | +      eval_unwind = 1;
+  |      }
+  | +  else
+  | +    eval_unwind = 0;
+  |
+  |    /* The temporary environment for a builtin is supposed to apply to
+  |       all commands executed by that builtin.  Currently, this is a
+  | -     problem only with the `source' builtin. */
+  | -  if (builtin == source_builtin)
+  | +     problem only with the `source' and `eval' builtins. */
+  | +  if (builtin == source_builtin || builtin == eval_builtin)
+  |      {
+  |        if (subshell == 0)
+  |   begin_unwind_frame ("builtin_env");
+  | @@ -2369,18 +2476,18 @@
+  |
+  |    result = ((*builtin) (words->next));
+  |
+  | -  if (subshell == 0 && builtin == source_builtin)
+  | +  if (subshell == 0 && (builtin == source_builtin || builtin == eval_builtin))
+  |      {
+  | -      /* In POSIX mode, if any variable assignments precede the `.' builtin,
+  | -  they persist after the builtin completes, since `.' is a special
+  | -  builtin. */
+  | +      /* In POSIX mode, if any variable assignments precede the `.' or
+  | +  `eval' builtin, they persist after the builtin completes, since `.'
+  | +  and `eval' are special builtins. */
+  |        if (posixly_correct && builtin_env)
+  |   merge_builtin_env ();
+  |        dispose_builtin_env ();
+  |        discard_unwind_frame ("builtin_env");
+  |      }
+  |
+  | -  if (subshell == 0 && builtin == eval_builtin && (flags & CMD_IGNORE_RETURN))
+  | +  if (eval_unwind)
+  |      {
+  |        exit_immediately_on_error += old_e_flag;
+  |        discard_unwind_frame ("eval_builtin");
+
+  該当箇所は今では以下の様になっている。
+
+  | +++ bash-2.01/execute_cmd.c  2020-04-23 14:14:23.000000000 +0900
+  | @@ +4755,10 @@
+  |   /* The temporary environment for a builtin is supposed to apply to
+  |      all commands executed by that builtin.  Currently, this is a
+  |      problem only with the `unset', `source' and `eval' builtins.
+  |      `mapfile' is a special case because it uses evalstring (same as
+  |      eval or source) to run its callbacks. */
+  |   /* SHOULD_KEEP is for the pop_scope call below; it only matters when
+  |      posixly_correct is set, but we should propagate the temporary environment
+  |      to the enclosing environment only for special builtins. */
+  |   isbltinenv = (builtin == source_builtin || builtin == eval_builtin || builtin == unset_builtin || builtin == mapfile_builtin);
+  |   should_keep = isbltinenv && builtin != mapfile_builtin;
+
+  実装について色々疑問が出てくる。
+
+  command eval をした時にはどうなるのか。builtin builtin eval をした時にどうなるか。
+  そもそも条件によって特別な処理をしたりしなかったりする理由は何か。
+  振る舞い的にそうしなければならない必要があるからなのか、
+  或いは、単に実行効率の為なのか。
+
+  - builtin builtin eval NG
+  - command builtin eval NG
+  - builtin command eval OK
+
+  - f1() { :|declare -p A; } という関数を定義して
+    A=1 builtin eval f1 などとした場合には問題なく動く。
+    つまり、eval の文脈で直接実行した時にのみ問題が発生する。
+
+  - compgen -F 経由で呼び出した関数の中で :|declare -p A としても問題
+    は起こらない。
+
+  該当部分の判定には mapfile 等も列挙されているが、実のところ mapfile
+  等が此処に追加された経緯が全く同じ問題による物なのかは怪しい。また別
+  の種類の問題があった可能性もある。変更履歴を追跡する価値はある。
+
+  ad4aef083 (Chet Ramey 2013-02-05 16:43:03 -0500 4763)
+    isbltinenv = (builtin == source_builtin || builtin == eval_builtin || builtin == unset_builtin || builtin == mapfile_builtin);
+
+    >            1/11
+    >            ----
+    > execute_cmd.c
+    >   - execute_builtin: since mapfile uses evalstring() to run its callbacks
+    >     internally, just like eval, so it needs to handle the case where the
+    >     temp environment given to mapfile persists throughout the entire
+    >     set of callback commands.  This might be a problem with trap also, but
+    >     trap isn't run in the same way.  Fixes bug reported by Dan Douglas
+    >     <ormaaj@gmail.com>
+
+    https://lists.gnu.org/archive/html/bug-bash/2013-01/msg00039.html
+
+  19e1dd936 (Chet Ramey 2011-12-03 13:47:06 -0500 4264)
+    isbltinenv = (builtin == source_builtin || builtin == eval_builtin || builtin == unset_builtin);
+
+    > execute_cmd.c
+    >   - fix execute_builtin so the `unset' builtin also operates on the
+    >     temporary environment in POSIX mode (as well as source and eval),
+    >     so that unsetting variables in the temporary environment doesn't
+    >     leave them set when unset completes.  Report by Eric Blake
+    >     <ebb9@byu.net>
+
+    https://lists.gnu.org/archive/html/bug-bash/2005-05/msg01417.html
+
+  7117c2d22 (Jari Aalto 2002-07-17 14:10:11 +0000 3054)
+    isbltinenv = (builtin == source_builtin || builtin == eval_builtin);
+  d166f0488 (Jari Aalto 1997-06-05 14:59:13 +0000 2795)
+    if (builtin == source_builtin || builtin == eval_builtin)
+  726f6388 (Jari Aalto 1996-08-26 18:22:31 +0000 2352)
+    if (builtin == source_builtin)
+
+  どうも全く同じケースで修正に至った訳ではなくて
+  それぞれでそれぞれに変な現象が起こっていた様子である。
+  此処で気になるのは何故 eval だと問題になって関数呼び出しだと問題にならないのかという事。
+
+  x A=1 declare -i a='x[$(:|declare -p A >&2)]'
+  o f1() { :|declare -p A >&2; }
+    A=1 declare -i a='x[$(f1)]'
+
+  % x ps1='$(:|declare -p A>&2)'
+  %   A=1 echo "${ps1@P}"
+  %   ... と思ったがこれは評価順序的に失敗するのが正しい?
+
+  o A=1 unset 'a[$(:|declare -p A >&2)]'
+  x A=1 let 'a[$(:|declare -p A >&2)]'
+  x A=1 declare -a a=(['$(declare -p A >&2)']=1)
+
+  x A=1 builtin eval ':; declare -p A'
+    何とこれでも駄目という事が判明した。pipe は実は関係なくて、
+    一回でもコマンドを実行すると tempenv が消滅してしまうという事の様だ?
+
+    つまり本来は tempenv を設定した文脈で tempenv を削除するべき所が、中でコマ
+    ンドを実行した時にそのコマンドの tempenv と勘違いして tempenv が削除されて
+    いるという事?
+
+  ? そもそも何がどうなって変数が消滅するのだろうか
+
+    | 実際に変数を探し出す関数は find_variable である。更に
+    | find_variable_internal を呼び出している。調べると tempenv を確認する条件
+    | があって、search_tempenv という変数等を初期化している。文脈によって
+    | tempenv を確認する条件が異なっていて tempenv を普通の変数に昇格し忘れてい
+    | ると tempenv が見えなくなるという事なのかと思ったが違う様だ。
+    | search_tempenv の条件はちゃんと満たされていて然し tempenv 自体が null に
+    | なっているのが問題の様だ。
+
+    find_variable_internal の中で temporary_env == NULL になっている。
+
+    | temporary_env が空になる箇所を特定したい。空にしている箇所は以下の通り:
+    | flush_temporary_env, dispose_temporary_env. 他に trap.c の中で一時的に
+    | tempenv を 0 にしている箇所があるが、これは現在は関係ないと思って良いだろ
+    | うという気がする。
+    |
+    | - subst.c: flush_temporary_env は subst.c の中からコマンド置換・プロセス
+    |   置換が redirection の中で実行されている時に実行されている様だ。試してみ
+    |   ると確かにその様に振る舞っている気がする (本当にこの部分のコードによっ
+    |   てそれが実現されているのかは分からないが)。
+    |
+    | - execute_cmd: 問題の箇所で NULL を代入している。これは builtin の呼び出
+    |   しに関連する所である。問題は pipe の中の位置によって tempenv が NULL だっ
+    |   たりそうでなかったりする事なので、実はここで NULL が代入されている事は
+    |   関係ない気がする。或いは、何処かの時点で tempenv が復元されている?
+    |
+    | - execute_cmd: 関数呼び出しの箇所でも NULL を代入している。但し、その直前
+    |   で push_context を呼び出している。これが何を目的とした物なのかは謎であ
+    |   る。
+    |
+    | 調べると dispose_temporary_env で tempenv が空になってそのまま変数が見つ
+    | からないという事の様に見える。何れにしても tempenv=new して tempenv=NULL
+    | していて、
+    |
+    | 1 tempenv=new は assign_in_env の中で実施され、assign_in_env は
+    |   expand_word_list_internal の中から呼び出されている。
+    |   expand_word_list_internal は eflags & WEXP_VARASSIGN の時に変数への代入
+    |   も実行している。そして、tempenv は必要になった時にその時点で作成される
+    |   様だ。
+    |
+    | 2 tempenv=NULL は dispose_temporary_env で起こり、dispose_temporary_env
+    |   は dispose_used_env_vars から呼び出される。dispose_used_env_vars は
+    |   execute_command_internal の中で呼び出される。つまり、現在のコマンドに対
+    |   応する tempenv かどうかに関係なくコマンドを実行する度に tempenv は削除
+    |   されてしまうという事。
+
+    tempenv は必要になった時に、変数代入の処理の際に勝手に作成される。変数代入
+    の処理は単語展開のコードの中で行われているので、コマンド実行側では tempenv
+    生成は関知しない。コマンドが終了する度に tempenv は削除される。
+
+    多分、これで何が起こっているのか大体分かった。
+
+  ? この様な設計になっているという事は、実のところ eval を実行する段階で
+    tempenv を待避しておくべきなのではないだろうか。
+
+    /* The temporary environment for a builtin is supposed to apply to
+       all commands executed by that builtin.  Currently, this is a
+       problem only with the `unset', `source' and `eval' builtins.
+       `mapfile' is a special case because it uses evalstring (same as
+       eval or source) to run its callbacks. */
+
+    この部分を読む限りに於いては source/eval/mapfile に関しては、
+    evalstring を実行する段階で待避を実行しておけば良いのではないか。
+
+    - evalstring は parse_and_execute を内部的に用いている。
+
+      | ./builtins/eval.def:56:  return (list ? evalstring (string_list (list), "eval", SEVAL_NOHIST) : EXECUTION_SUCCESS);
+      | ./builtins/mapfile.def:132:  return evalstring (execstr, NULL, flags);
+      | ./trap.c:437:         evalstring (savestring (trap_list[sig]), "trap", SEVAL_NONINT|SEVAL_NOHIST|SEVAL_RESETLINE);
+      |
+      | eval.def は eval の実行。mapfile.def は mapfile の実行。
+      | これらは明示的に execute_cmd で tempenv に対する対策がされている。
+      | trap.c に関しては前後で tempenv を退避している。
+
+    - 配列添字の展開もコマンド置換を通して parse_and_execute を用いている。
+
+      | let や declare の配列添字の展開に関してはコマンド置換を確認すれば良いの
+      | では。コマンド置換のコードを確認すると parse_and_execute を用いている。
+      | subst.c で parse_and_execute を用いているのはコマンド置換とプロセス置換。
+      | と思ったが $() 及び <() に関しては temporary_env に対して何かしていた様
+      | な…  と思ったが、それは $() 及び <() が redirection の中にいる時に
+      | tempenv を見えない様にするという処置だったので parse_and_execute で
+      | tempenv を固定する事は関係ない。
+
+    - parse_and_execute は中で execute_command_internal を呼び出している。
+
+      | parse_and_execute の呼び出し元は以下の様にたくさんある。が滅茶苦茶沢山という訳でもない。
+      |
+      | ./bashline.c:973:  r = parse_and_execute (command, (editing_mode == VI_EDITING_MODE) ? "v" : "C-xC-e", SEVAL_NOHIST)
+      | ./bashline.c:4343:  r = parse_and_execute (savestring (cmd), "bash_execute_unix_command", SEVAL_NOHIST);
+      | ./builtins/evalfile.c:285:    result = parse_and_execute (string, filename, pflags);
+      | ./builtins/evalstring.c:745:    r = parse_and_execute (string, from_file, flags);
+      | ./builtins/fc.def:294:      return (parse_and_execute (command, "fc", SEVAL_NOHIST));
+      | ./builtins/fc.def:490:  retval = parse_and_execute (command, "fc", SEVAL_NOHIST);
+      | ./jobs.c:4286:      parse_and_execute (savestring (trap_command), "trap", SEVAL_NOHIST|SEVAL_RESETLINE);
+      | ./parse.y:2737:  parse_and_execute (savestring (command), vname, SEVAL_NONINT|SEVAL_NOHIST);
+      | ./shell.c:1440:   return (parse_and_execute (savestring (command), "-c", SEVAL_NOHIST|SEVAL_RESETLINE));
+      | ./subst.c:6145:      rc = parse_and_execute (string, "process substitution", (SEVAL_NONINT|SEVAL_NOHIST));
+      | ./subst.c:6505:   rc = parse_and_execute (string, "command substitution", pflags|SEVAL_NOHIST);
+      | ./trap.c:954:     parse_and_execute (trap_command, "exit trap", SEVAL_NONINT|SEVAL_NOHIST|SEVAL_RESETLINE);
+      | ./trap.c:1067:    parse_and_execute (trap_command, tag, flags);
+      | ./variables.c:404:          parse_and_execute (temp_string, tname, SEVAL_NONINT|SEVAL_NOHIST|SEVAL_FUNCDEF|SEVAL_ONE
+      |
+      | - tempenv が存在しない様な条件下での実行
+      |   - "C-x C-e" による編集結果の実行
+      |   - "bind -x" によるコマンドの実行
+      |
+      |   実は上記の2つに関しては read -e の中で問題になる可能性があったが、
+      |   read_builtin の時に tempenv を退避しているので実は問題にならない?
+      |
+      |   - parse.y: これは execute_variable_command であり、
+      |     execute_variable_command は PROMPT_COMMAND の実行に使われている。
+      |     PROMPT_COMMAND は tempenv は関係ない。
+      |
+      |   - shell.c: これは -c で指定されたコマンドを実行するのに使っている。
+      |
+      |   - evalfile.c: force_execute_file (bashdb-main.inc),
+      |     maybe_execute_file (bashrc, profile, etc). これらは本当に tempenv
+      |     が存在しないと断言できるか不明。多分大丈夫。
+      |
+      |   - variables.c: initialize_shell_variables
+      |     これは環境変数からの関数定義の import の時に使う parse_and_execute である。
+      |   - trap.c (run_exit_trap)
+      |
+      | - tempenv を明示的に退避している環境での実行
+      |   - jobs.c: これは trap SIGCHLD の呼び出しである。
+      |     前後で明示的に tempenv を退避している。
+      |   - trap.c: これも前後で tempenv を退避している。
+      |
+      | - execute_command の側の対策により tempenv が固定されているケース
+      |
+      |   - fc.def: ここでの parse_and_execute は FCEDIT の実行に使っているだけ。
+      |     但し、FCEDIT の中で変数を参照しても良いのではないかという説もある。
+      |     が普通に考えたら FCEDIT には単純なコマンド名を指定するべきである。
+      |
+      |     然し、fc_builtin を実行する時に tempenv を固定しているので、これに
+      |     ついては実際には問題は起こり得ない。
+      |   - evalfile.c: fc, source
+      |
+      | - 問題が起こると判明しているケース
+      |   - subst.c: プロセス置換 及び コマンド置換。declare や let 等の添字で
+      |     問題になる。
+      |   - evalstring.c: これは別途確認する。
+      |
+      | ? ok: fc は bash-5.0 では fc_builtin に対する対策が追加されている。
+      |
+      |   | fc に関してはそもそも普通に tempenv が無効化されている? 何故? 実際
+      |   | に実行に使っているのは fc_execute_file で source と実質的に同じ筈。
+      |   | 不思議である。fc.def や evalfile.c の中では temporary_env に対して
+      |   | 一切触れていない。それにも関わらず tempenv が見えないのは不思議。
+      |   |
+      |   | うーん。bash-5.0 で試してみたらちゃんと fc の中からも tempenv が見
+      |   | えていて、コマンドを実行する時に消滅してしまうという悲しい現象も起
+      |   | こっていない様に見える。と思ったら fc_builtin に関しては明示的に対
+      |   | 策が追加されていた。
+
+      parse_and_execute の呼び出し元で問題が起こりそうな物は、
+      既知の declare, let しか存在しなかった。
+
+    - execute_command の呼び出し元を確認する。
+
+      | ./builtins/command.def:140:  result = execute_command (command);
+      | ./builtins/jobs.def:206:  result = execute_command (command);
+      | ./eval.c:170:         execute_command (current_command);
+      | ./execute_cmd.c:2707:      execute_command (command->value.Connection->first);
+      | ./execute_cmd.c:2778:      exec_result = execute_command (command->value.Connection->first);
+      | ./execute_cmd.c:2794:     exec_result = execute_command (second);
+      | ./execute_cmd.c:2934:      retval = execute_command (for_command->action);
+      | ./execute_cmd.c:3096:      body_status = execute_command (arith_for_command->action);
+      | ./execute_cmd.c:3434:      retval = execute_command (select_command->action);
+      | ./execute_cmd.c:3577:             retval = execute_command (clauses->action);
+      | ./execute_cmd.c:3639:      return_value = execute_command (while_command->test);
+      | ./execute_cmd.c:3666:      body_status = execute_command (while_command->action);
+      | ./execute_cmd.c:3698:  return_value = execute_command (if_command->test);
+      | ./execute_cmd.c:3708:      return (execute_command (if_command->true_case));
+      | ./execute_cmd.c:3717:      return (execute_command (if_command->false_case));
+      |
+      | 殆どは execute_cmd.c からの内部的な呼び出しである。
+      |
+      | - command.def については command_builtin からの呼び出し。これはその場で単
+      |   一のコマンドの実行の為に生成されたコマンドを実行するのに使われている。
+      |   単一のコマンドなので tempenv が消える等の事は気にしなくて良い。
+      | - jobs.def は jobs -x という機能による単一コマンド実行の様である。
+      |   bash のマニュアルを見た。jobs -x ... は command ... と同様だが、
+      |   ... に含まれる jobspec をジョブの group id (pid) に置き換えてから実行する様だ。
+      |   これも command.def の仲間である。
+      | - eval.c reader_loop での実行は普通にユーザからの入力を読み取って実行する
+      |   時に使う様である。然し、readline による読み取りとはまた別の様である。直
+      |   接 yyparse を呼び出しているので。何れにしてもこれについては reader_loop
+      |   関数が main からしか呼び出されていないので、外側で tempenv が設定されて
+      |   いるという状況は考えにくい。他にloadable builtin で reader_loop を呼び
+      |   出している物もあるが気にしなくて良い。
+      |
+      | execute_cmd.c 内部からの呼び出しはどうも構文の呼び出しの様である。
+      | 構文の呼び出しの場合には中で複数のコマンドを実行する時に tempenv が消滅すると困るが、
+      | 実のところ、構文キーワードに tempenv を設定する事はできないので問題ない。
+      |
+      | - A;B 全体に対する tempenv はない。
+      | - A&&B や A||B 全体に対する tempenv もない。
+      | - その他の for while select while if { に対する tempenv もない。
+
+      これらについては特に tempenv の固定は実行しなくても良い。
+
+    - やはり execute_command_internal で tempenv を push/pop するべきか?
+      と思ったが、parse_and_execute は中で沢山のコマンドを実行する。
+      毎回 push/pop していたら効率が悪いのでやはり parse_and_execute の側で
+      tempenv の push/pop を行うべきの様な気がする。
+
+      | ./execute_cmd.c:736:      exec_result = execute_command_internal (command, 1, pipe_in, pipe_out, fds_to_close);
+      | ./execute_cmd.c:990:     execute_command_internal again with asynchronous still set to 1,
+      | ./execute_cmd.c:1006:       execute_command_internal (command, 1, pipe_in, pipe_out,
+      | ./execute_cmd.c:1014:       execute_command_internal (command->value.Group->command,
+      | ./execute_cmd.c:1377:      rv = execute_command_internal (command, asynchronous, pipe_in, pipe_out, fds_to_close)
+      | ./execute_cmd.c:1686:    return_code = execute_command_internal ((COMMAND *)tcom, asynchronous, NO_PIPE, NO_PIPE,
+      | ./execute_cmd.c:2544:      execute_command_internal (cmd->value.Connection->first, asynchronous,
+      | ./execute_cmd.c:2594:  exec_result = execute_command_internal (cmd, asynchronous, prev, pipe_out, fds_to_close);
+      | ./execute_cmd.c:2677:      exec_result = execute_command_internal (tc, 1, pipe_in, pipe_out, fds_to_close);
+      | ./execute_cmd.c:2689:     exec_result = execute_command_internal (second, asynchronous, pipe_in, pipe_out, fds_to
+      | ./execute_cmd.c:2709:      execute_command_internal (command->value.Connection->first,
+      | ./execute_cmd.c:2716:      exec_result = execute_command_internal (command->value.Connection->second,
+      | ./execute_cmd.c:2760:        execute_command_internal again.  Leave asynchronous on
+      | ./execute_cmd.c:2764:     exec_result = execute_command_internal (command, 1, pipe_in, pipe_out, fds_to_close);
+      | ./execute_cmd.c:2780:      exec_result = execute_command_internal (command->value.Connection->first, 0, NO_PIPE,
+      | ./execute_cmd.c:5099:     result = execute_command_internal (fc, 0, NO_PIPE, NO_PIPE, fds_to_close);
+      | ./execute_cmd.c:5107:      result = execute_command_internal (fc, 0, NO_PIPE, NO_PIPE, fds_to_close);
+      |
+      | - A &
+      | - time
+      | - ()
+      | - A&B, A;B, A&&B, A||B
+      | - 関数本体の実行: 関数呼び出しについては tempenv を固定している。
+
+      これらは全て文法的に tempenv が存在しないので気にしなくて良い。
+
+    - execute_command_internal
+      - parse_and_execute
+        - コマンド置換・プロセス置換
+        - evalstring
+          - eval, mapfile, EXIT trap
+      - execute_command
+
+    * loadable builtin push の reader_loop で変な事が起こる気がする。
+
+    * 結論から言って parse_and_execute で tempenv の固定を行うべき気がする。
+
+      | 然し、VC_BLTENV という種類のスコープであるという事を設定している。これは
+      | 何処で使われるのか。vc_isbltnenv, vc_istempenv, vc_istempscope の判定で参
+      | 照している。vc_istempenv については BLTENV の時には false になる。
+      |
+      | ./variables.c:3277:      if (vc_isfuncenv (vc) || vc_isbltnenv (vc))
+      |   これは変数に値を代入する時に一番上のスコープの変数を探す時に、
+      |   そのスコープが有効な物かどうかの判定に使っている。
+      |
+      | ./variables.c:5273:      if ((vc_isfuncenv (shell_variables) || vc_istempenv (shell_variables)) && shell_variables->
+      |   push_posix_tempvar_internal の中で。一番上のスコープに変数を作成する時に、
+      |   func/tempenv の時にはちゃんと hash_table が != NULL である事を確認する時に判定している。
+      |   bltenv の場合には shall_variables が NULL だとずっと NULL である。
+      |
+      |   | というか逆にそれ以外の文脈だったらどうなるのか謎である。変数を作成する
+      |   | 事ができない? memleak になる気がする。或いは実際にその様な状況にはなら
+      |   | ないと考えて良いのだろうか。
+      |   |
+      |   | pop_scope
+      |   |   push_func_var/push_builtin_var
+      |   |     push_posix_tempvar_internal (*, 0)
+      |   |       bind_variable_internal (name, value, (HASH*) NULL, 0, 0)
+      |   |         make_new_variable (name, (HASH*) NULL)
+      |   |           hash_insert (name, (HASH*) NULL, HASH_NOSRCH)
+      |   |
+      |   | 一つの可能性は non-POSIX モードで push_builtin_var が呼び出される場合。
+      |   | push_builtin_var は pop_scope からしか呼び出されない。そして pop_scope
+      |   | では shell_variables から変数を拾って、shell_variables を一段 pop して
+      |   | から push_builtin_var を書き出している。
+      |   |
+      |   | * うーん。調べると push_scope しているのは VC_BLTNENV だけであり、そし
+      |   |   て VC_BLTNENV が実行されているのは一箇所のみである。つまり、問題の
+      |   |   execute_cmd で builtin を実行する箇所。この時、必ず non-empty な
+      |   |   tempenv を指定しているので、VC_BLTNENV に対して table が NULL である
+      |   |   という状況は起こり得ない。
+      |   |
+      |   | memleak が起こるとすれば funcenv でも tempenv でも bltnenv でもない何ら
+      |   | かの文脈の上でこれが起こらなければならないが…。辿っていくと、
+      |   | new_variable_context という関数で variable context が作成され、この時に
+      |   | vctx の flags が設定される。
+      |   |
+      |   | * new_variable_context を調べると global context を作成する時に
+      |   |   create_variable_tablesが呼び出されるがこの時は table は即座に新しい
+      |   |   hash テーブルが割り当てられる。
+      |   |
+      |   | * 他に、maybe_make_export_env という関数でも が設定される。
+      |   |   new_variable_context (name, 0) 呼び出されるが、この時にも table は即
+      |   |   座に割当がある。
+      |   |
+      |   | という訳で、そもそも vc_isfuncenv/vc_istempenv 以外で table == NULL に
+      |   | なっている状況は存在しないと見て良い。
+      |
+      |   memleak がある様に見えるが、FUNCENV/TEMPENV 以外の時には
+      |   shell_variables->table は常に最初から初期化されているので NULL になって
+      |   いる事はない。なので、5273-5274 を通過した時点で table != NULL が保証さ
+      |   れている。なので memleak は存在しない。
+      |
+      | ./variables.c:5424:  if (vc_istempscope (vcxt) == 0)
+      |   pop_scope で。これは tempscope 以外は pop できない様にする措置。
+      |   tempscope は VC_TEMPENV|VC_BLTNENV である。
+      |
+      | ./variables.c:5429:  is_bltinenv = vc_isbltnenv (vcxt); /* XXX - for later */
+      |   これは使われていない変数である。
+
+      うーん。VC_BLTNENV という種類の文脈があるという事を考えると、
+      parse_and_execute の中で勝手に scope を作りにくい。
+      やはり、execute_cmd の中で頑張る?
+
+    ??? hash_insert で table に NULL を渡した時に内部で table を作成しているが、
+      これはおかしいのではないか。memleak なのではないか。然し、実際に NULL を
+      渡さない様に気をつけていれば実際的な問題は生じない。
+
+    ??? declare で tempenv を固定する様にした時に、A=1 declare -x A (A が外の環
+      境に propagate する) 等の動作が変わってしまうかもしれない。確認が必要であ
+      る。
+
+      →うーん。A=1 declare -x A はちゃんと動くけれども、A=1 export A 及び A=1
+      readonly A は動かなくなってしまう。何故だろう。
+
+      うーん。実装を確認すると att_propagate を付加する時に、declare では tv &&
+      tempvar しかチェックしていないけれども、readonly/export ではそれに加えて
+      posix || compat <= 44 もチェックしている。
+
+      またその他の疑問として VC_BLTNENV に待避しない限りに於いては
+      readonly/export は共に tempenv が漏れているという事。
+
+  ? command だと大丈夫で builtin だと駄目な理由は?
+
+    builtin は直接中で builtin 関数ポインタを呼び出している。
+    一方で command は execute_command を用いて実行しているので、
+    最初の単語に基づいて tempenv の固定が行われる。
+
+  ? should_keep 等のフラグで何かしているがこれは一体何だろうか。
+
+* report22: trap handler の中で jobs を実行すると偽情報が表示される
+  ble.sh #D1435 で判明した事。
+
+  具体的には trap handler の中で fork をすると、
+  その fork したプロセスの情報が jobs に登録されている。
+  trap handler の中、または、bind -x の中で jobs を実行すると、
+  そのプロセスの情報が出力される。
+  ユーザコマンドとして jobs を実行した場合には何も起こらない。
+
+  再現1
+    $ trap '(true); jobs' WINCH
+    [resize]
+
+  再現2
+    $ trap '(true); jobs' INT
+    [C-c]
+
+  再現3
+    $ trap '(true)' WINCH
+    $ bind -x '"\C-t": jobs'
+    [resize][C-t]
+
+  再現4 (再度してみたが再現しない?)
+    $ trap '(true)' INT
+    $ bind -x '"\C-t": jobs'
+    [C-c][C-t]
+
+  | jobs_builtin を見ると jobs.c の中の関数を呼び出している。
+  | jobs という配列が存在してそこにジョブ一覧を記録している様子である。
+  | ジョブの情報を更新している箇所を調べる。
+  |
+  | $ grc '\bjobs\[.* = '
+  | ./jobs.c:577:   jobs[i] = (JOB *)NULL;
+  | ./jobs.c:625:   jobs[j] = (JOB *)NULL;
+  | ./jobs.c:675:      jobs[i] = newjob;
+  | ./jobs.c:1414:  jobs[job_index] = (JOB *)NULL;
+  | ./jobs.c:3018:            jobs[job]->state = JDEAD;
+  | ./jobs.c:4039:      jobs[job]->state = JSTOPPED;
+  | ./jobs.c:4048:      jobs[job]->state = JRUNNING;
+  | ./jobs.c:4053:      jobs[job]->state = JDEAD;
+  | ./jobs.c:4068:    jobs[job]->j_cleanup = (sh_vptrfunc_t *)NULL;
+  | ./jobs.c:4172:  for (i = 1, p = jobs[j]->pipe; p->next != jobs[j]->pipe; p = p->next, i++)
+  | ./jobs.c:4828:  jobs[i]->state = JDEAD;
+  |
+  | うーん。newjob だろうか。stop_newline という関数でこれは代入されている。
+  | この stop_newline という関数がどのタイミングで呼び出されるのか調べる必要がある。
+  | 確認した所、全てのパイプラインの実行で stop_newline 経由でジョブが登録される様子だ。
+  | つまり何が問題になっているかというと jobs を実行するタイミングで
+  | 既に削除されているべき jobs が残ってしまっているのが原因という事。
+  |
+  | jobs を削除している箇所について調べる。
+  | ジョブの列挙は nonzero jobs[i] に対して行われている。
+  | つまり、jobs[i] = NULL を代入している箇所でジョブが削除されている物と思って良い。
+  | 577, 625 は新しくスロットを追加した時に初期化するのに使っている。
+  |
+  | どうやら振る舞いを観察すると、
+  | 通常の文脈で (true);jobs を実行すると
+  | (1) ジョブ追加 (2) ジョブ削除 (3) jobs実行 の順序で実行されるが、
+  | trap handler の内部で実行すると
+  | (1) ジョブ追加 (2) jobs 実行 (3) ジョブ削除の順で実行される様である。
+  | この順番の制御は意図的な物である可能性が高い。
+  |
+  | delete_job の呼び出し元を観察する? delete_job は jobs.c 自身から呼び出される。
+  | 4箇所から呼び出されている。
+  |   - cleanup_dead_jobs
+  |   - delete_old_job
+  |   - wait_for_any_job これは関係ない
+  |   - delete_all_jobs これも関係ない
+  | 調べると両者とも cleanup_dead_jobs が呼びされている。
+  | cleanup_dead_jobs の呼び出し元を調べると色々な所で呼び出されている。
+  | というより stop_pipeline からも呼び出されている。
+  | 然し、これまでの結果より複数の fork があると複数の job が累積する。
+  | という事を考えると cleanup_dead_jobs 自体を呼び出すかどうかではなくて、
+  | cleanup_dead_jobs を呼び出しても job が削除されない条件を調べるべき。
+  |
+  | そして実際に cleanup_dead_jobs の実装を確認すると、
+  | jobs_list_frozen という変数が true の時には job が削除されない様になっている様だ。
+  | これの振る舞いについて確認する。と思って振る舞いを確認したが、
+  | jobs_list_frozen は常に 0 になっていた。これは関係ない。
+  | 結局別の条件によって削除が抑制されているという事が分かった。
+  |
+  | IS_NOTIFIED(i) が false になるとジョブが削除されずに残る。
+  | 然し、後で削除されるところを見ると IS_NOTIFIED(i) の状態は変化する?
+  | IS_NOTIFIED は ((jobs[j]->flags & J_NOTIFIED) != 0) に展開される。
+  | J_NOTIFIED で検索すると至る所で J_NOTIFIED が付加される。
+  | J_NOTIFIED の書き換えを追跡する事にする。
+  |
+  | 通常の文脈だと notify_of_job_status によって
+  | J_NOTIFIED が付加されてジョブが削除される。
+  | trap handler の中だとこれが実行されずに、
+  | jobs が実行された時に初めて J_NOTIFIED が付加される。
+  |
+  | notify_of_job_status 自体は3箇所 jobs.c で内部的に呼び出されている。
+  | 関係がありそうなのは、notify_and_cleanup で呼び出し元は以下の通り。
+  |
+  |   $ grc '\bnotify_and_cleanup\b'
+  |   ./jobs.c:3239:      notify_and_cleanup ();
+  |   ./parse.y:2340:   notify_and_cleanup ();
+  |   ./trap.c:1166:      notify_and_cleanup ();
+  |
+  | notify_and_cleanup 自体が内部で対話モードかどうか等を見て
+  | notify_of_job_status を呼び出すかどうか判定している。これが怪しい。
+  | OK. この条件で振る舞いが変わっているという事が分かった。
+  | 具体的には interactive という変数の値が 0 の時にはジョブ一覧が消去されない。
+
+  此処までの纏め。
+
+  * Bash では全てのパイプライン (サブシェル or 外部コマンド呼び出し)
+    は取り敢えずジョブに登録される
+  * 通常の文脈では notify_and_cleanup (恐らく parse より呼び出される)
+    が呼び出された時に、終了したパイプラインは "通知済み" とマークされ、
+    次の出力の前に速やかにジョブリストから削除される。
+  * 非対話文脈 (trap 及び bind -x を含む) では、notify_and_cleanup は
+    終了したパイプラインの削除を行わない。特に trap handler の中では、
+    interactive == 0 になっている為にパイプラインが "通知済み" 状態にならない。
+
+  * 少なくとも "パイプラインのジョブ情報は trap handler の中では通知す
+    る" というのは意図的な実装ではなさそうである。然し、そうは言っても
+    これを自然な振る舞いにしようと思うとコードを色々加えなければならない。
+    それだと Chet に確実に蹴られる。もっとコードの構造を理解して、
+    より自然な処理になる様に "コードの改良" という形にしないと適用されないだろう。
+
+  ? 通常の文脈では何故終了したパイプラインが通知される事もなく消えるのか?
+    →どうやら fg job の場合は以下の条件を満たした時にだけ通知する様だ。
+      termsig && WIFSIGNALED (s) && termsig != SIGINT && termsig != SIGPIPE
+      要するに何らかのシグナルによって終了した時にだけ通知を行う。
+
+  ? bind -x の中で (true);jobs を実行した場合にも問題は起こっていない。何故?
+
+  2021-02-09 この notify_and_cleanup について理解したい。
+
+  > void notify_and_cleanup () {
+  >   if (jobs_list_frozen) return;
+  >   if (interactive || interactive_shell == 0 || sourcelevel) notify_of_job_status ();
+  >   cleanup_dead_jobs ();
+  > }
+
+  interactive は現在の実行が対話モードかどうかを表す。これは bind や
+  trap の中では 0 になる。一方で interactive_shell は現在のシェルが対
+  話シェルかどうかを表す。ble.sh の環境では恐らく常に 1 である。
+  sourcelevel は恐らく source スクリプトの中で 1 以上の値になる。
+
+  つまり、対話シェルでかつ非対話な状況でかつ source の外でのみ
+  cleanup_dead_jobs の実行がスキップされる。
+
+  ? この様な状況は具体的には bind/trap 以外にどの様な場合が考えられる
+    だろうか。
+
+    関数の中や eval の中では外の状況がそのまま伝播する。対話モードは対
+    話モードのままなのだろう。確かめた。関数呼び出しや eval では対話モー
+    ドのままである。然し、一方で source の時には対話モードが解除される。
+    という具合になっている。なので、interactive || sourcelevel という
+    形になっているのである。
+
+  * 非対話シェルや source の中ではちゃんと cleanup_dead_jobs は実行さ
+    れる。然し、そうすると jobs を実行した時に色々と変なメッセージが出
+    ないのは何故だろうか。
+
+    うーん。単にジョブコントロールが off になっているからという事なの
+    だろうか。終了したジョブは JDEAD になっているのは確かである。他に
+    は stopped から running しかない。或いは mixed(?)。JDEAD の時、(1)
+    シグナルを受け取ったか (2) バックグラウンドジョブかつジョブコントー
+    ル有効時のみにジョブが出力される。
+
+    そうすると bind/trap の中で走った fg ジョブが出力される機会はない
+    気がするが、何故これが出力されてしまうのだろうか。不思議な事である。
+    と思ったがよく考えたら違う。実際に出力されるのは jobs コマンドを実
+    行したときで当てt、notify_and_cleanup によって為される訳ではない。
+
+  問題は、何故 jobs コマンドが fg dead ジョブを出力するのかという事で
+  ある。fg dead ジョブは出力しなくても良いのではないだろうか。
+
+  jobs の実装は以下の関数を呼び出している。
+
+  | void list_all_jobs (int format) {
+  |   cleanup_dead_jobs ();
+  |   map_over_jobs (print_job, format, -1);
+  | }
+
+  うーん。此処は cleanup_dead_jobs は fg dead は !notified でも削除す
+  る、という具合に変更してしまっても良いのではないかという気がする。
+
+  J_NOTIFIED が設置される箇所を列挙しておく。
+
+  - notify_of_job_status, pretty_print_job
+    これは出力したらもう出力しなくて良いという事。
+    この場合には fg dead については出力しなくても notified が付加される。
+  - wait_for_job, wait_for_signle_pid, kill_job
+    これは wait/kill したらもう出力しなくて良いという事。
+    一種の fg に変換するのに近いような操作であるので理解できる。
+  - mark_dead_jobs_as_notified うーん。これは意図的な操作なので関係ない。
+  - start_job これは分からない
+
+  これは余り確認しても意味がない気がして来た。
+
+  * wait_for_any_job にも怪しい部分がある。
+    コメントには最初に終了した background job と書かれているが、
+    実際には fg dead (unnotified) でも即座に終了してしまう気がする。
+
+  この関数は何処から呼び出されている? wait -n から呼び出されている様だ。
+  wait -n とは何だろうか。
+
+  うーん。再現した。これも一緒に report するべきである。
+
+  trap '(sleep 1;exit 11)&(exit 22);wait -n;echo "wait status: $?"' INT
+
+  というか二箇所の修正が本当に必要だろうか→cleanup_dead_jobs の側の修
+  正だけで直った。
+
+  ----------
+
+  然し、本当に foreground dead jobs を無条件に削除してしまっても良いの
+  だろうか。foreground job であっても、何かで使う機会があるのではない
+  か。うーん。使うというと notify_of_job_status か各種 print のコマン
+  ドのみの気がする。各種 print で特に必要になるとは考えにくい。そうす
+  ると notify_of_job_status において何らかのエラーを出力する場合に限ら
+  れる。改めてコードを見ると、
+
+    > s = raw_job_exit_status (job);
+    > termsig = WTERMSIG (s);
+    >
+    > // これは foreground dead job には関係ない。
+    > if (startup_state == 0 && WIFSIGNALED (s) == 0 &&
+    >       ((DEADJOB (job) && IS_FOREGROUND (job) == 0) || STOPPED (job)))
+    >   continue;
+    >
+    > // これは関係あるかもしれないが何か操作をするとしても J_NOTIFIED
+    > // を付加して後で削除される様にする。そうでなければ何もしない。
+    > if ((job_control == 0 && interactive_shell) ||
+    >     (startup_state == 2 && (subshell_environment & SUBSHELL_COMSUB)) ||
+    >     (startup_state == 2 && posixly_correct && (subshell_environment & SUBSHELL_COMSUB) == 0))
+    >   {
+    >     if (DEADJOB (job) && (interactive_shell || (find_last_pid (job, 0) != last_asynchronous_pid)))
+    >       jobs[job]->flags |= J_NOTIFIED;
+    >     continue;
+    >   }
+    >
+    > switch (JOBSTATE (job))
+    >   {
+    >   case JDEAD:
+    >     // interactive_shell == 0 ではないのでこれは関係ない
+    >     if (interactive_shell == 0 && termsig && WIFSIGNALED (s) &&
+    >         termsig != SIGINT &&
+    >         termsig != SIGTERM &&
+    >         termsig != SIGPIPE &&
+    >         signal_is_trapped (termsig) == 0)
+    >       {
+    >         ...
+    >       }
+    >     else if (IS_FOREGROUND (job))
+    >       {
+    >         // 取り敢えず foreground dead job の時は此処に入って来る
+    >         // WIFSIGNALED 状態の時には何か出力する
+    >         if (termsig && WIFSIGNALED (s) && termsig != SIGINT && termsig != SIGPIPE)
+    >           {
+    >             ...
+    >           }
+    >       }
+    >     else if (job_control)
+    >       {
+    >         ...
+    >       }
+    >     jobs[job]->flags |= J_NOTIFIED;
+    >     break;
+
+    そうすると foreground dead job に対しては (1) 何もしない (2)
+    J_NOTIFIED をつけるだけ (3) WIFSIGNALED を出力して J_NOTIFIED をつ
+    けるの三種類の操作しかない。うーん。(3) に該当する場合には残して置
+    いた方が良い? 但し、foreground の時には print しない。
+
 2019-12-17
 
 * shadow がそのままになってしまう。

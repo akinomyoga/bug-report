@@ -1,0 +1,194 @@
+From: murase
+To: bug-bash@gnu.org
+Subject: [PATCH] Fix foreground dead jobs in trap handlers treated like background ones
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -g -O2 -Wno-parentheses -Wno-format-security
+uname output: Linux chatoyancy 5.6.13-100.fc30.x86_64 #1 SMP Fri May 15 00:36:06 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
+Machine Type: x86_64-pc-linux-gnu
+
+Bash Version: 5.1
+Patch Level: 4
+Release Status: release
+
+Description:
+
+  In interactive shells, the foreground dead jobs (i.e., foreground
+  jobs that have already terminated) in trap handlers are treated as
+  if they are the background dead jobs.  (1) When `jobs' is called in
+  a trap handler, all the foreground jobs that have already terminated
+  in the same call of the trap handler are printed.  (2) When `wait
+  -n' is called in a trap handler, it immediately returns with the
+  exit status of the previous foreground dead job.  I'll describe them
+  in detail in the following Repeat-By section.
+
+  These behaviors are different from those in the normal case where
+  `jobs' and `wait -n' are executed outside the trap handler, and I
+  don't see the rationale for this behavior change.  The behavior is
+  just annoying.  However, this behavior seems to be unchanged at
+  least since bash-1.14 (the oldest one found in
+  https://ftp.gnu.org/gnu/bash/) for `jobs', and bash-4.3 for `wait
+  -n' (when the option `wait -n' is first introduced).
+
+Repeat-By:
+
+  (1) `jobs' prints the information of all the foreground dead jobs in
+  trap handlers.  This reproduces in all the versions of Bash that I
+  tested from 1.14 to devel branch.  This one was originally reported
+  by `eximus (@3ximus)' at
+
+    https://github.com/akinomyoga/ble.sh/issues/78#issue-771281403
+
+  First consider the following function:
+
+    $ bash --norc
+    $ f(){(sleep 1;exit 1)&(exit 2);jobs;}
+
+  If one executes the function normally, `jobs' called inside the
+  function reports only the background job "%1 (sleep 1;exit 1)" and
+  not the foreground job as expected:
+
+    $ f
+    [1] 62465
+    [1]+  Running                 ( sleep 1; exit 1 ) &
+    $
+    [1]+  Exit 1                  ( sleep 1; exit 1 )
+
+  However, when this function is executed inside the trap handler, the
+  the foreground job "%2 (exit 2)" is also reported by `jobs':
+
+    $ trap f INT
+    $ ^C          /* <-- Here type C-c */
+    [1]+  Running                 ( sleep 1; exit 1 ) &
+    [2]   Exit 2                  ( exit 2 )
+    $
+    [1]+  Exit 1                  ( sleep 1; exit 1 )
+
+  When there are many forks (subshells and external command
+  executions), `jobs' will report as many job entries as forks in the
+  trap handler which is annoying:
+
+    $ trap 'for a in {0..99};do /bin/true;done;jobs' INT
+    $ ^C
+    [1]   Done      trap 'for a in {0..99};do /bin/true;done;jobs' INT
+    [2]   Done      trap 'for a in {0..99};do /bin/true;done;jobs' INT
+
+    [...]
+
+    [98]   Done      trap 'for a in {0..99};do /bin/true;done;jobs' INT
+    [99]   Done      trap 'for a in {0..99};do /bin/true;done;jobs' INT
+    [100]   Done      trap 'for a in {0..99};do /bin/true;done;jobs' INT
+
+  Actually, originally reported one had slightly different structure.
+  `jobs' in the `bind -x' binding reports the foreground dead jobs in
+  the immediately preceding invokation of trap handlers:
+
+    $ trap 'for a in {0..9};do /bin/true;done' INT
+    $ bind -x '"\C-t":jobs'
+    $ /* <-- Here change the terminal size and type C-t */
+    [1]   Done                    bind -x '"\C-t":jobs'
+    [2]   Done                    bind -x '"\C-t":jobs'
+    [3]   Done                    bind -x '"\C-t":jobs'
+    [4]   Done                    bind -x '"\C-t":jobs'
+    [5]   Done                    bind -x '"\C-t":jobs'
+    [6]   Done                    bind -x '"\C-t":jobs'
+    [7]   Done                    bind -x '"\C-t":jobs'
+    [8]   Done                    bind -x '"\C-t":jobs'
+    [9]   Done                    bind -x '"\C-t":jobs'
+    [10]   Done                    bind -x '"\C-t":jobs'
+
+
+  (2) The behavior of `wait -n' is also affected.
+
+  Consider the following function which waits for the first
+  termination of any background job.
+
+    $ bash --norc
+    $ g(){(sleep 1;exit 1)&(exit 2);wait -n;echo "wait status: $?";}
+
+  When it is executed normally, it waits for the termination of
+  `(sleep 1;exit 1)' for one second and report the exit status `1':
+
+    $ g
+    [1] 18082
+    [1]+  Exit 1                  ( sleep 1; exit 1 )
+    wait status: 1
+
+  However, when it is executed in a trap handler, `wait -n'
+  immediately returns and report the status `2' which is the exit
+  status of the already-terminated foreground job `(exit 2)':
+
+    $ trap g INT
+    $ ^C          /* <-- Here type C-c */
+    wait status: 2
+    $
+    [1]+  Exit 1                  ( sleep 1; exit 1 )
+
+
+Fix:
+
+  The reason that the behavior changes between the outside and inside
+  of the trap handlers can be understood from the function body of
+  `notify_and_cleanup ()' in `jobs.c'.
+
+  > void
+  > notify_and_cleanup ()
+  > {
+  >   if (jobs_list_frozen)
+  >     return;
+  >
+  >   if (interactive || interactive_shell == 0 || sourcelevel)
+  >     notify_of_job_status ();
+  >
+  >   cleanup_dead_jobs ();
+  > }
+
+  The condition of the second `if' statement is usually satisfied but
+  unsatisfied in the trap handlers.  In normal situation,
+  `notify_of_job_status ()' just mark a foreground dead job as
+  `J_NOTIFIED' without printing the job information unless the job is
+  in the `WIFSIGNALED' state (terminated by a signal?).  Then, the
+  subsequent call of `clean_up_dead_jobs ()' removes the jobs marked
+  as `J_NOTIFIED'.  In this way, the foreground jobs are immediately
+  removed from the job list in a normal situation.  However, in the
+  trap handlers, `notify_of_job_status ()' is not called, so
+  foreground dead jobs are never marked as `J_NOTIFIED' and therefore
+  survive after the call of `cleanup_dead_jobs ()'.  Actually, any
+  foreground jobs created in a trap handler would never be removed
+  until the end of the trap handler.
+
+  The actual work of `wait -n' is done in the function
+  `wait_for_any_job (flags, ps)' in `jobs.c'.  In the description of
+  `wait -n' in the manual and also the source-code comment of
+  `wait_for_any_job ()', this function is supposed to wait for any
+  background jobs.  However, in the implementation, it isn't actually
+  checked whether the job is foreground or background.  This is the
+  reason that `wait -n' immediately terminates with a foreground dead
+  job in trap handlers.  I think this implementation is based on the
+  assumption that the foreground dead jobs would be immediately
+  removed so that the dead jobs are only the background ones when
+  `wait_for_any_job ()' is called.  In fact, this assumption is
+  correct in normal cases, but this is not the case in trap handlers.
+
+
+  So, I think the quick fix is to remove the foreground dead jobs
+  immediately in `cleanup_dead_jobs ()' regardless of `J_NOTIFIED'.
+  This is a one-line fix (see the attached patch [■■■]).  There is
+  mostly no use for the job entries of foreground dead jobs, so they
+  can be removed safely in most cases.
+
+  ----
+
+  The only exception is the case for the foreground jobs of the
+  `WIFSIGNALED' state.
+
+
+  However, I believe the foreground dead jobs needs to be immediately
+
+
+
+	[Description of how to fix the problem.  If you don't know a
+	fix for the problem, don't include this section.]
