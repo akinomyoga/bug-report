@@ -7,6 +7,8 @@
 2020-05-15
 
 * ${ list; } に対応するには何処をどうすれば良いのか。
+  https://lists.gnu.org/archive/html/help-bash/2020-05/msg00077.html
+
   Chet が patch があれば受け入れると言っている。
   気になる。然しすでに何日か経ってしまったし、mmap を使った実装などを要求されると大変である。
   というより一時ファイルを作成して其処に出力させるなど面倒が多い気がする。
@@ -236,6 +238,74 @@
 -------------------------------------------------------------------------------
   Done
 -------------------------------------------------------------------------------
+
+2021-02-15
+
+* report21: Chet から readline の方も修正が必要との事。確かにそうだ [#D0022]
+  返信をしたら readline の方もこちらで試しに実装してみる事になった。
+
+  取り敢えずできる所から修正を加えていく事にしよう。
+  interface がどうのこうのというのは実装してから修正すれば良いのである。
+
+
+  Q rl_timeout_remaining: changed parameter type from `int' to
+    `unsigned' following the declaration of `falarm'.
+
+  Q 元の input.c の以下の部分はおかしくないか。empty_set に現在の
+    sigmask を読み取ってそれを pselect に渡しているが、そもそも
+    pselect に NULL を渡したら現在の sigmask が使われるのではないか。
+    或いはそれに反する実装が存在するのだろうか。
+
+    >       sigemptyset (&empty_set);
+    >       sigprocmask (SIG_BLOCK, (sigset_t *)NULL, &empty_set);
+    >       result = pselect (fileno (stream) + 1, &readfds, NULL, NULL, NULL, &empty_set);
+
+    調べると bc3714724 で導入された物の様である。
+
+  Q _rl_abort_internal を呼び出す方針はよくわからないので、READERR を返す事にした。
+
+  * done: 自身でも SIGALRT を用意する事にする
+    falarm は使えるのか。lib/sh の中にあるが…。
+    include していない様な気がするが実の所実際にコンパイルしてみないと分からない。
+
+  Q __MINGW32__ の時の実装?
+
+  うーん。どうしても即終了してしまう。何故だろうか。
+  と思ったが timepoint を clear していないのが問題?
+  →これだった。timeout_duration は clear していたが、
+  timeout_point を clear するのを忘れていた。
+
+  Q rl_done と RL_STATE_DONE の使い分けは何だろうか。
+    分からないので両方設定している。
+
+  どうしても文章がくどくなってしまう。供養する。
+
+  % so just calling _rl_abort_internal doesn't terminate the
+  % processing. At the jump destination, some additional test, whether the
+  % `longjmp' was caused by timeout or not, needs to be done. I initially
+  % tried to carry the information of preferred treatment, READERR or EOF,
+  % through `rl_pinding_input'. But this variable is cleared by
+  % `_rl_abort_internal' so cannot be used. Next I tried to store READERR
+  % or EOF to the buffer by `rl_stuff_char ()', however the buffer is a
+  % sequence of unsigned char so that READERR or EOF cannot be properly
+  % stuffed. Finally, I decided to add another RL_STATE flag
+  % RL_STATE_TIMEOUT.
+  %
+  % There are a few questions. First, is there any expected behavior
+  % difference of readline () when it gets READERR from rl_getc compared
+  % to the case it gets EOF? They are handled in different control paths
+  % but seem to behave effectively the same, that is,
+  % `readline_internal_char' sets RL_STATE_DONE and rl_done and returns 1.
+
+  実は既に同じ問題を報告している人がいた。
+
+  https://lists.gnu.org/archive/html/bug-bash/2019-09/msg00054.html
+  https://lists.gnu.org/archive/html/bug-bash/2016-11/msg00145.html
+  https://lists.gnu.org/archive/html/bug-bash/2013-01/msg00138.html
+
+  取り敢えず提出して一段落したので一旦閉じる。
+
+2021-02-08
 
 * 2021-02-06 report21: read -t がブロックしてしまう [#D0021]
 

@@ -1,0 +1,439 @@
+From adbeac354c4428bfb4ce2ffc7bedd7aed65a0885 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 8 Feb 2021 18:10:23 +0900
+Subject: [PATCH 1/4] Use select(2) for the read timeout
+
+---
+ bashline.c        |  10 +--
+ builtins/common.h |   8 ++-
+ builtins/read.def | 179 +++++++++++++++++++++++++++++++++++++++++-----
+ config-bot.h      |   4 ++
+ lib/sh/zread.c    |   4 +-
+ quit.h            |   6 --
+ trap.c            |   2 +-
+ 7 files changed, 180 insertions(+), 33 deletions(-)
+
+diff --git a/bashline.c b/bashline.c
+index 831f35bf..3e609f86 100644
+--- a/bashline.c
++++ b/bashline.c
+@@ -4625,16 +4625,18 @@ bash_event_hook ()
+     sig = terminating_signal;
+   else if (interrupt_state)
+     sig = SIGINT;
+-  else if (sigalrm_seen)
++#if !defined (USE_SELECT_FOR_READ_TIMEOUT)
++  else if (is_timeout_reached ())
+     sig = SIGALRM;
++#endif
+   else
+     sig = first_pending_trap ();
+ 
+   /* If we're going to longjmp to top_level, make sure we clean up readline.
+      check_signals will call QUIT, which will eventually longjmp to top_level,
+-     calling run_interrupt_trap along the way.  The check for sigalrm_seen is
+-     to clean up the read builtin's state. */
+-  if (terminating_signal || interrupt_state || sigalrm_seen)
++     calling run_interrupt_trap along the way.  The check for
++     is_timeout_reached is to clean up the read builtin's state. */
++  if (terminating_signal || interrupt_state || is_timeout_reached ())
+     rl_cleanup_after_signal ();
+   bashline_reset_event_hook ();
+ 
+diff --git a/builtins/common.h b/builtins/common.h
+index a4f9275d..f4265b00 100644
+--- a/builtins/common.h
++++ b/builtins/common.h
+@@ -218,6 +218,11 @@ extern int force_execute_file PARAMS((const char *, int));
+ extern int source_file PARAMS((const char *, int));
+ extern int fc_execute_file PARAMS((const char *));
+ 
++/* Functions from read.def */
++extern int is_timeout_reached PARAMS((void));
++extern int do_timeout PARAMS((int));
++extern void check_timeout PARAMS((void));
++
+ /* variables from common.c */
+ extern sh_builtin_func_t *this_shell_builtin;
+ extern sh_builtin_func_t *last_shell_builtin;
+@@ -236,9 +241,6 @@ extern int breaking;
+ extern int continuing;
+ extern int loop_level;
+ 
+-/* variables from read.def */
+-extern int sigalrm_seen;
+-
+ /* variables from shift.def */
+ extern int print_shift_error;
+ 
+diff --git a/builtins/read.def b/builtins/read.def
+index 82997151..a9ef61f1 100644
+--- a/builtins/read.def
++++ b/builtins/read.def
+@@ -89,6 +89,10 @@ $END
+ #  include <io.h>
+ #endif
+ 
++#if defined (USE_SELECT_FOR_READ_TIMEOUT)
++#  include <sys/select.h>
++#endif
++
+ #include "../bashintl.h"
+ 
+ #include "../shell.h"
+@@ -132,25 +136,127 @@ static int read_mbchar PARAMS((int, char *, int, int, int));
+ #endif
+ static void ttyrestore PARAMS((struct ttsave *));
+ 
++#if !defined (USE_SELECT_FOR_READ_TIMEOUT)
+ static sighandler sigalrm PARAMS((int));
+-static void reset_alarm PARAMS((void));
++#endif
++static void set_timeout PARAMS((unsigned int, unsigned int));
++static void reset_timeout PARAMS((void));
++static void cleanup_timeout PARAMS((void));
++int is_timeout_reached PARAMS((void));
++int do_timeout PARAMS((int));
++void check_timeout PARAMS((void));
+ 
+ /* Try this to see what the rest of the shell can do with the information. */
+ procenv_t alrmbuf;
+-int sigalrm_seen;
++#if defined (USE_SELECT_FOR_READ_TIMEOUT)
++static struct timeval tmout_time;
++#else
++static int sigalrm_seen;
++static SigHandler *old_alrm;
++#endif
+ 
+ static int reading, tty_modified;
+-static SigHandler *old_alrm;
+ static unsigned char delim;
+ 
+ static struct ttsave termsave;
+ 
++#if defined (USE_SELECT_FOR_READ_TIMEOUT)
++static void
++set_timeout (unsigned int tmsec, unsigned int tmusec)
++{
++  if (gettimeofday(&tmout_time, 0) != 0)
++    {
++      tmout_time.tv_sec = 0;
++      tmout_time.tv_usec = 0;
++    }
++  tmout_time.tv_sec += tmsec;
++  tmout_time.tv_usec += tmusec;
++  if (tmout_time.tv_usec >= 1000000)
++    {
++      tmout_time.tv_sec++;
++      tmout_time.tv_usec -= 1000000;
++    }
++  return 0;
++}
++
++static void
++reset_timeout ()
++{
++  cleanup_timeout();
++}
++
++static void
++cleanup_timeout ()
++{
++  tmout_time.tv_sec = 0;
++  tmout_time.tv_usec = 0;
++}
++
++int
++is_timeout_reached ()
++{
++  struct timeval current_time;
++
++  /* timeout is not set */
++  if (tmout_time.tv_sec == 0 && tmout_time.tv_usec == 0)
++    return 0;
++
++  /* timeout has been reached */
++  if (gettimeofday(&current_time, 0) != 0 ||
++    current_time.tv_sec > tmout_time.tv_sec ||
++    (current_time.tv_sec == tmout_time.tv_sec &&
++      current_time.tv_usec >= tmout_time.tv_usec))
++    return 1;
++
++  return 0;
++}
++
++int
++do_timeout (int fd)
++{
++  int r;
++  struct timeval current_time, timeout;
++  fd_set readfds;
++
++  /* If timeout is not set, return 0. */
++  if (tmout_time.tv_sec == 0 && tmout_time.tv_usec == 0)
++    return 0;
++
++  /* If timeout has been reached, do longjmp. */
++  if (gettimeofday(&current_time, 0) != 0 ||
++    current_time.tv_sec > tmout_time.tv_sec ||
++    (current_time.tv_sec == tmout_time.tv_sec &&
++      current_time.tv_usec >= tmout_time.tv_usec))
++    sh_longjmp (alrmbuf, 1);
++
++  /* Call select with timeout */
++  FD_ZERO (&readfds);
++  FD_SET (fd, &readfds);
++  timeout.tv_sec = tmout_time.tv_sec - current_time.tv_sec;
++  timeout.tv_usec = tmout_time.tv_usec - current_time.tv_usec;
++  if (current_time.tv_usec > tmout_time.tv_usec)
++    {
++      timeout.tv_sec--;
++      timeout.tv_usec += 1000000;
++    }
++  r = select (fd + 1, &readfds, NULL, NULL, &timeout);
++
++  if (r < 0)
++    return r; /* Error: select sets errno. */
++  else if (r == 0)
++    sh_longjmp (alrmbuf, 1);
++  else
++    return 0;
++}
++
++#else
+ /* In all cases, SIGALRM just sets a flag that we check periodically.  This
+    avoids problems with the semi-tricky stuff we do with the xfree of
+    input_string at the top of the unwind-protect list (see below). */
+ 
+-/* Set a flag that CHECK_ALRM can check.  This relies on zread or read_builtin
+-   calling trap.c:check_signals(), which knows about sigalrm_seen and alrmbuf. */
++/* Set a flag that check_timeout() can check.  This relies on zread or
++   read_builtin calling trap.c:check_signals(), which knows about
++   sigalrm_seen and alrmbuf. */
+ static sighandler
+ sigalrm (s)
+      int s;
+@@ -159,13 +265,50 @@ sigalrm (s)
+ }
+ 
+ static void
+-reset_alarm ()
++set_timeout (unsigned int tmsec, unsigned int tmusec)
++{
++  old_alrm = set_signal_handler (SIGALRM, sigalrm);
++  add_unwind_protect (reset_timeout, (char *)NULL);
++  falarm (tmsec, tmusec);
++}
++
++static void
++reset_timeout ()
+ {
+   /* Cancel alarm before restoring signal handler. */
+   falarm (0, 0);
+   set_signal_handler (SIGALRM, old_alrm);
+ }
+ 
++static void
++cleanup_timeout ()
++{
++  sigalrm_seen = 0;
++}
++
++int
++is_timeout_reached ()
++{
++  return sigalrm_seen;
++}
++
++int
++do_timeout (int fd)
++{
++  /* Nothing needed here.  The timeout would be instead processed by
++     SIGALRM while executing read(2). */
++  (void) fd;
++  return 0;
++}
++#endif
++
++void
++check_timeout ()
++{
++  if (is_timeout_reached())
++    sh_longjmp (alrmbuf, 1);
++}
++
+ /* Read the value of the shell variables whose names follow.
+    The reading is done from the current input stream, whatever
+    that may be.  Successive words of the input line are assigned
+@@ -227,7 +370,8 @@ read_builtin (list)
+   USE_VAR(ps2);
+   USE_VAR(lastsig);
+ 
+-  sigalrm_seen = reading = tty_modified = 0;
++  cleanup_timeout ();
++  reading = tty_modified = 0;
+ 
+   i = 0;		/* Index into the string that we are reading. */
+   raw = edit = 0;	/* Not reading raw input by default. */
+@@ -446,7 +590,8 @@ read_builtin (list)
+       code = setjmp_nosigs (alrmbuf);
+       if (code)
+ 	{
+-	  sigalrm_seen = 0;
++	  cleanup_timeout ();
++
+ 	  /* Tricky.  The top of the unwind-protect stack is the free of
+ 	     input_string.  We want to run all the rest and use input_string,
+ 	     so we have to save input_string temporarily, run the unwind-
+@@ -468,8 +613,6 @@ read_builtin (list)
+ 	}
+       if (interactive_shell == 0)
+ 	initialize_terminating_signals ();
+-      old_alrm = set_signal_handler (SIGALRM, sigalrm);
+-      add_unwind_protect (reset_alarm, (char *)NULL);
+ #if defined (READLINE)
+       if (edit)
+ 	{
+@@ -477,7 +620,7 @@ read_builtin (list)
+ 	  add_unwind_protect (bashline_reset_event_hook, (char *)NULL);
+ 	}
+ #endif
+-      falarm (tmsec, tmusec);
++      set_timeout (tmsec, tmusec);
+     }
+ 
+   /* If we've been asked to read only NCHARS chars, or we're using some
+@@ -553,7 +696,7 @@ read_builtin (list)
+      of the unwind-protect stack after the realloc() works right. */
+   add_unwind_protect (xfree, input_string);
+ 
+-  CHECK_ALRM;
++  check_timeout ();
+   if ((nchars > 0) && (input_is_tty == 0) && ignore_delim)	/* read -N */
+     unbuffered_read = 2;
+   else if ((nchars > 0) || (delim != '\n') || input_is_pipe)
+@@ -572,7 +715,7 @@ read_builtin (list)
+   ps2 = 0;
+   for (print_ps2 = eof = retval = 0;;)
+     {
+-      CHECK_ALRM;
++      check_timeout ();
+ 
+ #if defined (READLINE)
+       if (edit)
+@@ -619,7 +762,7 @@ read_builtin (list)
+ 	}
+ 
+       reading = 1;
+-      CHECK_ALRM;
++      check_timeout ();
+       errno = 0;
+ 
+ #if defined (SIGCHLD)
+@@ -670,7 +813,7 @@ read_builtin (list)
+ #endif
+ 
+       if (retval <= 0)			/* XXX shouldn't happen */
+-	CHECK_ALRM;
++	check_timeout ();
+ 
+       /* XXX -- use i + mb_cur_max (at least 4) for multibyte/read_mbchar */
+       if (i + (mb_cur_max > 4 ? mb_cur_max : 4) >= size)
+@@ -730,7 +873,7 @@ read_builtin (list)
+ 
+ add_char:
+       input_string[i++] = c;
+-      CHECK_ALRM;
++      check_timeout ();
+ 
+ #if defined (HANDLE_MULTIBYTE)
+       /* XXX - what if C == 127? Can DEL introduce a multibyte sequence? */
+@@ -767,7 +910,7 @@ add_char:
+ 	break;
+     }
+   input_string[i] = '\0';
+-  CHECK_ALRM;
++  check_timeout ();
+ 
+ #if defined (READLINE)
+   if (edit)
+@@ -784,7 +927,7 @@ add_char:
+     }
+ 
+   if (tmsec > 0 || tmusec > 0)
+-    reset_alarm ();
++    reset_timeout ();
+ 
+   if (nchars > 0 || delim != '\n')
+     {
+diff --git a/config-bot.h b/config-bot.h
+index b075c778..75e67018 100644
+--- a/config-bot.h
++++ b/config-bot.h
+@@ -60,6 +60,10 @@
+ #  define SYS_SIGLIST_DECLARED
+ #endif
+ 
++#if defined (HAVE_SELECT) && defined (HAVE_GETTIMEOFDAY)
++#  define USE_SELECT_FOR_READ_TIMEOUT
++#endif
++
+ /***********************************************************************/
+ /* Unset defines based on what configure reports as missing or broken. */
+ /***********************************************************************/
+diff --git a/lib/sh/zread.c b/lib/sh/zread.c
+index 71a06a76..06620661 100644
+--- a/lib/sh/zread.c
++++ b/lib/sh/zread.c
+@@ -46,6 +46,7 @@ extern int executing_builtin;
+ extern void check_signals_and_traps (void);
+ extern void check_signals (void);
+ extern int signal_is_trapped (int);
++extern int do_timeout (int);
+ 
+ /* Read LEN bytes from FD into BUF.  Retry the read on EINTR.  Any other
+    error causes the loop to break. */
+@@ -58,7 +59,8 @@ zread (fd, buf, len)
+   ssize_t r;
+ 
+   check_signals ();	/* check for signals before a blocking read */
+-  while ((r = read (fd, buf, len)) < 0 && errno == EINTR)
++  while (((r = do_timeout (fd)) < 0
++      || (r = read (fd, buf, len)) < 0) && errno == EINTR)
+     {
+       int t;
+       t = errno;
+diff --git a/quit.h b/quit.h
+index db8a776b..887d2b91 100644
+--- a/quit.h
++++ b/quit.h
+@@ -38,12 +38,6 @@ extern volatile sig_atomic_t terminating_signal;
+     if (interrupt_state) throw_to_top_level (); \
+   } while (0)
+ 
+-#define CHECK_ALRM \
+-  do { \
+-    if (sigalrm_seen) \
+-      sh_longjmp (alrmbuf, 1); \
+-  } while (0)
+-
+ #define SETINTERRUPT interrupt_state = 1
+ #define CLRINTERRUPT interrupt_state = 0
+ 
+diff --git a/trap.c b/trap.c
+index 1b27fb3a..9c3db84a 100644
+--- a/trap.c
++++ b/trap.c
+@@ -587,7 +587,7 @@ clear_pending_traps ()
+ void
+ check_signals ()
+ {
+-  CHECK_ALRM;		/* set by the read builtin */
++  check_timeout (); /* check timeout set by the read builtin */
+   QUIT;
+ }
+ 
+-- 
+2.21.3
+

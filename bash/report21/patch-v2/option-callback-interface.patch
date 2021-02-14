@@ -1,0 +1,43 @@
+From d3dec94bcd7258e4e0601f9242b9a9e47ecca8e4 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sun, 14 Feb 2021 14:18:37 +0900
+Subject: [PATCH] Another option for callback interface
+
+---
+ lib/readline/callback.c | 1 +
+ lib/readline/readline.c | 7 +++++--
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/lib/readline/callback.c b/lib/readline/callback.c
+index 268bdf38..2345bdb6 100644
+--- a/lib/readline/callback.c
++++ b/lib/readline/callback.c
+@@ -105,6 +105,7 @@ _rl_callback_newline (void)
+ void
+ rl_callback_handler_install (const char *prompt, rl_vcpfunc_t *linefunc)
+ {
++  _rl_timeout_initialize ();
+   rl_set_prompt (prompt);
+   RL_SETSTATE (RL_STATE_CALLBACK);
+   rl_linefunc = linefunc;
+diff --git a/lib/readline/readline.c b/lib/readline/readline.c
+index 6e7dbeb1..d3075c1c 100644
+--- a/lib/readline/readline.c
++++ b/lib/readline/readline.c
+@@ -1156,8 +1156,11 @@ int
+ rl_initialize (void)
+ {
+   /* set up timeout if a timeout setting is set.  We call it first in
+-     this function to precisely obtain the starting time. */
+-  _rl_timeout_initialize ();
++     this function to precisely obtain the starting time.  For the
++     callback interface, `_rl_timeout_initialize ()' will be called from
++     `rl_callback_handler_install ()'. */
++  if (!RL_ISSTATE (RL_STATE_CALLBACK))
++    _rl_timeout_initialize ();
+ 
+   /* If we have never been called before, initialize the
+      terminal and data structures. */
+-- 
+2.21.3
+

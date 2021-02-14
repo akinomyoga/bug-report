@@ -1,0 +1,1377 @@
+From 3d6de5fb4cb8528216cd984bf5f014efa932e4b3 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 8 Feb 2021 18:10:23 +0900
+Subject: [PATCH] Use select/pselect for the read timeout
+
+* Use select(2) for the read timeout
+* readline: initial support for timeout
+* builtin/read.def: use readline timeout
+* rl_timeout: clean up codes
+* introduce _rl_timeout_select
+---
+ .gitignore                         |   6 +
+ bashline.c                         |  10 +-
+ builtins/common.h                  |   8 +-
+ builtins/read.def                  | 203 ++++++++++++++++--
+ config-bot.h                       |   4 +
+ lib/readline/callback.c            |   5 +
+ lib/readline/examples/Makefile     |   8 +-
+ lib/readline/examples/rl-timeout.c | 224 ++++++++++++++++++++
+ lib/readline/input.c               | 316 ++++++++++++++++++++++++++---
+ lib/readline/parens.c              |   8 +-
+ lib/readline/readline.c            |  11 +
+ lib/readline/readline.h            |   6 +
+ lib/readline/rlprivate.h           |  29 ++-
+ lib/readline/signals.c             |   3 +
+ lib/sh/zread.c                     |   4 +-
+ quit.h                             |   6 -
+ trap.c                             |   2 +-
+ 17 files changed, 782 insertions(+), 71 deletions(-)
+ create mode 100644 lib/readline/examples/rl-timeout.c
+
+diff --git a/.gitignore b/.gitignore
+index a3f65e8b..8380cd48 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -42,6 +42,12 @@ lib/glob/Makefile
+ lib/intl/Makefile
+ lib/malloc/Makefile
+ lib/readline/Makefile
++lib/readline/examples/fileman
++lib/readline/examples/rl
++lib/readline/examples/rl-callbacktest
++lib/readline/examples/rl-callbacktest2
++lib/readline/examples/rl-timeout
++lib/readline/examples/rltest
+ lib/sh/Makefile
+ lib/termcap/Makefile
+ lib/tilde/Makefile
+diff --git a/bashline.c b/bashline.c
+index 831f35bf..3e609f86 100644
+--- a/bashline.c
++++ b/bashline.c
+@@ -4625,16 +4625,18 @@ bash_event_hook ()
+     sig = terminating_signal;
+   else if (interrupt_state)
+     sig = SIGINT;
+-  else if (sigalrm_seen)
++#if !defined (USE_SELECT_FOR_READ_TIMEOUT)
++  else if (is_timeout_reached ())
+     sig = SIGALRM;
++#endif
+   else
+     sig = first_pending_trap ();
+ 
+   /* If we're going to longjmp to top_level, make sure we clean up readline.
+      check_signals will call QUIT, which will eventually longjmp to top_level,
+-     calling run_interrupt_trap along the way.  The check for sigalrm_seen is
+-     to clean up the read builtin's state. */
+-  if (terminating_signal || interrupt_state || sigalrm_seen)
++     calling run_interrupt_trap along the way.  The check for
++     is_timeout_reached is to clean up the read builtin's state. */
++  if (terminating_signal || interrupt_state || is_timeout_reached ())
+     rl_cleanup_after_signal ();
+   bashline_reset_event_hook ();
+ 
+diff --git a/builtins/common.h b/builtins/common.h
+index a4f9275d..f4265b00 100644
+--- a/builtins/common.h
++++ b/builtins/common.h
+@@ -218,6 +218,11 @@ extern int force_execute_file PARAMS((const char *, int));
+ extern int source_file PARAMS((const char *, int));
+ extern int fc_execute_file PARAMS((const char *));
+ 
++/* Functions from read.def */
++extern int is_timeout_reached PARAMS((void));
++extern int do_timeout PARAMS((int));
++extern void check_timeout PARAMS((void));
++
+ /* variables from common.c */
+ extern sh_builtin_func_t *this_shell_builtin;
+ extern sh_builtin_func_t *last_shell_builtin;
+@@ -236,9 +241,6 @@ extern int breaking;
+ extern int continuing;
+ extern int loop_level;
+ 
+-/* variables from read.def */
+-extern int sigalrm_seen;
+-
+ /* variables from shift.def */
+ extern int print_shift_error;
+ 
+diff --git a/builtins/read.def b/builtins/read.def
+index 82997151..0af5d750 100644
+--- a/builtins/read.def
++++ b/builtins/read.def
+@@ -72,6 +72,7 @@ $END
+ 
+ #include "bashtypes.h"
+ #include "posixstat.h"
++#include "posixselect.h"
+ 
+ #include <stdio.h>
+ 
+@@ -132,25 +133,142 @@ static int read_mbchar PARAMS((int, char *, int, int, int));
+ #endif
+ static void ttyrestore PARAMS((struct ttsave *));
+ 
++#if !defined (USE_SELECT_FOR_READ_TIMEOUT)
+ static sighandler sigalrm PARAMS((int));
+-static void reset_alarm PARAMS((void));
++#endif
++static void set_timeout PARAMS((unsigned int, unsigned int));
++static void reset_timeout PARAMS((void));
++static void cleanup_timeout PARAMS((void));
++static void handle_timeout PARAMS((void));
++int is_timeout_reached PARAMS((void));
++int do_timeout PARAMS((int));
++void check_timeout PARAMS((void));
+ 
+ /* Try this to see what the rest of the shell can do with the information. */
+ procenv_t alrmbuf;
+-int sigalrm_seen;
++#if defined (USE_SELECT_FOR_READ_TIMEOUT)
++static struct timeval tmout_time;
++#else
++static int sigalrm_seen;
++static SigHandler *old_alrm;
++#endif
+ 
+ static int reading, tty_modified;
+-static SigHandler *old_alrm;
+ static unsigned char delim;
+ 
+ static struct ttsave termsave;
+ 
++#if defined (USE_SELECT_FOR_READ_TIMEOUT)
++static void
++set_timeout (unsigned int tmsec, unsigned int tmusec)
++{
++  if (gettimeofday (&tmout_time, 0) != 0)
++    {
++      tmout_time.tv_sec = 0;
++      tmout_time.tv_usec = 0;
++    }
++  tmout_time.tv_sec += tmsec;
++  tmout_time.tv_usec += tmusec;
++  if (tmout_time.tv_usec >= USEC_PER_SEC)
++    {
++      tmout_time.tv_sec += tmout_time.tv_usec / USEC_PER_SEC;
++      tmout_time.tv_usec %= USEC_PER_SEC;
++    }
++#if defined (READLINE)
++  rl_timeout (tmsec, tmusec);
++#endif
++}
++
++static void
++reset_timeout ()
++{
++  cleanup_timeout ();
++}
++
++static void
++cleanup_timeout ()
++{
++  tmout_time.tv_sec = 0;
++  tmout_time.tv_usec = 0;
++#if defined (READLINE)
++  rl_timeout (0, 0);
++#endif
++}
++
++int
++is_timeout_reached ()
++{
++  struct timeval now;
++
++  /* timeout is not set */
++  if (tmout_time.tv_sec == 0 && tmout_time.tv_usec == 0)
++    return 0;
++
++  /* timeout has been reached */
++  if (gettimeofday (&now, 0) != 0 ||
++    now.tv_sec > tmout_time.tv_sec ||
++    (now.tv_sec == tmout_time.tv_sec &&
++      now.tv_usec >= tmout_time.tv_usec))
++    return 1;
++
++  return 0;
++}
++
++int
++do_timeout (int fd)
++{
++  int r;
++  struct timeval now, timeout;
++  fd_set readfds;
++#if defined (HAVE_PSELECT)
++  struct timespec ptimeout;
++#endif
++
++  /* If timeout is not set, return 0. */
++  if (tmout_time.tv_sec == 0 && tmout_time.tv_usec == 0)
++    return 0;
++
++  /* If timeout has been reached, do longjmp. */
++  if (gettimeofday (&now, 0) != 0 ||
++    now.tv_sec > tmout_time.tv_sec ||
++    (now.tv_sec == tmout_time.tv_sec &&
++      now.tv_usec >= tmout_time.tv_usec))
++    handle_timeout ();
++
++  /* Call select with timeout */
++  FD_ZERO (&readfds);
++  FD_SET (fd, &readfds);
++  timeout.tv_sec = tmout_time.tv_sec - now.tv_sec;
++  timeout.tv_usec = tmout_time.tv_usec - now.tv_usec;
++  if (now.tv_usec > tmout_time.tv_usec)
++    {
++      timeout.tv_sec--;
++      timeout.tv_usec += USEC_PER_SEC;
++    }
++#if defined (HAVE_PSELECT)
++  ptimeout.tv_sec = timeout.tv_sec;
++  ptimeout.tv_nsec = timeout.tv_usec * 1000;
++  r = pselect (fd + 1, &readfds, NULL, NULL, &ptimeout, NULL);
++#else
++  r = select (fd + 1, &readfds, NULL, NULL, &timeout);
++#endif
++
++  if (r < 0)
++    return r; /* Error: select sets errno. */
++  else if (r == 0)
++    handle_timeout ();
++  else
++    return 0;
++}
++
++#else
+ /* In all cases, SIGALRM just sets a flag that we check periodically.  This
+    avoids problems with the semi-tricky stuff we do with the xfree of
+    input_string at the top of the unwind-protect list (see below). */
+ 
+-/* Set a flag that CHECK_ALRM can check.  This relies on zread or read_builtin
+-   calling trap.c:check_signals(), which knows about sigalrm_seen and alrmbuf. */
++/* Set a flag that check_timeout() can check.  This relies on zread or
++   read_builtin calling trap.c:check_signals(), which knows about
++   sigalrm_seen and alrmbuf. */
+ static sighandler
+ sigalrm (s)
+      int s;
+@@ -159,13 +277,56 @@ sigalrm (s)
+ }
+ 
+ static void
+-reset_alarm ()
++set_timeout (unsigned int tmsec, unsigned int tmusec)
++{
++  old_alrm = set_signal_handler (SIGALRM, sigalrm);
++  add_unwind_protect (reset_timeout, (char *)NULL);
++  falarm (tmsec, tmusec);
++}
++
++static void
++reset_timeout ()
+ {
+   /* Cancel alarm before restoring signal handler. */
+   falarm (0, 0);
+   set_signal_handler (SIGALRM, old_alrm);
+ }
+ 
++static void
++cleanup_timeout ()
++{
++  sigalrm_seen = 0;
++}
++
++int
++is_timeout_reached ()
++{
++  return sigalrm_seen;
++}
++
++int
++do_timeout (int fd)
++{
++  /* Nothing needed here.  The timeout would be instead processed by
++     SIGALRM while executing read(2). */
++  (void) fd;
++  return 0;
++}
++#endif
++
++static void
++handle_timeout ()
++{
++  sh_longjmp (alrmbuf, 1);
++}
++
++void
++check_timeout ()
++{
++  if (is_timeout_reached ())
++    handle_timeout ();
++}
++
+ /* Read the value of the shell variables whose names follow.
+    The reading is done from the current input stream, whatever
+    that may be.  Successive words of the input line are assigned
+@@ -227,7 +388,8 @@ read_builtin (list)
+   USE_VAR(ps2);
+   USE_VAR(lastsig);
+ 
+-  sigalrm_seen = reading = tty_modified = 0;
++  cleanup_timeout ();
++  reading = tty_modified = 0;
+ 
+   i = 0;		/* Index into the string that we are reading. */
+   raw = edit = 0;	/* Not reading raw input by default. */
+@@ -446,7 +608,8 @@ read_builtin (list)
+       code = setjmp_nosigs (alrmbuf);
+       if (code)
+ 	{
+-	  sigalrm_seen = 0;
++	  cleanup_timeout ();
++
+ 	  /* Tricky.  The top of the unwind-protect stack is the free of
+ 	     input_string.  We want to run all the rest and use input_string,
+ 	     so we have to save input_string temporarily, run the unwind-
+@@ -468,8 +631,6 @@ read_builtin (list)
+ 	}
+       if (interactive_shell == 0)
+ 	initialize_terminating_signals ();
+-      old_alrm = set_signal_handler (SIGALRM, sigalrm);
+-      add_unwind_protect (reset_alarm, (char *)NULL);
+ #if defined (READLINE)
+       if (edit)
+ 	{
+@@ -477,7 +638,7 @@ read_builtin (list)
+ 	  add_unwind_protect (bashline_reset_event_hook, (char *)NULL);
+ 	}
+ #endif
+-      falarm (tmsec, tmusec);
++      set_timeout (tmsec, tmusec);
+     }
+ 
+   /* If we've been asked to read only NCHARS chars, or we're using some
+@@ -553,7 +714,7 @@ read_builtin (list)
+      of the unwind-protect stack after the realloc() works right. */
+   add_unwind_protect (xfree, input_string);
+ 
+-  CHECK_ALRM;
++  check_timeout ();
+   if ((nchars > 0) && (input_is_tty == 0) && ignore_delim)	/* read -N */
+     unbuffered_read = 2;
+   else if ((nchars > 0) || (delim != '\n') || input_is_pipe)
+@@ -572,7 +733,7 @@ read_builtin (list)
+   ps2 = 0;
+   for (print_ps2 = eof = retval = 0;;)
+     {
+-      CHECK_ALRM;
++      check_timeout ();
+ 
+ #if defined (READLINE)
+       if (edit)
+@@ -619,7 +780,7 @@ read_builtin (list)
+ 	}
+ 
+       reading = 1;
+-      CHECK_ALRM;
++      check_timeout ();
+       errno = 0;
+ 
+ #if defined (SIGCHLD)
+@@ -670,7 +831,7 @@ read_builtin (list)
+ #endif
+ 
+       if (retval <= 0)			/* XXX shouldn't happen */
+-	CHECK_ALRM;
++	check_timeout ();
+ 
+       /* XXX -- use i + mb_cur_max (at least 4) for multibyte/read_mbchar */
+       if (i + (mb_cur_max > 4 ? mb_cur_max : 4) >= size)
+@@ -730,7 +891,7 @@ read_builtin (list)
+ 
+ add_char:
+       input_string[i++] = c;
+-      CHECK_ALRM;
++      check_timeout ();
+ 
+ #if defined (HANDLE_MULTIBYTE)
+       /* XXX - what if C == 127? Can DEL introduce a multibyte sequence? */
+@@ -767,7 +928,7 @@ add_char:
+ 	break;
+     }
+   input_string[i] = '\0';
+-  CHECK_ALRM;
++  check_timeout ();
+ 
+ #if defined (READLINE)
+   if (edit)
+@@ -784,7 +945,7 @@ add_char:
+     }
+ 
+   if (tmsec > 0 || tmusec > 0)
+-    reset_alarm ();
++    reset_timeout ();
+ 
+   if (nchars > 0 || delim != '\n')
+     {
+@@ -1157,7 +1318,11 @@ edit_line (p, itext)
+   bashline_reset_event_hook ();
+ 
+   if (ret == 0)
+-    return ret;
++    {
++      if (RL_ISSTATE (RL_STATE_TIMEOUT))
++	handle_timeout ();
++      return ret;
++    }
+   len = strlen (ret);
+   ret = (char *)xrealloc (ret, len + 2);
+   ret[len++] = delim;
+diff --git a/config-bot.h b/config-bot.h
+index b075c778..be0aeb1a 100644
+--- a/config-bot.h
++++ b/config-bot.h
+@@ -60,6 +60,10 @@
+ #  define SYS_SIGLIST_DECLARED
+ #endif
+ 
++#if (defined (HAVE_SELECT) || defined (HAVE_PSELECT)) && defined (HAVE_GETTIMEOFDAY)
++#  define USE_SELECT_FOR_READ_TIMEOUT
++#endif
++
+ /***********************************************************************/
+ /* Unset defines based on what configure reports as missing or broken. */
+ /***********************************************************************/
+diff --git a/lib/readline/callback.c b/lib/readline/callback.c
+index 66e8d113..268bdf38 100644
+--- a/lib/readline/callback.c
++++ b/lib/readline/callback.c
+@@ -147,6 +147,11 @@ rl_callback_read_char (void)
+       (*rl_redisplay_function) ();
+       _rl_want_redisplay = 0;
+       memcpy ((void *)_rl_top_level, (void *)olevel, sizeof (procenv_t));
++      if (RL_ISSTATE (RL_STATE_TIMEOUT))
++	{
++	  RL_SETSTATE(RL_STATE_DONE);
++	  rl_done = 1;
++	}
+       CALLBACK_READ_RETURN ();
+     }
+ 
+diff --git a/lib/readline/examples/Makefile b/lib/readline/examples/Makefile
+index 2df22407..7800f1c3 100644
+--- a/lib/readline/examples/Makefile
++++ b/lib/readline/examples/Makefile
+@@ -16,7 +16,7 @@
+ #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ #
+ 
+-EXECUTABLES = fileman rltest rl
++EXECUTABLES = fileman rltest rl rl-callbacktest rl-callbacktest2 rl-timeout
+ CFLAGS  = -g -I../.. -I.. -DREADLINE_LIBRARY
+ LDFLAGS = -g -L..
+ 
+@@ -28,6 +28,12 @@ all: $(EXECUTABLES)
+ 
+ rl: rl.o
+ 	$(CC) $(LDFLAGS) -o $@ rl.o -lreadline -ltermcap
++rl-callbacktest: rl-callbacktest.o
++	$(CC) $(LDFLAGS) -o $@ rl-callbacktest.o -lreadline -ltermcap
++rl-callbacktest2: rl-callbacktest2.o
++	$(CC) $(LDFLAGS) -o $@ rl-callbacktest2.o -lreadline -ltermcap
++rl-timeout: rl-timeout.o
++	$(CC) $(LDFLAGS) -o $@ rl-timeout.o -lreadline -ltermcap
+ 
+ fileman: fileman.o
+ 	$(CC) $(LDFLAGS) -o $@ fileman.o -lreadline -ltermcap
+diff --git a/lib/readline/examples/rl-timeout.c b/lib/readline/examples/rl-timeout.c
+new file mode 100644
+index 00000000..945bb952
+--- /dev/null
++++ b/lib/readline/examples/rl-timeout.c
+@@ -0,0 +1,224 @@
++/* Standard include files. stdio.h is required. */
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++#include <limits.h>
++
++/* Used for select(2) */
++#include <sys/types.h>
++#include <sys/select.h>
++
++#include <errno.h>
++#include <stdio.h>
++
++/* Standard readline include files. */
++#if defined (READLINE_LIBRARY)
++#  include "readline.h"
++#  include "history.h"
++#else
++#  include <readline/readline.h>
++#  include <readline/history.h>
++#endif
++
++extern int errno;
++
++static void cb_linehandler (char *);
++
++int timeout_secs = 1, timeout_usecs = 0;
++int running;
++const char *prompt = "rltest$ ";
++
++/* **************************************************************** */
++/*								    */
++/* Example 1: readline () with rl_readline_state		    */
++/*								    */
++/* **************************************************************** */
++
++void
++rltest_timeout_readline1 ()
++{
++  const char *temp;
++
++  rl_timeout (timeout_secs, timeout_usecs);
++  temp = readline (prompt);
++  if (RL_ISSTATE (RL_STATE_TIMEOUT))
++    printf ("timeout\n");
++  else if (temp == NULL)
++    printf ("no input line\n");
++  else
++    printf ("input line: %s\n", temp);
++  free ((void *) temp);
++}
++
++/* **************************************************************** */
++/*								    */
++/* Example 2: readline () with rl_timeout_event_hook		    */
++/*								    */
++/* **************************************************************** */
++
++static int
++timeout_handler ()
++{
++  printf ("timeout\n");
++  return READERR;
++}
++
++void
++rltest_timeout_readline2 ()
++{
++  const char *temp;
++
++  rl_timeout (timeout_secs, timeout_usecs);
++  rl_timeout_event_hook = timeout_handler;
++  temp = readline (prompt);
++  if (temp == NULL)
++    printf ("no input line\n");
++  else
++    printf ("input line: %s\n", temp);
++  free ((void *)temp);
++}
++
++/* **************************************************************** */
++/*								    */
++/* Example 3: rl_callback_* () with rl_timeout_remaining	    */
++/*								    */
++/* **************************************************************** */
++
++/* Callback function called for each line when accept-line executed, EOF
++   seen, or EOF character read.  This sets a flag and returns; it could
++   also call exit(3). */
++static void
++cb_linehandler (char *line)
++{
++  /* Can use ^D (stty eof) or `exit' to exit. */
++  if (line == NULL || strcmp (line, "exit") == 0)
++    {
++      if (line == 0)
++	printf ("\n");
++      printf ("exit\n");
++      /* This function needs to be called to reset the terminal settings,
++	 and calling it from the line handler keeps one extra prompt from
++	 being displayed. */
++      rl_callback_handler_remove ();
++
++      running = 0;
++    }
++  else
++    {
++      if (*line)
++	add_history (line);
++      printf ("input line: %s\n", line);
++      free (line);
++    }
++}
++
++void
++rltest_timeout_callback1 ()
++{
++  fd_set fds;
++  int r;
++  unsigned sec, usec;
++
++  rl_timeout (timeout_secs, timeout_usecs);
++  rl_callback_handler_install (prompt, cb_linehandler);
++  running = 1;
++  while (running)
++    {
++      FD_ZERO (&fds);
++      FD_SET (fileno (rl_instream), &fds);
++      r = rl_timeout_remaining (&sec, &usec);
++      if (r == 1)
++	{
++	  struct timeval timeout = {sec, usec};
++	  r = select (FD_SETSIZE, &fds, NULL, NULL, &timeout);
++	}
++      if (r < 0 && errno != EINTR)
++	{
++	  perror ("rltest: select");
++	  rl_callback_handler_remove ();
++	  break;
++	}
++      else if (r == 0)
++	{
++	  printf ("rltest: timeout\n");
++	  rl_callback_handler_remove ();
++	  break;
++	}
++
++      if (FD_ISSET (fileno (rl_instream), &fds))
++	rl_callback_read_char ();
++    }
++
++  printf ("rltest: Event loop has exited\n");
++}
++
++/* **************************************************************** */
++/*								    */
++/* Example 4: rl_callback_* () with rl_timeout_event_hook	    */
++/*								    */
++/* **************************************************************** */
++
++static int
++cb_timeouthandler ()
++{
++  printf ("timeout\n");
++  rl_callback_handler_remove ();
++  running = 0;
++  return READERR;
++}
++
++void
++rltest_timeout_callback2 ()
++{
++  int r;
++
++  rl_timeout (timeout_secs, timeout_usecs);
++  rl_timeout_event_hook = cb_timeouthandler;
++  rl_callback_handler_install (prompt, cb_linehandler);
++  running = 1;
++  while (running)
++    rl_callback_read_char ();
++
++  printf ("rltest: Event loop has exited\n");
++}
++
++int
++main (int argc, char **argv)
++{
++  if (argc >= 2)
++    {
++      if (argc >= 3)
++	{
++	  double timeout = atof (argv[2]);
++	  if (timeout <= 0.0)
++	    {
++	      fprintf (stderr, "rltest: specify a positive number for timeout.\n");
++	      return 2;
++	    }
++	  else if (timeout > UINT_MAX)
++	    {
++	      fprintf (stderr, "rltest: timeout too large.\n");
++	      return 2;
++	    }
++	  timeout_secs = (unsigned) timeout;
++	  timeout_usecs = (unsigned) ((timeout - timeout_secs) * 1000000 + 0.5);
++	}
++
++      if (strcmp (argv[1], "readline1") == 0)
++	rltest_timeout_readline1 ();
++      else if (strcmp (argv[1], "readline2") == 0)
++	rltest_timeout_readline2 ();
++      else if (strcmp (argv[1], "callback1") == 0)
++	rltest_timeout_callback1 ();
++      else if (strcmp (argv[1], "callback2") == 0)
++	rltest_timeout_callback2 ();
++      else
++	return 2;
++    }
++  else
++    {
++      fprintf (stderr, "usage: rltest [readline1 | readline2 | callback1 | callback2] [timeout]\n");
++      return 2;
++    }
++  return 0;
++}
+diff --git a/lib/readline/input.c b/lib/readline/input.c
+index f514d8c5..469c49cb 100644
+--- a/lib/readline/input.c
++++ b/lib/readline/input.c
+@@ -89,6 +89,9 @@ rl_hook_func_t *rl_event_hook = (rl_hook_func_t *)NULL;
+ /* A function to call if a read(2) is interrupted by a signal. */
+ rl_hook_func_t *rl_signal_event_hook = (rl_hook_func_t *)NULL;
+ 
++/* A function to call when pselect/select(2) timed out. */
++rl_hook_func_t *rl_timeout_event_hook = (rl_hook_func_t *)NULL;
++
+ /* A function to replace _rl_input_available for applications using the
+    callback interface. */
+ rl_hook_func_t *rl_input_available_hook = (rl_hook_func_t *)NULL;
+@@ -132,6 +135,36 @@ win32_isatty (int fd)
+ #define isatty(x)	win32_isatty(x)
+ #endif
+ 
++/* ---- Declarations for rl_timeout ------------------------------- */
++
++/* _getch () is used for rl_getc in MinGW 32, but the way to set a
++   timeout for `_getch' is unknown, so we use the fallback by SIGALRM
++   in MinGW 32.. */
++#if (defined (HAVE_PSELECT) || defined (HAVE_SELECT)) && !defined (__MINGW32__)
++#  define RL_TIMEOUT_USE_SELECT
++#else
++#  define RL_TIMEOUT_USE_SIGALRM
++#endif
++
++/* Public readline interface */
++void rl_timeout (unsigned int, unsigned int);
++int rl_timeout_remaining (unsigned int *, unsigned int *);
++
++/* Readline-local functions */
++int _rl_timeout_initialize ();
++int _rl_timeout_handle_sigalrm (void);
++int _rl_timeout_select(int, fd_set *, fd_set *, fd_set *,
++  const _rl_timeval *, const sigset_t *);
++
++/* File-local functions and variables */
++static void _rl_timeout_handle (void);
++#if defined (RL_TIMEOUT_USE_SIGALRM)
++static int set_alarm (unsigned int *, unsigned int *);
++static void reset_alarm (void);
++#endif
++
++static struct timeval timeout_duration, timeout_point;
++
+ /* **************************************************************** */
+ /*								    */
+ /*			Character Input Buffering       	    */
+@@ -214,22 +247,22 @@ rl_gather_tyi (void)
+   register int tem, result;
+   int chars_avail, k;
+   char input;
+-#if defined(HAVE_SELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+   fd_set readfds, exceptfds;
+-  struct timeval timeout;
++  _rl_timeval timeout;
+ #endif
+ 
+   chars_avail = 0;
+   input = 0;
+   tty = fileno (rl_instream);
+ 
+-#if defined (HAVE_SELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+   FD_ZERO (&readfds);
+   FD_ZERO (&exceptfds);
+   FD_SET (tty, &readfds);
+   FD_SET (tty, &exceptfds);
+-  USEC_TO_TIMEVAL (_keyboard_input_timeout, timeout);
+-  result = select (tty + 1, &readfds, (fd_set *)NULL, &exceptfds, &timeout);
++  USEC_TO_RLTIMEVAL (_keyboard_input_timeout, timeout);
++  result = _rl_timeout_select (tty + 1, &readfds, (fd_set *)NULL, &exceptfds, &timeout, NULL);
+   if (result <= 0)
+     return 0;	/* Nothing to read. */
+ #endif
+@@ -330,11 +363,10 @@ rl_set_keyboard_input_timeout (int u)
+ int
+ _rl_input_available (void)
+ {
+-#if defined(HAVE_SELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+   fd_set readfds, exceptfds;
+-  struct timeval timeout;
+-#endif
+-#if !defined (HAVE_SELECT) && defined(FIONREAD)
++  _rl_timeval timeout;
++#elif defined(FIONREAD)
+   int chars_avail;
+ #endif
+   int tty;
+@@ -344,19 +376,17 @@ _rl_input_available (void)
+ 
+   tty = fileno (rl_instream);
+ 
+-#if defined (HAVE_SELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+   FD_ZERO (&readfds);
+   FD_ZERO (&exceptfds);
+   FD_SET (tty, &readfds);
+   FD_SET (tty, &exceptfds);
+-  USEC_TO_TIMEVAL (_keyboard_input_timeout, timeout);
+-  return (select (tty + 1, &readfds, (fd_set *)NULL, &exceptfds, &timeout) > 0);
+-#else
++  USEC_TO_RLTIMEVAL (_keyboard_input_timeout, timeout);
++  return (_rl_timeout_select (tty + 1, &readfds, (fd_set *)NULL, &exceptfds, &timeout, NULL) > 0);
+ 
+-#if defined (FIONREAD)
++#elif defined (FIONREAD)
+   if (ioctl (tty, FIONREAD, &chars_avail) == 0)
+     return (chars_avail);
+-#endif
+ 
+ #endif
+ 
+@@ -463,6 +493,245 @@ rl_clear_pending_input (void)
+   return 0;
+ }
+ 
++/* **************************************************************** */
++/*								    */
++/*			    Timeout utility			    */
++/*								    */
++/* **************************************************************** */
++
++#if defined (RL_TIMEOUT_USE_SIGALRM)
++#  if defined (HAVE_SETITIMER)
++static int
++set_alarm (unsigned int *secs, unsigned int *usecs)
++{
++  struct itimerval it;
++  it.it_interval.tv_sec = 0;
++  it.it_interval.tv_usec = 0;
++  it.it_value.tv_sec = *secs;
++  it.it_value.tv_usec = *usecs;
++  return setitimer(ITIMER_REAL, &it, NULL);
++}
++static void
++reset_alarm ()
++{
++  struct itimerval it = {0};
++  setitimer(ITIMER_REAL, &it, NULL);
++}
++#  else
++static int
++set_alarm (unsigned int *secs, unsigned int *usecs)
++{
++  if (*secs == 0 || *usecs >= USEC_PER_SEC / 2)
++    (*secs)++;
++  *usecs = 0;
++  return alarm (*secs);
++}
++static void
++reset_alarm ()
++{
++  alarm (0);
++}
++#  endif
++#endif
++
++/* Set a timeout which will be used for the next call of `readline
++   ()'.  When (0, 0) are specified the timeout is cleared.  */
++void
++rl_timeout (unsigned int secs, unsigned int usecs)
++{
++  timeout_duration.tv_sec = secs + usecs / USEC_PER_SEC;
++  timeout_duration.tv_usec = usecs % USEC_PER_SEC;
++}
++
++/* Start measuring the time.  Returns 0 on success.  Returns -1 on
++   error. */
++int
++_rl_timeout_initialize ()
++{
++  unsigned secs, usecs;
++
++  /* Clear the timeout state of the previous edit */
++  RL_UNSETSTATE(RL_STATE_TIMEOUT);
++  timeout_point.tv_sec = 0;
++  timeout_point.tv_usec = 0;
++
++  /* Return -1 when timeout is unset. */
++  if (timeout_duration.tv_sec == 0 && timeout_duration.tv_usec == 0)
++    return 0;
++
++  /* Return -1 on gettimeofday error. */
++  if (gettimeofday(&timeout_point, 0) != 0)
++    {
++      timeout_point.tv_sec = 0;
++      timeout_point.tv_usec = 0;
++      return -1;
++    }
++
++  secs = timeout_duration.tv_sec;
++  usecs = timeout_duration.tv_usec;
++#if defined (RL_TIMEOUT_USE_SIGALRM)
++  /* If select(2)/pselect(2) is unavailable, use SIGALRM. */
++  if (set_alarm (&secs, &usecs) < 0)
++    return -1;
++#endif
++
++  timeout_point.tv_sec += secs;
++  timeout_point.tv_usec += usecs;
++  if (timeout_point.tv_usec >= USEC_PER_SEC)
++    {
++      timeout_point.tv_sec++;
++      timeout_point.tv_usec -= USEC_PER_SEC;
++    }
++  return 0;
++}
++
++/* Get the remaining time until the scheduled timeout.  Returns -1 on
++   error or no timeout set with secs and usecs unchanged.  Returns 1
++   on an expired timeout with secs and usecs unchanged.  Returns 1
++   when the timeout has not yet expired.  The remaining time is stored
++   in secs and usecs.  When NULL is specified to either of the
++   arguments, just the expiration is tested. */
++int
++rl_timeout_remaining (unsigned int *secs, unsigned int *usecs)
++{
++  struct timeval current_time;
++
++  /* Return -1 when timeout is unset. */
++  if (timeout_point.tv_sec == 0 && timeout_point.tv_usec == 0)
++    {
++      errno = 0;
++      return -1;
++    }
++
++  /* Return -1 on error. errno is set by gettimeofday. */
++  if (gettimeofday(&current_time, 0) != 0)
++    return -1;
++
++  /* Return 0 when timeout has already expired. */
++  if (current_time.tv_sec > timeout_point.tv_sec ||
++    (current_time.tv_sec == timeout_point.tv_sec &&
++      current_time.tv_usec >= timeout_point.tv_usec))
++    return 0;
++
++  if (secs && usecs)
++    {
++      *secs = timeout_point.tv_sec - current_time.tv_sec;
++      *usecs = timeout_point.tv_usec - current_time.tv_usec;
++      if (timeout_point.tv_usec < current_time.tv_usec)
++	{
++	  (*secs)--;
++	  *usecs += USEC_PER_SEC;
++	}
++    }
++
++  return 1;
++}
++
++int
++_rl_timeout_select (
++  int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
++  const _rl_timeval * timeout, const sigset_t *sigmask)
++{
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
++  int result;
++#  if defined (HAVE_PSELECT)
++  struct timespec ts;
++#  else
++  sigset_t origmask;
++  struct timeval tv;
++#  endif
++#  if defined (RL_TIMEOUT_USE_SELECT)
++  int rltmout_status;
++  _rl_timeval rltmout;
++#  endif
++
++#  if defined (RL_TIMEOUT_USE_SELECT)
++  /* When the remaining time for rl_timeout is shorter than the
++     keyboard input timeout, replace `timeout' with the remaining time
++     for `rl_timeout' and set `rltmout_status = 1'. */
++  rltmout_status = rl_timeout_remaining (&rltmout.sec, &rltmout.usec);
++  if (rltmout_status == 0)
++    _rl_timeout_handle ();
++  else if (rltmout_status == 1)
++    {
++      if (timeout == NULL ||
++	rltmout.sec < timeout->sec ||
++	(rltmout.sec == timeout->sec &&
++	  rltmout.usec < timeout->usec))
++	timeout = &rltmout;
++      else
++	rltmout_status = -1;
++    }
++#  endif
++
++#  if defined (HAVE_PSELECT)
++  if (timeout)
++    {
++      ts.tv_sec = timeout->sec;
++      ts.tv_nsec = timeout->usec * 1000;
++      result = pselect (nfds, readfds, writefds, exceptfds, &ts, sigmask);
++    }
++  else
++    result = pselect (nfds, readfds, writefds, exceptfds, NULL, sigmask);
++#  else
++  if (sigmask)
++    sigprocmask (SIG_SETMASK, sigmask, &origmask);
++
++  if (timeout)
++    {
++      tv.tv_sec = timeout->sec;
++      tv.tv_usec = timeout->usec;
++      result = select (nfds, readfds, writefds, exceptfds, &tv);
++    }
++  else
++    result = select (nfds, readfds, writefds, exceptfds, NULL);
++
++  if (sigmask)
++    sigprocmask (SIG_SETMASK, &origmask, NULL);
++#  endif
++
++#  if defined (RL_TIMEOUT_USE_SELECT)
++  if (rltmout_status == 1 && result == 0)
++    _rl_timeout_handle ();
++#  endif
++  return result;
++#else /* !(defined (HAVE_PSELECT) || defined (HAVE_SELECT)) */
++  /* Always success */
++  return nfds;
++#endif
++}
++
++static void
++_rl_timeout_handle ()
++{
++  if (rl_timeout_event_hook)
++    (*rl_timeout_event_hook) ();
++
++  RL_SETSTATE(RL_STATE_TIMEOUT);
++  _rl_abort_internal ();
++}
++
++int
++_rl_timeout_handle_sigalrm ()
++{
++#if defined (RL_TIMEOUT_USE_SIGALRM)
++  if (timeout_point.tv_sec == 0 && timeout_point.tv_usec == 0)
++    return -1;
++
++  /* Reset `timeout_point' to the current time to ensure that later
++     calls of `rl_timeout_pending ()' return 0 (timeout expired). */
++  if (gettimeofday(&timeout_point, 0) != 0)
++    {
++      timeout_point.tv_sec = 0;
++      timeout_point.tv_usec = 0;
++    }
++  reset_alarm ();
++
++  _rl_timeout_handle ();
++#endif
++  return -1;
++}
++
+ /* **************************************************************** */
+ /*								    */
+ /*			     Character Input			    */
+@@ -525,8 +794,8 @@ rl_getc (FILE *stream)
+ {
+   int result;
+   unsigned char c;
+-#if defined (HAVE_PSELECT)
+-  sigset_t empty_set;
++#if defined (RL_TIMEOUT_USE_SELECT)
++  int fd;
+   fd_set readfds;
+ #endif
+ 
+@@ -541,16 +810,17 @@ rl_getc (FILE *stream)
+ 	return (_getch ());	/* "There is no error return." */
+ #endif
+       result = 0;
+-#if defined (HAVE_PSELECT)
++#if defined (RL_TIMEOUT_USE_SELECT)
++      fd = fileno (stream);
+       FD_ZERO (&readfds);
+-      FD_SET (fileno (stream), &readfds);
++      FD_SET (fd, &readfds);
+ #  if defined (HANDLE_SIGNALS)
+-      result = pselect (fileno (stream) + 1, &readfds, NULL, NULL, NULL, &_rl_orig_sigset);
++      result = _rl_timeout_select (fd + 1, &readfds, NULL, NULL, NULL, &_rl_orig_sigset);
+ #  else
+-      sigemptyset (&empty_set);
+-      sigprocmask (SIG_BLOCK, (sigset_t *)NULL, &empty_set);
+-      result = pselect (fileno (stream) + 1, &readfds, NULL, NULL, NULL, &empty_set);
++      result = _rl_timeout_select (fd + 1, &readfds, NULL, NULL, NULL, NULL);
+ #  endif /* HANDLE_SIGNALS */
++      if (result == 0)
++	_rl_timeout_handle ();
+ #endif
+       if (result >= 0)
+ 	result = read (fileno (stream), &c, sizeof (unsigned char));
+diff --git a/lib/readline/parens.c b/lib/readline/parens.c
+index b8c5ac84..1056ba3b 100644
+--- a/lib/readline/parens.c
++++ b/lib/readline/parens.c
+@@ -114,9 +114,9 @@ rl_insert_close (int count, int invoking_key)
+     _rl_insert_char (count, invoking_key);
+   else
+     {
+-#if defined (HAVE_SELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+       int orig_point, match_point, ready;
+-      struct timeval timer;
++      _rl_timeval timer;
+       fd_set readfds;
+ 
+       _rl_insert_char (1, invoking_key);
+@@ -130,12 +130,12 @@ rl_insert_close (int count, int invoking_key)
+ 
+       FD_ZERO (&readfds);
+       FD_SET (fileno (rl_instream), &readfds);
+-      USEC_TO_TIMEVAL (_paren_blink_usec, timer);
++      USEC_TO_RLTIMEVAL (_paren_blink_usec, timer);
+ 
+       orig_point = rl_point;
+       rl_point = match_point;
+       (*rl_redisplay_function) ();
+-      ready = select (1, &readfds, (fd_set *)NULL, (fd_set *)NULL, &timer);
++      ready = _rl_timeout_select (1, &readfds, (fd_set *)NULL, (fd_set *)NULL, &timer, NULL);
+       rl_point = orig_point;
+ #else /* !HAVE_SELECT */
+       _rl_insert_char (count, invoking_key);
+diff --git a/lib/readline/readline.c b/lib/readline/readline.c
+index de06af1d..6e7dbeb1 100644
+--- a/lib/readline/readline.c
++++ b/lib/readline/readline.c
+@@ -577,6 +577,13 @@ readline_internal_charloop (void)
+ 	{
+ 	  (*rl_redisplay_function) ();
+ 	  _rl_want_redisplay = 0;
++	  /* Handle `_rl_abort_internal ()' caused by timeout. */
++	  if (RL_ISSTATE (RL_STATE_TIMEOUT))
++	    {
++	      RL_SETSTATE(RL_STATE_DONE);
++	      rl_done = 1;
++	      return 1;
++	    }
+ 	  /* If we get here, we're not being called from something dispatched
+ 	     from _rl_callback_read_char(), which sets up its own value of
+ 	     _rl_top_level (saving and restoring the old, of course), so
+@@ -1148,6 +1155,10 @@ _rl_subseq_result (int r, Keymap map, int key, int got_subseq)
+ int
+ rl_initialize (void)
+ {
++  /* set up timeout if a timeout setting is set.  We call it first in
++     this function to precisely obtain the starting time. */
++  _rl_timeout_initialize ();
++
+   /* If we have never been called before, initialize the
+      terminal and data structures. */
+   if (rl_initialized == 0)
+diff --git a/lib/readline/readline.h b/lib/readline/readline.h
+index 90b53892..8e8c99f8 100644
+--- a/lib/readline/readline.h
++++ b/lib/readline/readline.h
+@@ -447,6 +447,8 @@ extern int rl_clear_pending_input (void);
+ extern int rl_read_key (void);
+ extern int rl_getc (FILE *);
+ extern int rl_set_keyboard_input_timeout (int);
++extern void rl_timeout (unsigned int, unsigned int);
++extern int rl_timeout_remaining (unsigned int *, unsigned int *);
+ 
+ /* `Public' utility functions . */
+ extern void rl_extend_line_buffer (int);
+@@ -599,6 +601,9 @@ extern rl_hook_func_t *rl_event_hook;
+ /* The address of a function to call if a read is interrupted by a signal. */
+ extern rl_hook_func_t *rl_signal_event_hook;
+ 
++/* The address of a function to call on a timeout. */
++extern rl_hook_func_t *rl_timeout_event_hook;
++
+ /* The address of a function to call if Readline needs to know whether or not
+    there is data available from the current input source. */
+ extern rl_hook_func_t *rl_input_available_hook;
+@@ -906,6 +911,7 @@ extern int rl_persistent_signal_handlers;
+ #define RL_STATE_REDISPLAYING	0x1000000	/* updating terminal display */
+ 
+ #define RL_STATE_DONE		0x2000000	/* done; accepted line */
++#define RL_STATE_TIMEOUT	0x4000000	/* done; timeout expired */
+ 
+ #define RL_SETSTATE(x)		(rl_readline_state |= (x))
+ #define RL_UNSETSTATE(x)	(rl_readline_state &= ~(x))
+diff --git a/lib/readline/rlprivate.h b/lib/readline/rlprivate.h
+index 7d7c3819..92efd917 100644
+--- a/lib/readline/rlprivate.h
++++ b/lib/readline/rlprivate.h
+@@ -4,7 +4,7 @@
+ /* Copyright (C) 1999-2021 Free Software Foundation, Inc.
+ 
+    This file is part of the GNU Readline Library (Readline), a library
+-   for reading lines of text with interactive input and history editing.      
++   for reading lines of text with interactive input and history editing.
+ 
+    Readline is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+@@ -26,6 +26,7 @@
+ #include "rlconf.h"	/* for VISIBLE_STATS */
+ #include "rlstdc.h"
+ #include "posixjmp.h"	/* defines procenv_t */
++#include "posixselect.h"	/* for USEC_PER_SEC */
+ #include "rlmbutil.h"	/* for HANDLE_MULTIBYTE */
+ 
+ /*************************************************************************
+@@ -78,7 +79,7 @@ typedef struct  __rl_search_context
+   int search_string_size;
+ 
+   char **lines;
+-  char *allocated_line;    
++  char *allocated_line;
+   int hlen;
+   int hindex;
+ 
+@@ -169,7 +170,7 @@ typedef struct __rl_vimotion_context
+ 
+ /* fill in more as needed */
+ /* `Generic' callback data and functions */
+-typedef struct __rl_callback_generic_arg 
++typedef struct __rl_callback_generic_arg
+ {
+   int count;
+   int i1, i2;
+@@ -181,11 +182,17 @@ typedef int _rl_callback_func_t (_rl_callback_generic_arg *);
+ typedef void _rl_sigcleanup_func_t (int, void *);
+ 
+ /*************************************************************************
+- *									 *
+- * Global functions undocumented in texinfo manual and not in readline.h *
+- *									 *
++ * Undocumented private structs						 *
+  *************************************************************************/
+ 
++/* input.c */
++typedef struct __rl_timeval { unsigned int sec, usec; } _rl_timeval;
++#define USEC_TO_RLTIMEVAL(us, tv) \
++do { \
++  (tv).sec = (us) / USEC_PER_SEC; \
++  (tv).usec = (us) % USEC_PER_SEC; \
++} while (0)
++
+ /*************************************************************************
+  *									 *
+  * Global variables undocumented in texinfo manual and not in readline.h *
+@@ -259,7 +266,7 @@ extern void _rl_keyseq_cxt_dispose (_rl_keyseq_cxt *);
+ extern void _rl_keyseq_chain_dispose (void);
+ 
+ extern int _rl_dispatch_callback (_rl_keyseq_cxt *);
+-     
++
+ /* callback.c */
+ extern _rl_callback_generic_arg *_rl_callback_data_alloc (int);
+ extern void _rl_callback_data_dispose (_rl_callback_generic_arg *);
+@@ -300,6 +307,10 @@ extern int _rl_input_queued (int);
+ extern void _rl_insert_typein (int);
+ extern int _rl_unget_char (int);
+ extern int _rl_pushed_input_available (void);
++extern int _rl_timeout_initialize (void);
++extern int _rl_timeout_handle_sigalrm (void);
++extern int _rl_timeout_select (int, fd_set *, fd_set *, fd_set *,
++  const _rl_timeval *, const sigset_t *);
+ 
+ /* isearch.c */
+ extern _rl_search_cxt *_rl_scxt_alloc (int, int);
+@@ -371,7 +382,7 @@ extern void _rl_internal_char_cleanup (void);
+ extern void _rl_init_executing_keyseq (void);
+ extern void _rl_term_executing_keyseq (void);
+ extern void _rl_end_executing_keyseq (void);
+-extern void _rl_add_executing_keyseq (int); 
++extern void _rl_add_executing_keyseq (int);
+ 
+ /* rltty.c */
+ extern int _rl_disable_tty_signals (void);
+@@ -469,7 +480,7 @@ extern int _rl_vi_domove_motion_cleanup (int, _rl_vimotion_cxt *);
+ /* Use HS_HISTORY_VERSION as the sentinel to see if we've included history.h
+    and so can use HIST_ENTRY */
+ #if defined (HS_HISTORY_VERSION)
+-extern void _rl_free_history_entry (HIST_ENTRY *); 
++extern void _rl_free_history_entry (HIST_ENTRY *);
+ #endif
+ 
+ /*************************************************************************
+diff --git a/lib/readline/signals.c b/lib/readline/signals.c
+index ecaf699e..cd1a579b 100644
+--- a/lib/readline/signals.c
++++ b/lib/readline/signals.c
+@@ -266,6 +266,9 @@ _rl_handle_signal (int sig)
+     case SIGQUIT:
+ #endif
+ 
++      if (sig == SIGALRM)
++	_rl_timeout_handle_sigalrm ();
++
+ #if defined (HAVE_POSIX_SIGNALS)
+       if (block_sig)
+ 	sigprocmask (SIG_BLOCK, &set, &oset);
+diff --git a/lib/sh/zread.c b/lib/sh/zread.c
+index 71a06a76..06620661 100644
+--- a/lib/sh/zread.c
++++ b/lib/sh/zread.c
+@@ -46,6 +46,7 @@ extern int executing_builtin;
+ extern void check_signals_and_traps (void);
+ extern void check_signals (void);
+ extern int signal_is_trapped (int);
++extern int do_timeout (int);
+ 
+ /* Read LEN bytes from FD into BUF.  Retry the read on EINTR.  Any other
+    error causes the loop to break. */
+@@ -58,7 +59,8 @@ zread (fd, buf, len)
+   ssize_t r;
+ 
+   check_signals ();	/* check for signals before a blocking read */
+-  while ((r = read (fd, buf, len)) < 0 && errno == EINTR)
++  while (((r = do_timeout (fd)) < 0
++      || (r = read (fd, buf, len)) < 0) && errno == EINTR)
+     {
+       int t;
+       t = errno;
+diff --git a/quit.h b/quit.h
+index db8a776b..887d2b91 100644
+--- a/quit.h
++++ b/quit.h
+@@ -38,12 +38,6 @@ extern volatile sig_atomic_t terminating_signal;
+     if (interrupt_state) throw_to_top_level (); \
+   } while (0)
+ 
+-#define CHECK_ALRM \
+-  do { \
+-    if (sigalrm_seen) \
+-      sh_longjmp (alrmbuf, 1); \
+-  } while (0)
+-
+ #define SETINTERRUPT interrupt_state = 1
+ #define CLRINTERRUPT interrupt_state = 0
+ 
+diff --git a/trap.c b/trap.c
+index 1b27fb3a..9c3db84a 100644
+--- a/trap.c
++++ b/trap.c
+@@ -587,7 +587,7 @@ clear_pending_traps ()
+ void
+ check_signals ()
+ {
+-  CHECK_ALRM;		/* set by the read builtin */
++  check_timeout (); /* check timeout set by the read builtin */
+   QUIT;
+ }
+ 
+-- 
+2.21.3
+

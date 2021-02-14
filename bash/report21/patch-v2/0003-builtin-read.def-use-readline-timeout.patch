@@ -1,0 +1,130 @@
+From 35c1bb1e3c5080604ffd1a8d9a0e366e86d3d698 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 12 Feb 2021 12:05:30 +0900
+Subject: [PATCH 3/4] builtin/read.def: use readline timeout
+
+---
+ builtins/read.def | 39 ++++++++++++++++++++++++++-------------
+ 1 file changed, 26 insertions(+), 13 deletions(-)
+
+diff --git a/builtins/read.def b/builtins/read.def
+index a9ef61f1..feebfca2 100644
+--- a/builtins/read.def
++++ b/builtins/read.def
+@@ -72,6 +72,7 @@ $END
+ 
+ #include "bashtypes.h"
+ #include "posixstat.h"
++#include "posixselect.h"
+ 
+ #include <stdio.h>
+ 
+@@ -89,10 +90,6 @@ $END
+ #  include <io.h>
+ #endif
+ 
+-#if defined (USE_SELECT_FOR_READ_TIMEOUT)
+-#  include <sys/select.h>
+-#endif
+-
+ #include "../bashintl.h"
+ 
+ #include "../shell.h"
+@@ -142,6 +139,7 @@ static sighandler sigalrm PARAMS((int));
+ static void set_timeout PARAMS((unsigned int, unsigned int));
+ static void reset_timeout PARAMS((void));
+ static void cleanup_timeout PARAMS((void));
++static void handle_timeout PARAMS((void));
+ int is_timeout_reached PARAMS((void));
+ int do_timeout PARAMS((int));
+ void check_timeout PARAMS((void));
+@@ -171,12 +169,14 @@ set_timeout (unsigned int tmsec, unsigned int tmusec)
+     }
+   tmout_time.tv_sec += tmsec;
+   tmout_time.tv_usec += tmusec;
+-  if (tmout_time.tv_usec >= 1000000)
++  if (tmout_time.tv_usec >= USEC_PER_SEC)
+     {
+-      tmout_time.tv_sec++;
+-      tmout_time.tv_usec -= 1000000;
++      tmout_time.tv_sec += tmout_time.tv_usec / USEC_PER_SEC;
++      tmout_time.tv_usec %= USEC_PER_SEC;
+     }
+-  return 0;
++#if defined (READLINE)
++  rl_timeout (tmsec, tmusec);
++#endif
+ }
+ 
+ static void
+@@ -190,6 +190,9 @@ cleanup_timeout ()
+ {
+   tmout_time.tv_sec = 0;
+   tmout_time.tv_usec = 0;
++#if defined (READLINE)
++  rl_timeout (0, 0);
++#endif
+ }
+ 
+ int
+@@ -227,7 +230,7 @@ do_timeout (int fd)
+     current_time.tv_sec > tmout_time.tv_sec ||
+     (current_time.tv_sec == tmout_time.tv_sec &&
+       current_time.tv_usec >= tmout_time.tv_usec))
+-    sh_longjmp (alrmbuf, 1);
++    handle_timeout();
+ 
+   /* Call select with timeout */
+   FD_ZERO (&readfds);
+@@ -237,14 +240,14 @@ do_timeout (int fd)
+   if (current_time.tv_usec > tmout_time.tv_usec)
+     {
+       timeout.tv_sec--;
+-      timeout.tv_usec += 1000000;
++      timeout.tv_usec += USEC_PER_SEC;
+     }
+   r = select (fd + 1, &readfds, NULL, NULL, &timeout);
+ 
+   if (r < 0)
+     return r; /* Error: select sets errno. */
+   else if (r == 0)
+-    sh_longjmp (alrmbuf, 1);
++    handle_timeout();
+   else
+     return 0;
+ }
+@@ -302,11 +305,17 @@ do_timeout (int fd)
+ }
+ #endif
+ 
++static void
++handle_timeout ()
++{
++  sh_longjmp (alrmbuf, 1);
++}
++
+ void
+ check_timeout ()
+ {
+   if (is_timeout_reached())
+-    sh_longjmp (alrmbuf, 1);
++    handle_timeout();
+ }
+ 
+ /* Read the value of the shell variables whose names follow.
+@@ -1300,7 +1309,11 @@ edit_line (p, itext)
+   bashline_reset_event_hook ();
+ 
+   if (ret == 0)
+-    return ret;
++    {
++      if (RL_ISSTATE (RL_STATE_TIMEOUT))
++	handle_timeout ();
++      return ret;
++    }
+   len = strlen (ret);
+   ret = (char *)xrealloc (ret, len + 2);
+   ret[len++] = delim;
+-- 
+2.21.3
+

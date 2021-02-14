@@ -1,0 +1,334 @@
+From 900ebf35496c2cd7a4714db85f8552cbd349ac8b Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sun, 14 Feb 2021 13:30:49 +0900
+Subject: [PATCH 5/7] introduce _rl_timeout_select
+
+---
+ lib/readline/input.c     | 140 +++++++++++++++++++++++----------------
+ lib/readline/parens.c    |   8 +--
+ lib/readline/rlprivate.h |  15 ++++-
+ 3 files changed, 100 insertions(+), 63 deletions(-)
+
+diff --git a/lib/readline/input.c b/lib/readline/input.c
+index 916db327..469c49cb 100644
+--- a/lib/readline/input.c
++++ b/lib/readline/input.c
+@@ -153,12 +153,11 @@ int rl_timeout_remaining (unsigned int *, unsigned int *);
+ /* Readline-local functions */
+ int _rl_timeout_initialize ();
+ int _rl_timeout_handle_sigalrm (void);
++int _rl_timeout_select(int, fd_set *, fd_set *, fd_set *,
++  const _rl_timeval *, const sigset_t *);
+ 
+ /* File-local functions and variables */
+-#if defined (RL_TIMEOUT_USE_SELECT)
+-static int _rl_timeout_wait (int, const sigset_t *);
+ static void _rl_timeout_handle (void);
+-#endif
+ #if defined (RL_TIMEOUT_USE_SIGALRM)
+ static int set_alarm (unsigned int *, unsigned int *);
+ static void reset_alarm (void);
+@@ -248,22 +247,22 @@ rl_gather_tyi (void)
+   register int tem, result;
+   int chars_avail, k;
+   char input;
+-#if defined(HAVE_SELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+   fd_set readfds, exceptfds;
+-  struct timeval timeout;
++  _rl_timeval timeout;
+ #endif
+ 
+   chars_avail = 0;
+   input = 0;
+   tty = fileno (rl_instream);
+ 
+-#if defined (HAVE_SELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+   FD_ZERO (&readfds);
+   FD_ZERO (&exceptfds);
+   FD_SET (tty, &readfds);
+   FD_SET (tty, &exceptfds);
+-  USEC_TO_TIMEVAL (_keyboard_input_timeout, timeout);
+-  result = select (tty + 1, &readfds, (fd_set *)NULL, &exceptfds, &timeout);
++  USEC_TO_RLTIMEVAL (_keyboard_input_timeout, timeout);
++  result = _rl_timeout_select (tty + 1, &readfds, (fd_set *)NULL, &exceptfds, &timeout, NULL);
+   if (result <= 0)
+     return 0;	/* Nothing to read. */
+ #endif
+@@ -364,11 +363,10 @@ rl_set_keyboard_input_timeout (int u)
+ int
+ _rl_input_available (void)
+ {
+-#if defined(HAVE_SELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+   fd_set readfds, exceptfds;
+-  struct timeval timeout;
+-#endif
+-#if !defined (HAVE_SELECT) && defined(FIONREAD)
++  _rl_timeval timeout;
++#elif defined(FIONREAD)
+   int chars_avail;
+ #endif
+   int tty;
+@@ -378,19 +376,17 @@ _rl_input_available (void)
+ 
+   tty = fileno (rl_instream);
+ 
+-#if defined (HAVE_SELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+   FD_ZERO (&readfds);
+   FD_ZERO (&exceptfds);
+   FD_SET (tty, &readfds);
+   FD_SET (tty, &exceptfds);
+-  USEC_TO_TIMEVAL (_keyboard_input_timeout, timeout);
+-  return (select (tty + 1, &readfds, (fd_set *)NULL, &exceptfds, &timeout) > 0);
+-#else
++  USEC_TO_RLTIMEVAL (_keyboard_input_timeout, timeout);
++  return (_rl_timeout_select (tty + 1, &readfds, (fd_set *)NULL, &exceptfds, &timeout, NULL) > 0);
+ 
+-#if defined (FIONREAD)
++#elif defined (FIONREAD)
+   if (ioctl (tty, FIONREAD, &chars_avail) == 0)
+     return (chars_avail);
+-#endif
+ 
+ #endif
+ 
+@@ -631,47 +627,78 @@ rl_timeout_remaining (unsigned int *secs, unsigned int *usecs)
+   return 1;
+ }
+ 
+-#if defined (RL_TIMEOUT_USE_SELECT)
+-static int
+-_rl_timeout_wait (int fd, const sigset_t *sigmask)
++int
++_rl_timeout_select (
++  int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
++  const _rl_timeval * timeout, const sigset_t *sigmask)
+ {
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+   int result;
+-  unsigned int secs, usecs;
+-#if defined (HAVE_PSELECT)
+-  struct timespec *timeout, timeout_buff;
+-#else
+-  struct timeval *timeout, timeout_buff;
+-#endif
+-  fd_set readfds;
++#  if defined (HAVE_PSELECT)
++  struct timespec ts;
++#  else
+   sigset_t origmask;
++  struct timeval tv;
++#  endif
++#  if defined (RL_TIMEOUT_USE_SELECT)
++  int rltmout_status;
++  _rl_timeval rltmout;
++#  endif
+ 
+-  timeout = NULL;
+-  result = rl_timeout_remaining (&secs, &usecs);
+-  if (result == 0)
+-    return 0; // timedout
+-  if (result == 1)
++#  if defined (RL_TIMEOUT_USE_SELECT)
++  /* When the remaining time for rl_timeout is shorter than the
++     keyboard input timeout, replace `timeout' with the remaining time
++     for `rl_timeout' and set `rltmout_status = 1'. */
++  rltmout_status = rl_timeout_remaining (&rltmout.sec, &rltmout.usec);
++  if (rltmout_status == 0)
++    _rl_timeout_handle ();
++  else if (rltmout_status == 1)
+     {
+-      timeout_buff.tv_sec = secs;
+-#if defined (HAVE_PSELECT)
+-      timeout_buff.tv_nsec = usecs * 1000;
+-#else
+-      timeout_buff.tv_usec = usecs;
+-#endif
+-      timeout = &timeout_buff;
++      if (timeout == NULL ||
++	rltmout.sec < timeout->sec ||
++	(rltmout.sec == timeout->sec &&
++	  rltmout.usec < timeout->usec))
++	timeout = &rltmout;
++      else
++	rltmout_status = -1;
+     }
++#  endif
+ 
+-  FD_ZERO (&readfds);
+-  FD_SET (fd, &readfds);
+-#if defined (HAVE_PSELECT)
+-  result = pselect (fd + 1, &readfds, NULL, NULL, timeout, sigmask);
+-#else
++#  if defined (HAVE_PSELECT)
++  if (timeout)
++    {
++      ts.tv_sec = timeout->sec;
++      ts.tv_nsec = timeout->usec * 1000;
++      result = pselect (nfds, readfds, writefds, exceptfds, &ts, sigmask);
++    }
++  else
++    result = pselect (nfds, readfds, writefds, exceptfds, NULL, sigmask);
++#  else
+   if (sigmask)
+     sigprocmask (SIG_SETMASK, sigmask, &origmask);
+-  result = select (fd + 1, &readfds, NULL, NULL, timeout);
++
++  if (timeout)
++    {
++      tv.tv_sec = timeout->sec;
++      tv.tv_usec = timeout->usec;
++      result = select (nfds, readfds, writefds, exceptfds, &tv);
++    }
++  else
++    result = select (nfds, readfds, writefds, exceptfds, NULL);
++
+   if (sigmask)
+     sigprocmask (SIG_SETMASK, &origmask, NULL);
+-#endif
++#  endif
++
++#  if defined (RL_TIMEOUT_USE_SELECT)
++  if (rltmout_status == 1 && result == 0)
++    _rl_timeout_handle ();
++#  endif
+   return result;
++#else /* !(defined (HAVE_PSELECT) || defined (HAVE_SELECT)) */
++  /* Always success */
++  return nfds;
++#endif
+ }
+ 
+ static void
+@@ -683,7 +710,6 @@ _rl_timeout_handle ()
+   RL_SETSTATE(RL_STATE_TIMEOUT);
+   _rl_abort_internal ();
+ }
+-#endif
+ 
+ int
+ _rl_timeout_handle_sigalrm ()
+@@ -701,16 +727,11 @@ _rl_timeout_handle_sigalrm ()
+     }
+   reset_alarm ();
+ 
+-  if (rl_timeout_event_hook)
+-    (*rl_timeout_event_hook) ();
+-
+-  RL_SETSTATE(RL_STATE_TIMEOUT);
+-  _rl_abort_internal ();
++  _rl_timeout_handle ();
+ #endif
+   return -1;
+ }
+ 
+-
+ /* **************************************************************** */
+ /*								    */
+ /*			     Character Input			    */
+@@ -773,6 +794,10 @@ rl_getc (FILE *stream)
+ {
+   int result;
+   unsigned char c;
++#if defined (RL_TIMEOUT_USE_SELECT)
++  int fd;
++  fd_set readfds;
++#endif
+ 
+   while (1)
+     {
+@@ -786,10 +811,13 @@ rl_getc (FILE *stream)
+ #endif
+       result = 0;
+ #if defined (RL_TIMEOUT_USE_SELECT)
++      fd = fileno (stream);
++      FD_ZERO (&readfds);
++      FD_SET (fd, &readfds);
+ #  if defined (HANDLE_SIGNALS)
+-      result = _rl_timeout_wait (fileno (stream), &_rl_orig_sigset);
++      result = _rl_timeout_select (fd + 1, &readfds, NULL, NULL, NULL, &_rl_orig_sigset);
+ #  else
+-      result = _rl_timeout_wait (fileno (stream), NULL);
++      result = _rl_timeout_select (fd + 1, &readfds, NULL, NULL, NULL, NULL);
+ #  endif /* HANDLE_SIGNALS */
+       if (result == 0)
+ 	_rl_timeout_handle ();
+diff --git a/lib/readline/parens.c b/lib/readline/parens.c
+index b8c5ac84..1056ba3b 100644
+--- a/lib/readline/parens.c
++++ b/lib/readline/parens.c
+@@ -114,9 +114,9 @@ rl_insert_close (int count, int invoking_key)
+     _rl_insert_char (count, invoking_key);
+   else
+     {
+-#if defined (HAVE_SELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+       int orig_point, match_point, ready;
+-      struct timeval timer;
++      _rl_timeval timer;
+       fd_set readfds;
+ 
+       _rl_insert_char (1, invoking_key);
+@@ -130,12 +130,12 @@ rl_insert_close (int count, int invoking_key)
+ 
+       FD_ZERO (&readfds);
+       FD_SET (fileno (rl_instream), &readfds);
+-      USEC_TO_TIMEVAL (_paren_blink_usec, timer);
++      USEC_TO_RLTIMEVAL (_paren_blink_usec, timer);
+ 
+       orig_point = rl_point;
+       rl_point = match_point;
+       (*rl_redisplay_function) ();
+-      ready = select (1, &readfds, (fd_set *)NULL, (fd_set *)NULL, &timer);
++      ready = _rl_timeout_select (1, &readfds, (fd_set *)NULL, (fd_set *)NULL, &timer, NULL);
+       rl_point = orig_point;
+ #else /* !HAVE_SELECT */
+       _rl_insert_char (count, invoking_key);
+diff --git a/lib/readline/rlprivate.h b/lib/readline/rlprivate.h
+index 86ddaa77..92efd917 100644
+--- a/lib/readline/rlprivate.h
++++ b/lib/readline/rlprivate.h
+@@ -26,6 +26,7 @@
+ #include "rlconf.h"	/* for VISIBLE_STATS */
+ #include "rlstdc.h"
+ #include "posixjmp.h"	/* defines procenv_t */
++#include "posixselect.h"	/* for USEC_PER_SEC */
+ #include "rlmbutil.h"	/* for HANDLE_MULTIBYTE */
+ 
+ /*************************************************************************
+@@ -181,11 +182,17 @@ typedef int _rl_callback_func_t (_rl_callback_generic_arg *);
+ typedef void _rl_sigcleanup_func_t (int, void *);
+ 
+ /*************************************************************************
+- *									 *
+- * Global functions undocumented in texinfo manual and not in readline.h *
+- *									 *
++ * Undocumented private structs						 *
+  *************************************************************************/
+ 
++/* input.c */
++typedef struct __rl_timeval { unsigned int sec, usec; } _rl_timeval;
++#define USEC_TO_RLTIMEVAL(us, tv) \
++do { \
++  (tv).sec = (us) / USEC_PER_SEC; \
++  (tv).usec = (us) % USEC_PER_SEC; \
++} while (0)
++
+ /*************************************************************************
+  *									 *
+  * Global variables undocumented in texinfo manual and not in readline.h *
+@@ -302,6 +309,8 @@ extern int _rl_unget_char (int);
+ extern int _rl_pushed_input_available (void);
+ extern int _rl_timeout_initialize (void);
+ extern int _rl_timeout_handle_sigalrm (void);
++extern int _rl_timeout_select (int, fd_set *, fd_set *, fd_set *,
++  const _rl_timeval *, const sigset_t *);
+ 
+ /* isearch.c */
+ extern _rl_search_cxt *_rl_scxt_alloc (int, int);
+-- 
+2.21.3
+
