@@ -1,0 +1,36 @@
+From 021b804b351bd6fe967f7c09a46b40b469fd48c7 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Tue, 16 Feb 2021 01:36:09 +0900
+Subject: [PATCH 6/8] lib/readline/input.c (rl_getc): explictly specify the
+ default sigmask
+
+---
+ lib/readline/input.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/lib/readline/input.c b/lib/readline/input.c
+index 469c49cb..171b1217 100644
+--- a/lib/readline/input.c
++++ b/lib/readline/input.c
+@@ -797,6 +797,7 @@ rl_getc (FILE *stream)
+ #if defined (RL_TIMEOUT_USE_SELECT)
+   int fd;
+   fd_set readfds;
++  sigset_t empty_set;
+ #endif
+ 
+   while (1)
+@@ -817,7 +818,9 @@ rl_getc (FILE *stream)
+ #  if defined (HANDLE_SIGNALS)
+       result = _rl_timeout_select (fd + 1, &readfds, NULL, NULL, NULL, &_rl_orig_sigset);
+ #  else
+-      result = _rl_timeout_select (fd + 1, &readfds, NULL, NULL, NULL, NULL);
++      sigemptyset (&empty_set);
++      sigprocmask (SIG_BLOCK, (sigset_t *)NULL, &empty_set);
++      result = _rl_timeout_select (fd + 1, &readfds, NULL, NULL, NULL, &empty_set);
+ #  endif /* HANDLE_SIGNALS */
+       if (result == 0)
+ 	_rl_timeout_handle ();
+-- 
+2.21.3
+
