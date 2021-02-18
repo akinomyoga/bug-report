@@ -1,0 +1,27 @@
+From 90276db404e1b5b00204ca99d21ab46de000f884 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Tue, 16 Feb 2021 23:47:06 +0900
+Subject: [PATCH] accept reserved words after arithmetic/condtional commands
+
+---
+ parse.y | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/parse.y b/parse.y
+index ab256e77..a44fb350 100644
+--- a/parse.y
++++ b/parse.y
+@@ -5473,8 +5473,10 @@ reserved_word_acceptable (toksym)
+     case '{':
+     case '}':		/* XXX */
+     case AND_AND:
++    case ARITH_CMD:
+     case BANG:
+     case BAR_AND:
++    case COND_END:
+     case DO:
+     case DONE:
+     case ELIF:
+-- 
+2.21.3
+

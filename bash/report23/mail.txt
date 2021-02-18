@@ -1,0 +1,82 @@
+
+-------------------------------------------------------------------------------
+
+2021年2月16日(火) 21:41 Oğuz <oguzismailuysal@gmail.com>:
+>> 2021年2月16日(火) 19:24 Oğuz <oguzismailuysal@gmail.com>:
+>> > XRAT Shell Grammar (
+>> > https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_xcu_chap02.html#tag_23_02_10
+>> > ) explains that giving almost the same examples as we posted in
+>> > this thread.
+>>
+>> Thank you, interesting! So, if I understand correctly, the following
+>> construct which Bash allows is finally disallowed by POSIX?
+>>
+>> $ if (false) then (echo x) else (echo y) fi
+>
+> No, it is allowed.
+
+OK, I have again checked the page. I haven't read the latter half of
+the section.  The special rule is
+
+XCU 2.10.2/(1) Shell Grammar Rules [Command Name]
+> When the TOKEN is exactly a reserved word, the token identifier for
+> that reserved word shall result. Otherwise, the token WORD shall be
+> returned. Also, if the parser is in any state where only a reserved
+> word could be the next correct token, proceed as above.
+
+It seems like XCU 2.4 is telling lie..., or at least some important
+information is missing.  Is XCU 2.4 just informative texts?  Instead,
+is XCU 2.10 solely the actual normative requirements for the shell
+grammar?
+
+The above special rule means that
+
+  $ if [[ str ]] then [[ str ]] fi
+  $ if ((expr)) then ((expr)) fi
+
+should also be acceped as valid constructs.  Other shells parses them,
+but Bash fails:
+
+  $ bash -c 'if [[ str ]] then [[ str ]] fi'; echo $?
+  bash: -c: line 0: syntax error near unexpected token `then'
+  bash: -c: line 0: `if [[ str ]] then [[ str ]] fi'
+  1
+  $ zsh -c 'if [[ str ]] then [[ str ]] fi'; echo $?
+  0
+  $ ksh -c 'if [[ str ]] then [[ str ]] fi'; echo $?
+  0
+  $ yash -c 'if [[ str ]] then [[ str ]] fi'; echo $?
+  0
+
+  $ bash -c 'if ((expr)) then ((expr)) fi'; echo $?
+  bash: -c: line 0: syntax error near unexpected token `then'
+  bash: -c: line 0: `if ((expr)) then ((expr)) fi'
+  1
+  $ zsh -c 'if ((expr)) then ((expr)) fi'; echo $?
+  0
+  $ ksh -c 'if ((expr)) then ((expr)) fi'; echo $?
+  0
+
+  Note: yash doesn't support arithmetic commands.
+
+Maybe Bash could insist that [[ ... ]] and ((...)) are not part of the
+standard so that it can behave inconsistently.  But it seems to me
+that there is really no reason to behave inconsistently here.
+
+--
+Koichi
+
+-------------------------------------------------------------------------------
+
+case_clause
+-> Case WORD linebreak in linebreak case_list Esac
+-> Case 'x' ε in ε case_list Esac
+-> Case 'x' ε in ε case_item_ns Esac
+-> Case 'x' ε in ε '(' pattern ')' compound_list Esac
+-> Case 'x' ε in ε '(' 'x' ')' linebreak term Esac
+-> Case 'x' ε in ε '(' 'x' ')' ε and_or Esac
+-> Case 'x' ε in ε '(' 'x' ')' ε pipeline Esac
+-> Case 'x' ε in ε '(' 'x' ')' ε pipe_sequence Esac
+-> Case 'x' ε in ε '(' 'x' ')' ε command Esac
+-> Case 'x' ε in ε '(' 'x' ')' ε compound_command Esac
+-> Case 'x' ε in ε '(' 'x' ')' ε if_clause Esac

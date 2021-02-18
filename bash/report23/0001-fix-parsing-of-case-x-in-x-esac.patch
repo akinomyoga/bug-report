@@ -1,0 +1,25 @@
+From 6b3f6615e44051d092fd7016e5682759b1e99bd6 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sun, 14 Feb 2021 17:47:54 +0900
+Subject: [PATCH] fix parsing of $(case x in (x) esac)
+
+---
+ parse.y | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/parse.y b/parse.y
+index ab256e77..67e5d2cf 100644
+--- a/parse.y
++++ b/parse.y
+@@ -4185,7 +4185,7 @@ eof_error:
+ 	      lex_rwlen = 0;
+ 	      continue;
+ 	    }
+-	  else if (ch == '\n' || COMSUB_META(ch))
++	  else if (ch == '\n' || COMSUB_META(ch) || (ch == ')' && close == ')' && (tflags & LEX_INCASE) != 0))
+ 	    {
+ 	      shell_ungetc (peekc);
+ /*itrace("parse_comsub:%d: set lex_reswordok = 1, ch = `%c'", line_number, ch);*/
+-- 
+2.21.3
+
