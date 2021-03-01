@@ -239,6 +239,68 @@
   Done
 -------------------------------------------------------------------------------
 
+2021-03-01
+
+* 2021-02-08 report21: Chet の Review 待ち [#D0024]
+
+  これは結局 Chet が新しく追加した timeout.h を使って書き直した
+  version が push された。
+
+* 2021-02-08 report21: Copyright assignment をせよとの事 [#D0023]
+
+  https://www.gnu.org/licenses/why-assign.ja.html
+  https://www.gnu.org/prep/maintain/html_node/Copyright-Papers.html
+
+  テンプレートは以下にある。
+
+  https://git.savannah.gnu.org/cgit/gnulib.git/tree/doc/Copyright
+
+  何故か request-assign.program と request-assign.future で宛先が異な
+  る。情報が古いのだろうか。或いは管轄が異なるのだろうか。両方に送って
+  みたが future の方しか返事がない。或いは、future は program を含んで
+  いるので余計に assign する必要はないと判断されて future だけ返事が来
+  たのだろうか。
+
+  何れにしてもサインして送った。検索すると FSF の Copyright assignment
+  には賛否両論がある様だ。FSF はちょっと過激な団体なので色々微妙かもし
+  れないが、まあ、Bash で将来どうのこうのするという予定はないので大丈
+  夫だろう。
+
+  それから新しい Copyright Assignment についてアナウンスしても良いかと
+  いう質問があったので OK と返答しておいた。
+
+  microbloggin と言っているので調べたが恐らく GNU Social の様だ。調べ
+  ると個人でやっているサーバーばかりで、自分でサーバーを建てる程でもな
+  いし、知らない人の個人サーバーにアカウントを作る気もならない。そもそ
+  も FSF は他人を信用しないので個人サーバーなのだろう。寧ろ大企業が大
+  規模インスタンスを作ってる Mastodon の状況がおかしいのである。そして
+  FSF が GNU Social で垂れ流している情報は恐らく以下のページで並んでい
+  る物だろうと。。
+
+  https://status.fsf.org/fsf
+
+  Copyright assignment した人がいるとメッセージが機械的に流されている。
+  味気も何もない物である。そして次から次へと流れている。多分、誰か偉い
+  人が確認している訳でもないし、それどころか誰も気にしていない。これな
+  ら別に了承しなくても良かった気がする。
+
+  2021-02-26 copyright assignment のサイン付きの返事を貰った。というか、
+  明らかに機械的に挿入されたサインである。こんなので良いのだろうか。
+
+  > To check whether papers have been received, look in
+  > /gd/gnuorg/copyright.list.  If you can’t look there directly,
+  > fsf-records@gnu.org can check for you.  Our clerk can also check for
+  > papers that are waiting to be entered and inform you when expected
+  > papers arrive.
+  >
+  > The directory /gd/gnuorg mentioned throughout this document is
+  > available on the general GNU server, currently fencepost.gnu.org.
+  > If you are the maintainer of a GNU package, you should have an
+  > account there.  If you don't have one already, see
+  > https://www.gnu.org/software/README.accounts.html.  Such GNU login
+  > accounts include email (see
+  > https://www.fsf.org/about/systems/sending-mail-via-fencepost).
+
 2021-02-15
 
 * report21: Chet から readline の方も修正が必要との事。確かにそうだ [#D0022]
