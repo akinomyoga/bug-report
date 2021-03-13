@@ -1,3 +1,52 @@
+
+
+----------------------------------------------------------------------
+2021-03-13 string special unescape [#H0004]
+https://lists.gnu.org/archive/html/help-bash/2021-03/msg00047.html
+
+% function unescape-pengyu-encoding {
+%   local a b s=$1 cleanup=
+%   if ! shopt -q extglob; then
+%     shopt -s extglob
+%     cleanup='shopt -u extglob'
+%   fi
+%
+%   a='\' b='\z'  s=${s//"$a"?("$a")/$b}
+%   a='\n' b=$'\n' s=${s//$a/$b}
+%   a='\t' b=$'\t' s=${s//$a/$b}
+%   a='\z' b='\'   s=${s//$a/$b}
+%   result=$s
+%
+%   eval "$cleanup"
+% }
+%
+% これで行けるのではないかと思ったが、元から \z が含まれている場合に動か
+% ない。
+
+function unescape-helpbash202103-47 {
+  local s=$1
+  s=${s//z/z0}
+  s=${s//'\\'/z1}
+  s=${s//'\n'/$'\n'}
+  s=${s//'\t'/$'\t'}
+  s=${s//z1/'\'}
+  s=${s//z0/z}
+  result=$s
+}
+unescape-helpbash202103-47 '\\n'; x=$result
+declare -p x | cat -v
+
+
+これでうまく行くという事の証拠はあるか。
+
+初めの二つの処理によって単体の z は全て z0 になり、他に z1 が含まれる
+様になる。つまり z の後には必ず 0 または 1 が存在する状態である。更に、
+偶数個の \ は全て z1...z1 に変換されて、奇数個の \ は z1...z1\ になる。
+つまり、全ての \ は \\ 以外の形になる。なので安全に \n 及び \t を変換
+すれば良くなる。
+
+大丈夫の気がする。
+
 ----------------------------------------------------------------------
 2021-02-07 Bash minifiers [H0003]
 
