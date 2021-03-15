@@ -1,4 +1,26 @@
+2021-03-13 [#H0005]
+https://lists.gnu.org/archive/html/help-bash/2021-03/msg00097.html
 
+何が言いたいのか分からない。
+
+> Why this part is separated from the previous line with a newline?
+> According to your explanation, the newline functions as a period, but
+> in this case "where ..." describes the previous word "street spoken
+> language" unlike the one which has the same literal structure "where
+> else do the quotes get interpreted, can you write a short list?" in
+> the original post.
+> 
+> よく見たら文の構造が微妙に違う。OP の where は疑問文であると分かる構造
+> をしている。今回の where は後に続く部分が文を為しているので修飾と分か
+> る。じゃあ改行は入れるべきではないのではないかと言えるかもしれない。然
+> し、口語的に考えたら後で細くしようと思って新しい文で前回の続き的に話し
+> 出す事はあるだろう。という事を考えると余り強くも言えない。
+> 
+> 
+>     I tried to modify `declare -p' again and noticed that I can
+>     include quotes inside the declare assignments of the form `declare
+>     [-opts] "$res"'. Could you briefly list up other places where the
+>     quotes get interpreted?
 
 ----------------------------------------------------------------------
 2021-03-13 string special unescape [#H0004]
