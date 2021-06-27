@@ -1,0 +1,22 @@
+
+
+- changed lib/sh/unicode.c
+- changed expr.c
+- changed bashline.c
+- changed lib/readline/bind.c
+- changed builtins/bind.def:
+- changed hashlib.c:
+- changed parse.y
+- changed config-bot.h
+- changed quit.h
+- changed trap.c
+- changed lib/sh/zread.c
+- changed builtins/common.h
+- changed builtins/read.def
+- changed lib/readline/rlprivate.h
+- changed lib/readline/signals.c
+- changed lib/readline/readline.c
+- changed lib/readline/readline.h
+- changed lib/readline/callback.c
+- changed lib/readline/input.c
+- changed lib/readline/parens.c
