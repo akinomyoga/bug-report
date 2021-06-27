@@ -4,6 +4,19 @@
   Memo
 ------------------------------------------------------------------------------
 
+2021-05-11
+
+* fish は全然いい言語ではないという事
+
+  https://www.oilshell.org/blog/2021/01/why-a-new-shell.html#whats-the-difference-between-oil-and-fish
+  https://github.com/pirate/fish-utils/blob/master/README.md
+
+  様々な人が自分のシェルを作っている
+  https://github.com/oilshell/oil/wiki/Alternative-Shells
+  https://github.com/oilshell/oil/wiki/ExternalResources#posix-shells
+  POSIX list にも何か自分のシェルを作っている人が居た。
+
+
 2020-05-15
 
 * ${ list; } に対応するには何処をどうすれば良いのか。
@@ -209,6 +222,25 @@
 ------------------------------------------------------------------------------
   Bugs
 ------------------------------------------------------------------------------
+
+2021-05-25
+
+* set -e; builtin eval false || true で駄目になるという事
+
+  この問題は実は report20 のすぐ上で起こっている問題で起こっている原因も似たよ
+  うな物である様に思われる。実装を見てみると eval/source/command の場合に
+  parse_and_execute を呼び出す事によって set -e の効果が回復してしまうのを、
+  前後で状態を保存する事によって防いでいる様である。
+
+  ? この実装方法だと他にも問題が生じる様な気がする。eval の内部で set -e した効
+    果が外に現れないのではないだろうか。或いはコマンドが終わる度に -e が設定し
+    直されるのだろうか。
+
+    $ eval set -e; false; true   # OK
+    $ set -e; eval set +e; false # OK
+
+    これらはちゃんと期待される動作をしている。何故だろうか。実装の詳細がよく分
+    からない。
 
 2021-02-08
 

@@ -1,15 +1,63 @@
 # bash
 
+## Reports/Fixes
 
-- report24: 古いOSでコンパイルできないとの報告に対する返答 [No mention]
+- report1: "`builtin printf '\uFF8E'`" generates broken surrogate pairs in Cygwin
+  - https://lists.gnu.org/archive/html/bug-bash/2016-11/msg00039.html
+- report2: In `((0? var: 0))`, expressions stored in var are evaluated
+  - https://lists.gnu.org/archive/html/bug-bash/2016-11/msg00050.html
+- report3: fix a bug that "`bind -r`" sometimes causes a segmentation fault
+  - https://lists.gnu.org/archive/html/bug-bash/2018-03/msg00155.html
+- report4: fix a bug that `bind -x '"\C-@": unix-command'` does not work
+  - https://lists.gnu.org/archive/html/bug-bash/2018-03/msg00165.html
+- report5: READLINE_POINT with multibyte locales
+  - https://lists.gnu.org/archive/html/bug-bash/2018-04/msg00040.html
+- report6: `bind -x` inside `bind -x` bindings
+  - https://lists.gnu.org/archive/html/bug-bash/2018-05/msg00020.html
+- report7: Switch vi-insert TAB bindings only for the default bindings
+  - https://lists.gnu.org/archive/html/bug-bash/2019-02/msg00035.html
+- report8: Fix a broken unwind frame on `builtin bind --help`
+  - https://lists.gnu.org/archive/html/bug-bash/2019-02/msg00033.html
+- report9: Fix a bug that `bind -x '"metachar":command'` fails when rl-variable `convert-meta` is `on`
+  - https://lists.gnu.org/archive/html/bug-bash/2019-02/msg00036.html
+- report10: Support `bind -x` for different keymaps
+  - https://lists.gnu.org/archive/html/bug-bash/2019-02/msg00038.html
+- report11: Fix a problem that shadow `bind -x` does not work
+  - https://lists.gnu.org/archive/html/bug-bash/2019-12/msg00063.html
+- report12: Fix a problem `rl_bind_key` cannot create shadow binding for `C-@`
+  - https://lists.gnu.org/archive/html/bug-bash/2019-12/msg00067.html
+- report13: Fix a problem that shadow `bind -x` is not removed from `bind -X`
+  - https://lists.gnu.org/archive/html/bug-bash/2019-12/msg00065.html
+- report14: Resolve inconsisteny of keyseq representation of `\C-\\` (0x5c)
+  - https://lists.gnu.org/archive/html/bug-bash/2020-01/msg00037.html
+- report15: Exit status by no-argument `return` for function calls in trap handlers
+  - https://lists.gnu.org/archive/html/bug-bash/2020-04/msg00089.html
+  - ■結局この問題は pending である
+- report16: Implement rehashing for associative arrays (Re: speeding up hash_search?)
+  - https://lists.gnu.org/archive/html/bug-bash/2020-04/msg00121.html
+- report17: How to use PROMPT_COMMAND(S) without breaking other scripts
+  - https://lists.gnu.org/archive/html/bug-bash/2020-08/msg00122.html
+- report18: Bash 5.0+: Fix a problem that interactive sessions close with `eval {`
+  - https://lists.gnu.org/archive/html/bug-bash/2020-08/msg00152.html
+- report19: Fix segfault with self-modifying array PROMPT_COMMAND
+  - https://lists.gnu.org/archive/html/bug-bash/2020-08/msg00198.html
+- report20: ■builtin eval pipeline の中で tempenv が消える
+- report21: read timeout を select/pselect を使って再実装
+  - https://lists.gnu.org/archive/html/bug-bash/2021-02/msg00059.html
+- report22: ■trap handler の中で jobs を実行すると偽情報が表示される
+- report23: [reply] $(case esac) に関連する問題
+  - https://lists.gnu.org/archive/html/bug-bash/2021-02/msg00097.html
+  - 関連 https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00097.html by Chet `parse_comsub` 再実装
+- report24: [reply] 古いOSでコンパイルできないとの報告に対する返答 [No mention]
   - https://lists.gnu.org/archive/html/bug-bash/2021-05/msg00088.html
 - report25: mapfile の高速化に関して
   - https://lists.gnu.org/archive/html/bug-bash/2021-05/msg00001.html
   - https://lists.gnu.org/archive/html/bug-bash/2021-05/msg00006.html
   - https://lists.gnu.org/archive/html/bug-bash/2021-05/msg00011.html
-  - ToDo: Cygwin については未だ遅い儘である。
+  - ToDo: ■Cygwin については未だ遅い儘である。
 - 2021-06-27 report26: 沢山の行を含む変数について `${v...}` が O(N^2) でスケールする事について
   - https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00138.html
 
+## help-bash
 
 - 2021-03-13 H0005: A. f. Ratchev の ogt に対するコメント
