@@ -1,0 +1,170 @@
+https://lists.gnu.org/archive/html/bug-bash/2021-05/msg00001.html
+
+------------------------------------------------------------------------------
+2021-05-04
+
+* 検索すると FreeBSD の mailing list で seek できるかどうか議論している。
+  https://lists.freebsd.org/pipermail/freebsd-hackers/2011-November/036863.html
+
+  通常ファイルとブロックデバイスの時には lseek で確実に判定できると思っ
+  て良いだろうか?
+
+  後、lseek が失敗した時の errno の判定をする必要はあるのだろうか。
+  EBADF の場合はそもそも続く処理で失敗するだろうから気にしなくて良い。
+  EINVAL は値が無効な時に発生する。0, SEEK_CUR だと位置が動かないから
+  駄目というデバイスも存在するかもしれない。ENXIO は SEEK_CUR を指定し
+  ている限りは発生しない。EOVERFLOW は確かに発生する可能性があるのかも
+  しれない。
+
+  従って、EOVERFLOW, EINVAL の場合には unseekable と判定する訳には行か
+  ない? 特に EINVAL によって常に unseekable になってしまう様な
+  platform だと常に unbuffered になって非効率になってしまうという事な
+  のだろう。
+
+  * 通常ファイル・ブロックデバイスの時には lseek を試した結果で seek
+    できると判定して良い。と思ったが本当だろうか。lseek が別の理由で失
+    敗した時に、何故 buffered read の儘なのだろうか。
+
+    色々不思議な点がある。結局デフォルトでは unbuffered read にして置
+    いて、lseek に成功したら buffered read に切り替える方が懸命なので
+    はないだろうか。
+
+  現在は以下の様になっている。
+
+                      | newline    | custom_delim |
+  --------------------|------------|--------------|
+  lseek成功           | buffered   | unbuffered   |
+  lseek失敗(ESPIPE)   | unbuffered | unbuffered   |
+  lseek失敗(他の理由) | buffered   | unbuffered   |
+
+  以下の様に変更する。
+
+  lseek          | newline    | custom_delim |
+  ---------------|------------|--------------|
+  成功&信用可能  | buffered   | buffered     |
+  成功&信用不能  | buffered   | unbuffered   |
+  失敗(ESPIPE)   | unbuffered | unbuffered   |
+  失敗(他の理由) | buffered   | unbuffered   |
+
+  lseek が信用できるかどうかは、__GLIBC__ || S_ISREG || S_ISBLK で判断する。
+  そもそも他の理由で失敗した時に何故 buffered にするのかというのも謎である。
+
+  うーん。やっぱり判定条件として何だか意味が分からない気がする。簡単に
+  纏めようとしたけれども困難である。また新しい変数を定義するのも憚られ
+  ると思うと簡単にするのは困難な気がする。そもそも newline の時の判定
+  が変だけれども変更しても良いのか分からないというのが問題なので、
+  newline の時にだけ判定を分けるのが自然である。
+
+  | #ifndef __CYGWIN__
+  |   if (delim == '\n')
+  |     unbuffered_read = (lseek (fd, 0L, SEEK_CUR) < 0) && (errno == ESPIPE);
+  |   else
+  |     {
+  |       int is_lseek_reliable;
+  | #ifndef __GLIBC__
+  |       struct stat st;
+  |       is_lseek_reliable = fstat (fd, &st) >= 0 &&
+  |         (S_ISREG (st.st_mode) || S_ISBLK (st.st_mode));
+  | #else
+  |       is_lseek_reliable = 1;
+  | #endif
+  |
+  |       unbuffered_read = !is_lseek_reliable || lseek (fd, 0L, SEEK_CUR) < 0;
+  |     }
+  | #else
+  |   unbuffered_read = 1;
+  | #endif
+
+  然し、これだと益々何故この様な実装になっているのか後で見た人に分から
+  ない。やはりちゃんと理解せずに編集するのは好ましくない。然しこの儘だ
+  と恐らくbash は結局 mapfile が遅い儘である。例えば、lseek が成功して
+  信頼できるのだったら、普通に buffered_read で良いのではないのか。
+  つまり、以下の様にする。こちらの方が説得力がある。
+
+  | #ifndef __CYGWIN__
+  |   if (delim == '\n')
+  |     unbuffered_read = (lseek (fd, 0L, SEEK_CUR) < 0) && (errno == ESPIPE);
+  |   else
+  |     {
+  |       struct stat st;
+  |
+  |       unbuffered_read = 1;
+  |
+  |       if (fstat (fd, &st) >= 0 &&
+  |         (S_ISREG(st.st_mode) || S_ISBLK (st.st_mode)) &&
+  |         lseek (fd, 0L, SEEK_CUR) >= 0)
+  |         unbuffered_read = 0;
+  |     }
+  | #else
+  |   unbuffered_read = 1;
+  | #endif
+
+* zsyncfd の位置が気になる。callback の前に呼び出すべきなのではないだろうか。
+
+> /* Has a callback been registered and if so is it time to call it? */
+> if (callback && line_count && (line_count % callback_quantum) == 0)
+>   {
+>     run_callback (callback, array_index, line);
+>
+>     /* Reset the buffer for bash own stream. */
+>     if (unbuffered_read == 0)
+>       zsyncfd (fd);
+>   }
+
+
+------------------------------------------------------------------------------
+2021-05-03
+
+以下の返信は書きかけたけれど、次の Chet の返信によって何故動かないかが
+判明したのでキャンセルした。
+
+| 2021年5月3日(月) 23:14 Chet Ramey <chet.ramey@case.edu>:
+| > On 5/2/21 9:51 AM, Koichi Murase wrote:
+| > > Maybe I'm asking a stupid question, but, as in the subject, why does
+| > > the builtin "mapfile -d delim" use unbuffered read when delim != '\n'?
+| >
+| > It's the shell being careful in the general case. You need to guarantee
+| > behavior in all of the cases where read(2) will not return until it sees
+| > a newline.
+|
+| Thank you for the information.  Are there any known cases that read(2)
+| blocks in this situation on some platforms?
+|
+| Since the unbuffered read is already turned on for non-seekable fd's
+| in the previous lines (builtins/mapfile.def L188), we can focus on
+| seekable fd's here.  Then, I don't have an idea what kind of seekable
+| files may affect the read(2)'s behavior for newline characters.  For
+| example, pipes may be buffered line-by-line by the sender.  TTY
+| drivers may also buffer lines or convert newline characters.  But they
+| are always not seekable as far as I know.
+|
+| Also, as far as I know, read(2) doesn't block when at least one byte
+| is available; For example, when we know that there is at least one
+| available byte in the fd using select(2), poll(2), or epoll(2), we
+| usually attempt a read(2) into a buffer of buffer_size > 1 for a
+| non-blocking read.  The read(2) doesn't block even if the available
+| data is smaller than the buffer_size but instead just fills the
+| currently available data and immediately returns.  So I guess there
+| should be no difference in blocking behavior between read(fd, &ch, 1)
+| and read(fd, &buff[0], buff_size) when we want to obtain the next
+| byte.
+|
+| For these reasons, I guess we can safely perform buffered read also
+| for non-LF delimiters, but maybe I miss something.
+|
+| > > This treatment of `mapfile' for "delim != '\n'" exists since the
+| > > mapfile delimiter is first introduced by commit 25a0eacfe "commit
+| > > bash-20140625 snapshot". Would it be a problem to change to the
+| > > buffered read also for non-LF delimiters? If we could remove the above
+| > > two lines (i.e., if (delim != '\n') unbuffered_read = 1;), I'd be very
+| > > happy...
+| >
+| > Try it out and see.
+|
+| Actually, I had already tried it in my Linux using a normal file, and
+| it seemed to work without any problems at least in that case.  But, of
+| course, that doesn't prove that it works in all the possible
+| situations (e.g., with any types of file descriptors connected to
+| files, devices, sockets, etc. in any existing operating systems).  Do
+| you have any advice on what types of file descriptors and which
+| operating systems we should include in our testing?

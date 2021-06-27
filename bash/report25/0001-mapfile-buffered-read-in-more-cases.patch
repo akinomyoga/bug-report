@@ -1,0 +1,61 @@
+From 2cab85eae0ec17e7d9b109d1943148d8e94f9adc Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Tue, 4 May 2021 14:04:55 +0900
+Subject: [PATCH] mapfile: buffered read in more cases
+
+---
+ builtins/mapfile.def | 25 +++++++++++++++++--------
+ 1 file changed, 17 insertions(+), 8 deletions(-)
+
+diff --git a/builtins/mapfile.def b/builtins/mapfile.def
+index 65c3cb4f..af725ad8 100644
+--- a/builtins/mapfile.def
++++ b/builtins/mapfile.def
+@@ -184,15 +184,24 @@ mapfile (fd, line_count_goal, origin, nskip, callback_quantum, callback, array_n
+   if (flags & MAPF_CLEARARRAY)
+     array_flush (array_cell (entry));
+ 
++  unbuffered_read = callback || line_count_goal;
++
+ #ifndef __CYGWIN__
+-  unbuffered_read = (lseek (fd, 0L, SEEK_CUR) < 0) && (errno == ESPIPE);
+-#else
+-  unbuffered_read = 1;
++  if (delim == '\n')
++    {
++      if (lseek (fd, 0L, SEEK_CUR) >= 0 || errno != ESPIPE)
++        unbuffered_read = 0;
++    }
++  else
++    {
++      struct stat st;
++      if (fstat (fd, &st) >= 0 &&
++        S_ISREG(st.st_mode) &&
++        lseek (fd, 0L, SEEK_CUR) >= 0)
++        unbuffered_read = 0;
++    }
+ #endif
+ 
+-  if (delim != '\n')
+-    unbuffered_read = 1;
+-
+   zreset ();
+ 
+   /* Skip any lines at beginning of file? */
+@@ -215,11 +224,11 @@ mapfile (fd, line_count_goal, origin, nskip, callback_quantum, callback, array_n
+       /* Has a callback been registered and if so is it time to call it? */
+       if (callback && line_count && (line_count % callback_quantum) == 0) 
+ 	{
+-	  run_callback (callback, array_index, line);
+-
+ 	  /* Reset the buffer for bash own stream. */
+ 	  if (unbuffered_read == 0)
+ 	    zsyncfd (fd);
++
++	  run_callback (callback, array_index, line);
+ 	}
+ 
+       /* XXX - bad things can happen if the callback modifies ENTRY, e.g.,
+-- 
+2.21.3
+
