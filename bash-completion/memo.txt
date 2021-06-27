@@ -1,0 +1,23 @@
+
+bash-completion
+
+
+* completions: invoke "cd" as "builtin cd"
+  https://github.com/scop/bash-completion/pull/528
+
+  `cd` を alias/function にするなど聞いたことがないと言われたがそうだろうか。
+  調べるとやはりみんなやっている気がする。自分もやっているし。
+
+  - https://github.com/akinomyoga/ble.sh/issues/21#issuecomment-461777016
+
+  - [command line - Using `alias' to add a default option - e.g. `alias cd="cd -P" ' - Stack Overflow](https://stackoverflow.com/questions/11697478/using-alias-to-add-a-default-option-e-g-alias-cd-cd-p)
+  - [bash - Always use `-P` flag with `cd` command - Ask Ubuntu](https://askubuntu.com/questions/320127/always-use-p-flag-with-cd-command)
+  - [replace cd in bash to (silent) pushd](https://gist.github.com/mbadran/130469)
+  - [Alias cd to record your directory travelling Using alias](https://www.commandlinefu.com/commands/view/7196/alias-cd-to-record-your-directory-travelling)
+  - [bash - aliasing cd to pushd - is it a good idea? - Unix &amp; Linux Stack Exchange](https://unix.stackexchange.com/questions/4290/aliasing-cd-to-pushd-is-it-a-good-idea)
+
+
+  - [bash - Do we have more history for cd? - Unix &amp; Linux Stack Exchange](https://unix.stackexchange.com/questions/157763/do-we-have-more-history-for-cd)
+  - [all-bash-history/acd_func.sh at master · djoot/all-bash-history](https://github.com/djoot/all-bash-history/blob/42fa6ddd9c840611ce5ef8890eae2cd6aa9f1927/acd_func.sh#L57)
+  - [cdhist/cdhist.rc at b6ddb70938cfcbd0ffd93ca6db119f0b54df7c2d · bulletmark/cdhist](https://github.com/bulletmark/cdhist/blob/b6ddb70938cfcbd0ffd93ca6db119f0b54df7c2d/cdhist.rc#L28)
+  - [cdext/cdext-setup.bash at master · ndragon70/cdext](https://github.com/ndragon70/cdext/blob/master/cdext-setup.bash#L15)
