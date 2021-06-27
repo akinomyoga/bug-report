@@ -1,0 +1,80 @@
+Subject: [PATCH] fix super-linear complexity of ${v^} and ${v//A}
+
+Description:
+
+  The time complexities of ${v/...} and ${v^...} are expected to be
+  linear with respect to the length of the variable contents.
+  However, the time complexity of ${v/...} is quadratic if there is no
+  replacement when the length is larger than about 10000.  Also, the
+  time complexity of ${v^} becomes quadratic if the variable contains
+  many newlines.
+
+  They are caused by the implementations that call `strlen' for the
+  variable contents inside loops. `strlen' itself has the linear
+  complexity, so the `strlen' inside the loops results in the
+  quadratic complexity.
+
+Repeat-By:
+
+  I attach a sample script: `test.sh'.  In this script, variable
+  content is constructed as
+
+    A=({00000..99999})
+    IFS=$'\n' eval 'v="${A[*]}"'
+
+  and then the time is measured as, e.g.,
+
+    time a=${v^}
+
+  By changing the size of array A, the time complexity may be checked.
+
+  I also attach plots, `r0026{a,b,c}.png', based on measurements on my
+  Linux host.  `r0026{a,b,c}' are for ${v^}, ${v@U} and ${v//A},
+  respectively.  The horizontal and vertical axes are the length of
+  the variable content and the time, respectively.  The red points
+  show the results for the devel branch.  The dashed lines are fitted
+  to the points in the range [20000, 500000] to extract the power. The
+  extracted power is written in the legend.  These results clearly
+  show the quadratic complexity of these parameter expansions.
+
+Fix:
+
+  I attach patches:
+
+  * r0026-ifdef-DEBUG.patch: This is not the fix for the above
+    problem, but a fix for non-DEBUG build of the devel branch.
+    `itrace' (which are introduced for the new treatment of array
+    subscripts and the new proc_comsub) are used outside `#ifdef
+    DEBUG'.  Maybe these `itrace's are supposed to be removed before
+    the next Bash is released, but it is annoying to every time remove
+    them when we want to test the performance of the non-DEBUG build
+    of the devel Bash.  In this patch, we enclose the new `itrace's in
+    `#ifdef DEBUG'
+
+  * r0026-fix-superlinear-sh_modcase.patch: The function `cval'
+    (lib/sh/casemod.c) is called from `sh_modcase' (lib/sh/casemod.c)
+    for each character in the string.  However, the function `cval'
+    calls `strlen' by itself to determine the length of the string.
+    This causes the quadratic complexity.  In this patch, we pass the
+    length of the string from `sh_modcase' to `cval'.
+
+  * r0026-fix-superlinear-pat_subst.patch: At the end of `pat_subst'
+    (subst.c), before appending the remaining content of the variable,
+    the string buffer for the result is extended using the macro
+    `RESIZE_MALLOCED_BUFFER'.  In RESIZE_MALLOCED_BUFFER, the new
+    buffer size is calculated by a while loop in which the macro
+    parameter for the previous buffer size is expanded.  `pat_subst'
+    specifies the expression `STRLEN(str) + 1' to the macro parameter
+    of the previous buffer size, which is directly expanded in the
+    loop and repeatedly evaluated in the loop.  As a result, the macro
+    `RESIZE_MALLOCED_BUFFER' becomes the quadratic complexity.  In
+    this patch, we specify the pre-calculated value of `strlen' to the
+    macro `RESIZE_MALLOCED_BUFFER'.  Also, the buffer size
+    determination of `RESIZE_MALLOCED_BUFFER' can be implemented
+    without using a loop.
+
+  The blue points and lines in `r0026{a,b,c}.png' show the time
+  complexity after the patches.  They are now linear as expected.
+
+--
+Koichi
