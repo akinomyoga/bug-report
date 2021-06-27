@@ -1,0 +1,43 @@
+Subject: [PATCH] quote command and function names of `complete -p'
+
+Description:
+
+  In order to make the output of `complete -p' reusable as shell
+  commands, the function name after `-F' and the command names also
+  needs to be properly quoted.
+
+  I understand that both the function names and the command names
+  don't usually need to be quoted, but in principle it is possible to
+  create such completion settings.  This becomes a problem when the
+  script needs to handle user-supplied arbitrary completion settings.
+
+  The related issue is https://github.com/akinomyoga/ble.sh/issues/102
+  I need to evaluate/parse the result of `complete -p' in my script,
+  I'm currently using a complicated heuristic way to analyze `complete
+  -p', but really want an efficient and reliable way. i.e. something
+  like « eval "words=($(complete -p CMD))" ».
+
+Repeat-By:
+
+  For example, the output of `complete -p' in the following cases
+  cannot be reliably evaluated.
+
+    $ complete -c 'test1; echo yes'
+    $ complete -F 'A{B,C}' test1
+    $ complete -p
+    complete -c test1; echo yes
+    complete -F A{B,C} test1
+
+  If we perform « saved=$(complete -p); ...; eval "$saved" », the
+  above types of completion settings will cause unexpected results.
+
+Fix:
+
+  I attach a patch (r0028-quote-complete-p-A.patch).  In this patch,
+  the command names are quoted only when necessary.  the function
+  names after `-F' are always quoted.  If we want to quote the
+  function name only when necessary, please instead use the second
+  patch `r0028-quote-complete-p-B.patch'.
+
+--
+Koichi

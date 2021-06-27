@@ -4,10 +4,10 @@ Description:
 
   Now "bind -x" can be used with numeric arguments when the numeric
   arguments are specified by e.g. "M-1 2 3".  However, when the
-  numeric arguments are specified by e.g. "M-1 M-2 M-3", it stil fails
+  numeric arguments are specified by e.g. "M-1 M-2 M-3", it still fails
   with the error message `bash_execute_unix_command: cannot find
-  keymap for command'.  It fails too when the arguments are speicified
-  through `vi-arg-digit' in vi-command map.
+  keymap for command'.  It fails too when the arguments are specified
+  through `vi-arg-digit' in the vi-command map.
 
 Repeat-By:
 

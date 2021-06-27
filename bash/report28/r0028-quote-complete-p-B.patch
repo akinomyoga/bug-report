@@ -1,0 +1,41 @@
+From 8f360d8ab080ce0c238bc94d374dfb36c53f886b Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sun, 27 Jun 2021 21:43:28 +0900
+Subject: [PATCH] builtins/complete: quote command names and function names in
+ "complete -p"
+
+---
+ builtins/complete.def | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/builtins/complete.def b/builtins/complete.def
+index 28a9ec2f..dbc1b8a6 100644
+--- a/builtins/complete.def
++++ b/builtins/complete.def
+@@ -530,7 +530,9 @@ print_arg (arg, flag, quote)
+ 
+   if (arg)
+     {
+-      x = quote ? sh_single_quote (arg) : (char *)arg;
++      x = (char *)arg;
++      if (quote || sh_contains_shell_metas (arg))
++	x = sh_single_quote (arg);
+       printf ("%s %s ", flag, x);
+       if (x != arg)
+ 	free (x);
+@@ -549,6 +551,12 @@ print_cmd_name (cmd)
+     printf ("-I");
+   else if (*cmd == 0)		/* XXX - can this happen? */
+     printf ("''");
++  else if (sh_contains_shell_metas (cmd))
++    {
++      cmd = sh_single_quote (cmd);
++      printf ("%s", cmd);
++      free (cmd);
++    }
+   else
+     printf ("%s", cmd);
+ }
+-- 
+2.21.3
+

@@ -1,0 +1,42 @@
+From 58864b8bb481324f6ee3c55564f2fd57ddf0f943 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sun, 27 Jun 2021 21:43:28 +0900
+Subject: [PATCH] builtins/complete: quote command names and function names in
+ "complete -p"
+
+---
+ builtins/complete.def | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/builtins/complete.def b/builtins/complete.def
+index 28a9ec2f..f5cff16f 100644
+--- a/builtins/complete.def
++++ b/builtins/complete.def
+@@ -549,6 +549,12 @@ print_cmd_name (cmd)
+     printf ("-I");
+   else if (*cmd == 0)		/* XXX - can this happen? */
+     printf ("''");
++  else if (sh_contains_shell_metas (cmd))
++    {
++      cmd = sh_single_quote (cmd);
++      printf ("%s", cmd);
++      free (cmd);
++    }
+   else
+     printf ("%s", cmd);
+ }
+@@ -574,8 +580,9 @@ print_one_completion (cmd, cs)
+ 
+   print_arg (cs->command, "-C", 1);
+ 
+-  /* simple arguments that don't require quoting */
+-  print_arg (cs->funcname, "-F", 0);
++  /* quoting is necessary because the name of the form "a{b,c}" is
++     also a valid function name. */
++  print_arg (cs->funcname, "-F", 1);
+ 
+   print_cmd_name (cmd);
+   printf ("\n");
+-- 
+2.21.3
+
