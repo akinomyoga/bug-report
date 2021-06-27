@@ -1,0 +1,55 @@
+From efe0b0c7b0020327059e72cd44747beb5f2c0822 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sun, 27 Jun 2021 11:37:15 +0900
+Subject: [PATCH 2/4] lib/sh/casemod (sh_modcase): fix superlinear complexity
+
+---
+ lib/sh/casemod.c | 10 ++++------
+ 1 file changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/lib/sh/casemod.c b/lib/sh/casemod.c
+index bdd96f84..0403f91c 100644
+--- a/lib/sh/casemod.c
++++ b/lib/sh/casemod.c
+@@ -47,7 +47,7 @@
+ #define _to_wlower(wc)	(iswupper (wc) ? towlower (wc) : (wc))
+ 
+ #if !defined (HANDLE_MULTIBYTE)
+-#  define cval(s, i)	((s)[(i)])
++#  define cval(s, i, l)	((s)[(i)])
+ #  define iswalnum(c)	(isalnum(c))
+ #  define TOGGLE(x)	(ISUPPER (x) ? tolower ((unsigned char)x) : (TOUPPER (x)))
+ #else
+@@ -75,18 +75,16 @@ extern char *substring PARAMS((char *, int, int));
+ 
+ #if defined (HANDLE_MULTIBYTE)
+ static wchar_t
+-cval (s, i)
++cval (s, i, l)
+      char *s;
+-     int i;
++     int i, l;
+ {
+   size_t tmp;
+   wchar_t wc;
+-  int l;
+   mbstate_t mps;  
+ 
+   if (MB_CUR_MAX == 1 || is_basic (s[i]))
+     return ((wchar_t)s[i]);
+-  l = strlen (s);
+   if (i >= (l - 1))
+     return ((wchar_t)s[i]);
+   memset (&mps, 0, sizeof (mbstate_t));
+@@ -143,7 +141,7 @@ sh_modcase (string, pat, flags)
+   inword = 0;
+   while (start < end)
+     {
+-      wc = cval ((char *)string, start);
++      wc = cval ((char *)string, start, end);
+ 
+       if (iswalnum (wc) == 0)
+ 	inword = 0;
+-- 
+2.21.3
+

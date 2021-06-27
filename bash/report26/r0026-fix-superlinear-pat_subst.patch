@@ -1,0 +1,40 @@
+From 17675e768973bb2e81a54a2405cdc1df4a216e11 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sun, 27 Jun 2021 13:04:49 +0900
+Subject: [PATCH 3/4] subst (pat_subst): fix superlinear complecity
+
+---
+ general.h | 3 +--
+ subst.c   | 2 +-
+ 2 files changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/general.h b/general.h
+index 0303d01a..57992dfc 100644
+--- a/general.h
++++ b/general.h
+@@ -184,8 +184,7 @@ typedef struct {
+   do { \
+     if ((cind) + (room) >= csize) \
+       { \
+-	while ((cind) + (room) >= csize) \
+-	  csize += (sincr); \
++	csize += ((cind) + (room) - csize + (sincr)) / (sincr) * (sincr); \
+ 	str = xrealloc (str, csize); \
+       } \
+   } while (0)
+diff --git a/subst.c b/subst.c
+index 497003dd..4fef5c1c 100644
+--- a/subst.c
++++ b/subst.c
+@@ -8454,7 +8454,7 @@ pat_subst (string, pat, rep, mflags)
+   /* Now copy the unmatched portion of the input string */
+   if (str && *str)
+     {
+-      RESIZE_MALLOCED_BUFFER (ret, rptr, STRLEN(str) + 1, rsize, 64);
++      RESIZE_MALLOCED_BUFFER (ret, rptr, send - str + 1, rsize, 64);
+       strcpy (ret + rptr, str);
+     }
+   else
+-- 
+2.21.3
+
