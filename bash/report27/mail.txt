@@ -1,0 +1,36 @@
+Subject: [PATCH] Fix READLINE_ARGUMENT with "M-1 M-2" and with `vi-arg-digit'
+
+Description:
+
+  Now "bind -x" can be used with numeric arguments when the numeric
+  arguments are specified by e.g. "M-1 2 3".  However, when the
+  numeric arguments are specified by e.g. "M-1 M-2 M-3", it stil fails
+  with the error message `bash_execute_unix_command: cannot find
+  keymap for command'.  It fails too when the arguments are speicified
+  through `vi-arg-digit' in vi-command map.
+
+Repeat-By:
+
+  $ ./bash --norc
+  $ f1() { echo "ARG=$READLINE_ARGUMENT"; }
+  $ bind -x '"\C-t": f1'
+  $       # <--- Press "M-1 2 C-t" (Note: M-1 is transmitted as "ESC 1")
+  ARG=12  # .... The expected result
+
+  $       # <--- Press "M-1 M-2 C-t"
+  bash: bash_execute_unix_command: cannot find keymap for command
+          # .... An unexpected error message. "ARG=12" is expected
+
+  $ set -o vi
+  $ bind -m vi-command -x '"\C-t": f1'
+  $       # <--- Press "ESC 1 C-t"
+  bash: bash_execute_unix_command: cannot find keymap for command
+          # .... An unexpected error message. "ARG=1" is expected.
+
+Fix:
+
+  I attach a patch for `rl_trim_arg_from_keyseq'
+  (lib/readline/bind.c)..
+
+--
+Koichi
