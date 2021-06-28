@@ -1,0 +1,91 @@
+From c0b221f0c37e3f66b92518128cc26ea832af270e Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sun, 27 Jun 2021 20:37:16 +0900
+Subject: [PATCH] readline (rl_trim_arg_from_keyseq): support vi-arg-digit and
+ multiple calls of digit-argument
+
+---
+ lib/readline/bind.c | 29 ++++++++++++++++++-----------
+ 1 file changed, 18 insertions(+), 11 deletions(-)
+
+diff --git a/lib/readline/bind.c b/lib/readline/bind.c
+index fdd61e9b..e0381698 100644
+--- a/lib/readline/bind.c
++++ b/lib/readline/bind.c
+@@ -888,25 +888,31 @@ rl_function_of_keyseq_len (const char *keyseq, size_t len, Keymap map, int *type
+ int
+ rl_trim_arg_from_keyseq	(const char *keyseq, size_t len, Keymap map)
+ {
+-  register int i, parsing_digits;
++  register int i, j, parsing_digits;
+   unsigned char ic;
++  Keymap map0;
++  rl_command_func_t *func;
+ 
+   if (map == 0)
+     map = _rl_keymap;
++  map0 = map;
+ 
+   /* The digits following the initial one (e.g., the binding to digit-argument)
+     or the optional `-' in a binding to digit-argument or universal-argument
+     are not added to rl_executing_keyseq. This is basically everything read by
+     rl_digit_loop. The parsing_digits logic is here in case they ever are. */
+-  for (i = parsing_digits = 0; keyseq && i < len; i++)
++  for (i = j = parsing_digits = 0; keyseq && i < len; i++)
+     {
+       ic = keyseq[i];
+ 
+       if (parsing_digits)
+ 	{
+-	  if (_rl_digit_p (ic) == 0)
+-	    return (i);
+-	  continue;
++	  if (_rl_digit_p (ic))
++	    {
++	      j = i + 1;
++	      continue;
++	    }
++	  parsing_digits = 0;
+ 	}
+ 
+       if (map[ic].type == ISKMAP)
+@@ -918,29 +924,30 @@ rl_trim_arg_from_keyseq	(const char *keyseq, size_t len, Keymap map)
+ 	}
+       if (map[ic].type == ISFUNC)
+ 	{
+-	  if (map[ic].function != rl_digit_argument && map[ic].function != rl_universal_argument)
+-	    return -1;
++	  func = map[ic].function;
++	  if (func != rl_digit_argument && func != rl_universal_argument && func != rl_vi_arg_digit)
++	    return (j);
+ 
+ 	  /* We don't bother with a keyseq that is only a numeric argument */
+ 	  if (i + 1 == len)
+ 	    return -1;
+ 
++	  map = map0;
+ 	  parsing_digits = 1;
+ 
+ 	  /* This logic should be identical to rl_digit_loop */
+ 	  /* We accept M-- as equivalent to M--1, C-u- as equivalent to C-u-1
+ 	     but set parsing_digits to 2 to note that we saw `-' */
+-	  if (map[ic].function == rl_universal_argument && (i + 1 == '-'))
++	  if (func == rl_universal_argument && (i + 1 == '-'))
+ 	    {
+ 	      i++;
+ 	      parsing_digits = 2;
+-	      continue;
+ 	    }
+-	  if (map[ic].function == rl_digit_argument && ic == '-')
++	  if (func == rl_digit_argument && ic == '-')
+ 	    {
+ 	      parsing_digits = 2;
+-	      continue;
+ 	    }
++	  j = i + 1;
+ 	}
+     }
+ 
+-- 
+2.21.3
+

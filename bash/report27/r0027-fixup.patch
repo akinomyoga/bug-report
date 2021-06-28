@@ -1,0 +1,62 @@
+From 47f609675205f09e2683a2f9e9c6c593809821b4 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Tue, 29 Jun 2021 04:53:25 +0900
+Subject: [PATCH] readline (rl_trim_arg_from_keyseq): fix up
+
+---
+ lib/readline/bind.c | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/lib/readline/bind.c b/lib/readline/bind.c
+index 643ac149..cb7f3176 100644
+--- a/lib/readline/bind.c
++++ b/lib/readline/bind.c
+@@ -888,7 +888,7 @@ rl_function_of_keyseq_len (const char *keyseq, size_t len, Keymap map, int *type
+ int
+ rl_trim_arg_from_keyseq	(const char *keyseq, size_t len, Keymap map)
+ {
+-  register int i, parsing_digits;
++  register int i, j, parsing_digits;
+   unsigned char ic;
+   Keymap map0;
+   rl_command_func_t *func;
+@@ -901,14 +901,17 @@ rl_trim_arg_from_keyseq	(const char *keyseq, size_t len, Keymap map)
+     or the optional `-' in a binding to digit-argument or universal-argument
+     are not added to rl_executing_keyseq. This is basically everything read by
+     rl_digit_loop. The parsing_digits logic is here in case they ever are. */
+-  for (i = parsing_digits = 0; keyseq && i < len; i++)
++  for (i = j = parsing_digits = 0; keyseq && i < len; i++)
+     {
+       ic = keyseq[i];
+ 
+       if (parsing_digits)
+ 	{
+ 	  if (_rl_digit_p (ic))
+-	    continue;
++	    {
++	      j = i + 1;
++	      continue;
++	    }
+ 	  parsing_digits = 0;
+ 	}
+ 
+@@ -923,7 +926,7 @@ rl_trim_arg_from_keyseq	(const char *keyseq, size_t len, Keymap map)
+ 	{
+ 	  func = map[ic].function;
+ 	  if (func != rl_digit_argument && func != rl_universal_argument && func != rl_vi_arg_digit)
+-	    return (i);
++	    return (j);
+ 
+ 	  /* We don't bother with a keyseq that is only a numeric argument */
+ 	  if (i + 1 == len)
+@@ -946,6 +949,7 @@ rl_trim_arg_from_keyseq	(const char *keyseq, size_t len, Keymap map)
+ 	      parsing_digits = 2;
+ 	      continue;
+ 	    }
++	  j = i + 1;
+ 	}
+     }
+ 
+-- 
+2.21.3
+
