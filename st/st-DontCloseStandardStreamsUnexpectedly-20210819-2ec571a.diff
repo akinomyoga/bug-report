@@ -7,9 +7,9 @@ Subject: [st][PATCH] fix a problem that the standard streams are
 In the current implementation, the slave PTY (assigned to the variable
 `s') is always closed after duplicating it to file descriptors of
 standard streams (0, 1, and 2).  However, when the allocated slave PTY
-`s' is already one of 0, 1, or 2, this causes unexpected closing of a
-standard stream.  The same problem occurs when the file descriptor of
-the master PTY (the variable `m') is one of 0, 1, or 2.
+`s' is already one of 0, 1, or 2, this causes the unexpected closing
+of a standard stream.  The same problem occurs when the file
+descriptor of the master PTY (the variable `m') is one of 0, 1, or 2.
 
 The problem can be reproduced by e.g. starting `st' with file
 descriptors 0, 1, and 2 being closed:
@@ -28,7 +28,7 @@ Bash):
 
 In this patch, the original master PTY (m) is closed before it would
 be overwritten by duplicated slave PTYs.  The original slave PTY (s)
-is closed only when it is not one of the stanrad streams.
+is closed only when it is not one of the standard streams.
 ---
  st.c | 5 +++--
  1 file changed, 3 insertions(+), 2 deletions(-)
