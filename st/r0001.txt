@@ -1,3 +1,133 @@
+2021-08-23
+
+After the advice from Alex Pilon, I update the commit message and
+resend the patch using `git send-email'.  Here's the description of
+this fix (which is essentially the same as the previous post
+https://lists.suckless.org/hackers/2108/17978.html).
+
+Problem:
+
+  When st is started with fd 0, 1, and 2 being closed, some of the
+  standard streams (file descriptors 0, 1, and 2) are closed in the
+  child process (i.e., the shell process).
+
+Description:
+
+  In the current implementation, the slave PTY (assigned to the
+  variable `s') is always closed after duplicating it to file
+  descriptors of standard streams (0, 1, and 2).  However, when the
+  allocated slave PTY `s' is already one of 0, 1, or 2, this causes
+  the unexpected closing of a standard stream.  The same problem
+  occurs when the file descriptor of the master PTY (the variable `m')
+  is one of 0, 1, or 2.
+
+Repeat-By:
+
+  The problem can be reproduced by e.g. starting `st' with file
+  descriptors 0, 1, and 2 being closed:
+
+  $ st 0<&- 1>&- 2>&-
+
+  Then in the opened `st' window,
+
+  $ echo hello[RET]
+
+  will produce the following error messages from Bash (when the shell
+  is Bash):
+
+  bash: echo: write error: Bad file descriptor
+  bash: echo: write error: Bad file descriptor
+
+  This is because the standard error output (fd 2) is unexpectedly
+  closed.
+
+Fix:
+
+  In this patch, the original master PTY (m) is closed before it would
+  be overwritten by duplicated slave PTYs.  The original slave PTY (s)
+  is closed only when it is not one of the standard streams.  Here's
+  also the inline copy of the patch (though my email client breaks the
+  whitespaces):
+
+------------------------------------------------------------------------------
+2021-08-23
+
+% I couldn't find it in lists.suckless.org.  Instead, I found the above
+% message at
+% https://www.mail-archive.com/hackers@suckless.org/msg10606.html. It
+% seems a significant number of messages are missing in
+% https://lists.suckless.org/hackers/2103/date.html. Where is the most
+% appropriate place to check the mail list archive?
+
+% I have a question. When we use "git send-email" to send a patch, how
+% to separate the email message and the commit message?  It seems like
+% the commit message would become directly a
+
+
+Alex, Thank you for your advice!
+
+2021年8月20日(金) 10:56 Alex Pilon <alp@alexpilon.ca>:
+> > Fix:
+> >
+> >   I attach a patch file:
+> >
+> >   - st-DontCloseStandardStreamsUnexpectedly-20210819-2ec571a.diff
+>
+> Normally people are expected to git send-email or compatible, just like
+> on the Linux kernel ML, not attach patches.
+
+Ah, OK. I had read the mention of "git send-email" on a suckless page,
+but I somehow thought I needed to set up a sendmail server by myself
+to use "git send-email".  Now I searched it and found that I can just
+specify the information of an existing SMTP server.
+
+> Good commit messages are appreciated, though yours may be a tad
+> verbose.  It's a matter of taste, the maintainers', not mine.
+
+I'm wondering what is the appropriate way to separate the email
+message and the commit message, but can I include the email messages
+in the cover letter of `git send-email'?
+
+> The first example I can find in my INBOX is from Maarten van Gompel
+> on the behalf of Stacy Harper (you have no on-behalf-of, so ignore
+> the extra From:), subject [PATCH 24/24] Add missing keys on lazy
+> numbers.
+
+I noticed that some of the emails are missing in
+lists.suckless.org/hackers.  I couldn't find the above email in
+lists.suckless.org but finally found it through Google search at
+https://www.mail-archive.com/hackers@suckless.org/msg10606.html.  It
+seems that a significant number of emails disappear in
+lists.suckess.org.  Is there any official complete archive of the
+mailing list?
+
+> > diff --git a/st.c b/st.c
+> > index ebdf360..a9338e1 100644
+> > --- a/st.c
+> > +++ b/st.c
+> > @@ -793,14 +793,15 @@ ttynew(const char *line, char *cmd, const char *out, char **args)
+> > …
+> >   if (ioctl(s, TIOCSCTTY, NULL) < 0)
+> >   die("ioctl TIOCSCTTY failed: %s\n", strerror(errno));
+> > - close(s);
+> > - close(m);
+> > + if (s > 2)
+> > + close(s);
+>
+> I'm pretty sure you want to indent close(s);.
+
+Yeah, that is because Gmail removes whitespace, which was the reason I
+also attached the patch file besides that in the inline mail body.
+Now I resend the patch through `git send-email', so I believe the
+whitespaces would be preserved.
+
+I will resend the patch later.
+
+--
+Koichi
+
+
+------------------------------------------------------------------------------
 Subject: [st][PATCH] fix a problem that the standard streams are
  unexpectedly closed
 
