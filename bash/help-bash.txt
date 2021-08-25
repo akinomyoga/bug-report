@@ -1,3 +1,77 @@
+
+2021-08-25 [#H0007]
+
+https://lists.gnu.org/archive/html/bug-bash/2021-08/msg00163.html
+
+文字列を文字の配列に変換する pure Bash の効率的な方法について議論して
+いる。様々な hack が出ている。自分も気になるので試してみる事にした。既
+に出ているのよりも微妙に高速な方法を見つけることができた。然し速度の差
+は local arr を宣言する程度に過ぎないので、既に出ているより分かりやす
+い物の方が良い様な気もする。
+
+------------------------------------------------------------------------------
+
+2021年8月23日(月) 6:13 Emanuele Torre <torreemanuele6@gmail.com>:
+>
+> It would be nice to have a parameter transformation (e.g. "${par@p}")
+> that expands $par to a string that will not be expanded by PS1, PS2, &c.
+
+It seems to me that you can just put '$par' (not "$par") in PS1.
+Then, the suggested "${par@p}" can be simply '$par', which isn't worth
+implementing as a new transform.
+
+  PS1='blabla $tmp_var blabla'
+
+Or
+
+  PS1="blabla \$tmp_var blabla"
+
+If you want to modify the variable later, you can save it in a
+different variable.
+
+  PS1_tmp_var=$tmp_var
+  PS1="blabla \$PS1_tmp_var blabla"
+
+--
+Koichi
+
+------------------------------------------------------------------------------
+2021-08-23
+
+
+2021年8月23日(月) 10:54 L A Walsh <bash@tlinx.org>:
+>
+> On 2021/08/19 02:15, Ilkka Virta wrote:
+> > $ declare -A A=([foo bar]="123 456" [adsf]="456 789")
+> > $ printf "<%s>\n" "${A[@]@K}"
+> > <adsf "456 789" "foo bar" "123 456" >
+> >
+> > Interesting. I wonder, what's the intended use-case for this?
+> >  
+> ---
+> Does it matter?: Organizing data.
+
+I'd guess Ilkka has asked the use case for this particular output
+format, i.e., the quoted fields inside a single word.  If the purpose
+is organizing the data, I would naturally expect the result in the
+following more useful format in separate words without quoting:
+
+<adsf>
+<456 789>
+<foo bar>
+<123 456>
+
+> Anyway, in my experience, asking 'why' or for 'use-cases' seems more often
+> a way to rule out or determine relative importance, but is almost always
+> an inaccurate way to do so.
+
+I think it is still valid to ask the known/existing use cases when
+someone doesn't know the existing use cases, which doesn't rule out
+the other use cases.  In particular, I think Ilkka has asked about the
+intended use-case, i.e., the original motivation of adding this
+feature in Bash 5.1.  It doesn't rule out other usages.
+
+------------------------------------------------------------------------------
 2021-03-13 [#H0005]
 https://lists.gnu.org/archive/html/help-bash/2021-03/msg00097.html
 
