@@ -1,0 +1,16 @@
+Bash Version:
+  devel branch (441078402919f6f0dd677cad18d55c7a89d294fc),
+  5.1.8(2)-maint (x86_64-pc-linux-gnu)
+
+Description:
+
+  The key `page-up', which is supposed to be bound to the readline
+  bindable function `history-search-backward' after commit 65822e50,
+  does not actually work because of a typo in `lib/readline/terminal.c'.
+
+Fix:
+
+  I attach a patch.
+
+--
+Koichi
