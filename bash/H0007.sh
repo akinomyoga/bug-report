@@ -1,67 +1,89 @@
 #!/usr/bin/env bash
 
-source ~/.mwg/src/ble.sh/src/benchmark.sh
+# Parameters
 
-# f0() { local arr; }
-# ble-measure -c 5 'f0 682390'
-
+# enabled measurements
 opts=greg:lea:mike:brace:arith
 
-if [[ :$opts: == *:greg:* ]]; then
-  # L A Walsh
-  f1() { local x n="$1" arr; for x in 0 1 2 3 4 5 6 7 8 9; do n=${n//$x/$x }; done; arr=($n); }
-  f2() { local i n="${#1}" arr; for ((i=0; i<n; i++)); do arr+=("${1:i:1}"); done; }
-  # Greg Wooledge
-  f3() { local n="$1" tmp arr i; while ((n > 0)); do tmp+=("$((n%10))"); ((n /= 10)); done; for ((i=${#tmp[@]}-1; i >= 0; i--)); do arr+=("${tmp[i]}"); done; }
-  f4() { local n="$1" i=${#1} arr; while ((n > 0)); do arr[--i]=$((n%10)); ((n /= 10)); done; }
-  f5() { local i n=${#1} arr; while ((i < n)); do arr[i]="${1:i:1}"; ((i++)); done; }
-  f6() { local i n=${#1} arr; for ((i=0; i<n; i++)); do arr[i]="${1:i:1}"; done; }
-  ble-measure -c 5 'f1 682390'
-  ble-measure -c 5 'f2 682390'
-  ble-measure -c 5 'f3 682390'
-  ble-measure -c 5 'f4 682390'
-  ble-measure -c 5 'f5 682390'
-  ble-measure -c 5 'f6 682390'
-fi
+output_file=
 
-if [[ :$opts: == *:lea:* ]]; then
-  # Lea Gris
-  shopt -s extglob
-  f7() { local arr; IFS=' ' read -ra arr <<< "${1//?()/ }"; }
-  f8() { local arr; IFS= mapfile -s1 -t -d $'\37' arr <<<"${1//?()/$'\37'}"; arr[-1]="${arr[-1]%?}"; }
-  ble-measure -c 5 'f7 682390'
-  ble-measure -c 5 'f8 682390'
-fi
+#------------------------------------------------------------------------------
 
-if [[ :$opts: == *:mike:* ]]; then
-  # Mike Jonkmans
-  f12() { local arr; [[ "$1" =~ ${1//?/(.)} ]]; arr=( "${BASH_REMATCH[@]:1}" ); }
-  ble-measure -c 5 'f12 682390'
-fi
+source ~/.mwg/src/ble.sh/src/benchmark.sh
 
-if [[ :$opts: == *:brace:* ]]; then
-  f20() { local arr; eval "for i in {0..$((${#1}-1))}; do arr[i]=\${1:i:1}; done"; }
-  f21() { local arr; eval "arr=('\${1:'{0..$((${#1}-1))}':1}')"; arr=("${arr[@]@P}"); }
-  f21b() { local -a "arr=('\${1:'{0..$((${#1}-1))}':1}')"; arr=("${arr[@]@P}"); }
-  f22() { local arr; eval "arr=('\"\${1:'{0..$((${#1}-1))}':1}\"')"; local "arr=(${arr[*]})"; }
-  f23() { local arr; eval "arr=('\"\${1:'{0..$((${#1}-1))}':1}\"')"; eval "arr=(${arr[*]})"; }
-  f24() { local -a "arr=('\"\${1:'{0..$((${#1}-1))}':1}\"')"; local -a "arr=(${arr[*]})"; }
-  ble-measure -c 5 'f20  682390'
-  ble-measure -c 5 'f21  682390'
-  ble-measure -c 5 'f21b 682390'
-  ble-measure -c 5 'f22  682390'
-  ble-measure -c 5 'f23  682390'
-  ble-measure -c 5 'f24  682390'
-fi
+function measure.1 {
+  local func=$1 text=$2
+  local ret nsec
+  ble-measure -c 5 "$func $text"
+  [[ $output_file ]] &&
+    echo "${#text} $func $nsec" >> "$output_file"
+}
 
-if [[ :$opts: == *:arith:* ]]; then
-  f30() { local arr; eval "let i={1..${#1}}-1,'arr[i]=$1/10**i%10'"; }
-  #f31() { local arr; local v=$1 i=0 x='v>10?i++,x,i--:(arr[i]=v%10,v/=10)'; : $((x)); declare -p arr; }
-  f31() { local arr i=${#1} v=$1 x='arr[--i]=v%10,v/=10,i&&x'; : $((x)); }
-  ble-measure -c 5 'f30 682390'
-  ble-measure -c 5 'f31 682390'
-fi
+function measure-all {
+  local text=$1
 
+  # f0() { local arr; }
+  # measure.1 f0 "$text"
+
+  if [[ :$opts: == *:greg:* ]]; then
+    # L A Walsh
+    f1() { local x n="$1" arr; for x in 0 1 2 3 4 5 6 7 8 9; do n=${n//$x/$x }; done; arr=($n); }
+    f2() { local i n="${#1}" arr; for ((i=0; i<n; i++)); do arr+=("${1:i:1}"); done; }
+    # Greg Wooledge
+    f3() { local n="$1" tmp arr i; while ((n > 0)); do tmp+=("$((n%10))"); ((n /= 10)); done; for ((i=${#tmp[@]}-1; i >= 0; i--)); do arr+=("${tmp[i]}"); done; }
+    f4() { local n="$1" i=${#1} arr; while ((n > 0)); do arr[--i]=$((n%10)); ((n /= 10)); done; }
+    f5() { local i n=${#1} arr; while ((i < n)); do arr[i]="${1:i:1}"; ((i++)); done; }
+    f6() { local i n=${#1} arr; for ((i=0; i<n; i++)); do arr[i]="${1:i:1}"; done; }
+    measure.1 f1 "$text"
+    measure.1 f2 "$text"
+    if [[ :$opts: == *:arith:* ]]; then
+      measure.1 f3 "$text"
+      measure.1 f4 "$text"
+    fi
+    measure.1 f5 "$text"
+    measure.1 f6 "$text"
+  fi
+
+  if [[ :$opts: == *:lea:* ]]; then
+    # Lea Gris
+    shopt -s extglob
+    f7() { local arr; IFS=' ' read -ra arr <<< "${1//?()/ }"; }
+    f8() { local arr; IFS= mapfile -s1 -t -d $'\37' arr <<<"${1//?()/$'\37'}"; arr[-1]="${arr[-1]%?}"; }
+    measure.1 f7 "$text"
+    measure.1 f8 "$text"
+  fi
+
+  if [[ :$opts: == *:mike:* ]]; then
+    # Mike Jonkmans
+    f12() { local arr; [[ "$1" =~ ${1//?/(.)} ]]; arr=( "${BASH_REMATCH[@]:1}" ); }
+    measure.1 f12 "$text"
+  fi
+
+  if [[ :$opts: == *:brace:* ]]; then
+    f20() { local i arr; eval "for i in {0..$((${#1}-1))}; do arr[i]=\${1:i:1}; done"; }
+    f21() { local arr; eval "arr=('\${1:'{0..$((${#1}-1))}':1}')"; arr=("${arr[@]@P}"); }
+    f21b() { local -a "arr=('\${1:'{0..$((${#1}-1))}':1}')"; arr=("${arr[@]@P}"); }
+    f22() { local arr; eval "arr=('\"\${1:'{0..$((${#1}-1))}':1}\"')"; local "arr=(${arr[*]})"; }
+    f23() { local arr; eval "arr=('\"\${1:'{0..$((${#1}-1))}':1}\"')"; eval "arr=(${arr[*]})"; }
+    f24() { local -a "arr=('\"\${1:'{0..$((${#1}-1))}':1}\"')"; local -a "arr=(${arr[*]})"; }
+    measure.1 f20 "$text"
+    measure.1 f21 "$text"
+    measure.1 f21b "$text"
+    measure.1 f22 "$text"
+    measure.1 f23 "$text"
+    measure.1 f24 "$text"
+  fi
+
+  if [[ :$opts: == *:arith:* ]]; then
+    f30() { local i arr; eval "let i={1..${#1}}-1,'arr[i]=$1/10**i%10'"; }
+    #f31() { local arr; local v=$1 i=0 x='v>10?i++,x,i--:(arr[i]=v%10,v/=10)'; : $((x)); declare -p arr; }
+    f31() { local arr i=${#1} v=$1 x='arr[--i]=v%10,v/=10,i&&x'; : $((x)); }
+    measure.1 f30 "$text"
+    measure.1 f31 "$text"
+  fi
+}
+
+#measure-all 682390
 # NAME ARG  bash-5.0          bash-5.1          bash-dev
 # ---- ---  ----------------  ----------------  ----------------
 # f1   *N   37.633 usec/eval  39.822 usec/eval  39.791 usec/eval
@@ -90,3 +112,78 @@ fi
 # 5000 times and obtained the average time of each call.  The whole
 # measurements are repeated five times, and the minimal time from the
 # five results is picked up for each function and bash version.
+
+#measure-all 9223372036854775807
+# NAME ARG  bash-5.0           bash-5.1           bash-dev
+# ---- ---  -----------------  -----------------  -----------------
+# f1   *N    44.935 usec/eval   47.373 usec/eval   47.694 usec/eval
+# f2   *A   117.765 usec/eval  110.829 usec/eval  112.467 usec/eval
+# f3   *N   218.435 usec/eval  208.938 usec/eval  210.873 usec/eval
+# f4   *N   105.815 usec/eval  106.998 usec/eval  106.042 usec/eval
+# f5   *A   112.499 usec/eval  115.269 usec/eval  116.066 usec/eval
+# f6   *A   102.330 usec/eval  104.512 usec/eval  106.442 usec/eval
+# f7   *B    47.856 usec/eval   54.459 usec/eval   55.903 usec/eval
+# f8   *R    69.606 usec/eval   60.349 usec/eval   60.250 usec/eval
+# f12  *A    56.081 usec/eval   57.088 usec/eval   57.930 usec/eval
+# f20  *A    82.260 usec/eval   84.660 usec/eval   85.648 usec/eval
+# f21  *A    68.165 usec/eval   66.532 usec/eval   68.023 usec/eval
+# f21b *A    61.962 usec/eval   59.633 usec/eval   61.553 usec/eval
+# f22  *A    80.121 usec/eval   74.776 usec/eval   77.130 usec/eval
+# f23  *A    95.685 usec/eval   84.609 usec/eval   86.396 usec/eval
+# f24  *A    73.762 usec/eval   68.606 usec/eval   71.041 usec/eval
+# f30  *N    62.949 usec/eval   61.437 usec/eval   62.290 usec/eval
+# f31  *N    54.739 usec/eval   53.150 usec/eval   53.806 usec/eval
+
+#measure-all 1000000000000066600000000000001
+# NAME ARG  bash-5.0           bash-5.1           bash-dev
+# ---- ---  -----------------  -----------------  -----------------
+# f1   *N    49.742 usec/eval   51.704 usec/eval   52.018 usec/eval
+# f2   *A   183.606 usec/eval  173.303 usec/eval  176.890 usec/eval
+# f3   *N   217.838 usec/eval  209.177 usec/eval  210.466 usec/eval
+# f4   *N   106.343 usec/eval  105.500 usec/eval  106.013 usec/eval
+# f5   *A   177.746 usec/eval  179.855 usec/eval  180.363 usec/eval
+# f6   *A   161.835 usec/eval  163.545 usec/eval  162.796 usec/eval
+# f7   *B    69.921 usec/eval   86.118 usec/eval   92.826 usec/eval
+# f8   *R   101.589 usec/eval   90.943 usec/eval   96.090 usec/eval
+# f12  *A    79.627 usec/eval   82.270 usec/eval   82.882 usec/eval
+# f20  *A   123.419 usec/eval  128.211 usec/eval  128.043 usec/eval
+# f21  *A    97.537 usec/eval   93.592 usec/eval   94.835 usec/eval
+# f21b *A    90.787 usec/eval   87.356 usec/eval   89.171 usec/eval
+# f22  *A   117.057 usec/eval  107.285 usec/eval  109.169 usec/eval
+# f23  *A   139.168 usec/eval  121.602 usec/eval  122.759 usec/eval
+# f24  *A   109.360 usec/eval  100.964 usec/eval  103.422 usec/eval
+# f30  *N    95.184 usec/eval   93.001 usec/eval   94.035 usec/eval
+# f31  *N    79.010 usec/eval   77.332 usec/eval   78.453 usec/eval
+
+# NAME ARG  bash-5.0           bash-5.1           bash-dev
+# ---- ---  -----------------  -----------------  -----------------
+# f1   *N    49.742 usec/eval   51.704 usec/eval   52.018 usec/eval
+# f2   *A   183.606 usec/eval  173.303 usec/eval  176.890 usec/eval
+# f5   *A   177.746 usec/eval  179.855 usec/eval  180.363 usec/eval
+# f6   *A   161.835 usec/eval  163.545 usec/eval  162.796 usec/eval
+# f7   *B    69.921 usec/eval   86.118 usec/eval   92.826 usec/eval
+# f8   *R   101.589 usec/eval   90.943 usec/eval   96.090 usec/eval
+# f12  *A    79.627 usec/eval   82.270 usec/eval   82.882 usec/eval
+# f20  *A   123.419 usec/eval  128.211 usec/eval  128.043 usec/eval
+# f21  *A    97.537 usec/eval   93.592 usec/eval   94.835 usec/eval
+# f21b *A    90.787 usec/eval   87.356 usec/eval   89.171 usec/eval
+# f22  *A   117.057 usec/eval  107.285 usec/eval  109.169 usec/eval
+# f23  *A   139.168 usec/eval  121.602 usec/eval  122.759 usec/eval
+# f24  *A   109.360 usec/eval  100.964 usec/eval  103.422 usec/eval
+
+# output_file=H0007-complexity.txt
+# : > "$output_file"
+# opts=greg:lea:mike:brace:arith
+# t100=1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+# measure-all 1
+# measure-all 12
+# measure-all 12345
+# measure-all 1234512345
+# measure-all 123451234512345
+# opts=greg:lea:mike:brace
+# measure-all 12345678901234567890
+# measure-all 12345678901234567890123456789012345678901234567890
+# measure-all "$t100"
+# measure-all "$t100$t100"
+# measure-all "$t100$t100$t100$t100$t100"
+# measure-all "$t100$t100$t100$t100$t100$t100$t100$t100$t100$t100"
