@@ -1,4 +1,4 @@
-Subject: [PATCH] quote command and function names of `complete -p'
+Subject: [PATCH] quote command and function names in `complete -p'
 
 Description:
 

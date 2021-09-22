@@ -223,6 +223,183 @@
   Bugs
 ------------------------------------------------------------------------------
 
+2021-09-10
+
+* 巨大配列を unset してもメモリが解放されない
+
+  proc 29029 が "read -t" まで入力した時点で cpu 100% になって暫く固まる。最
+  新版 ble.sh を reload しても再現する。新しく bash を起動すると再現しない。
+  これはこのセッション特有の問題だろうか。
+
+  →これは履歴を再読込したら発生しなくなった。 read -t で待たされた後に過去の
+  履歴が autosuggestion で表示される事なども考えると履歴補完で何か時間がかかっ
+  ていたという事なのかもしれない。
+
+  と思ったがプロセスのメモリ使用量が物凄い事になっている。790MB も使用してい
+  る。どういう事かと思ったら物凄く巨大な配列や変数が定義されているみたいだ。
+  declare -p > a.txt とすると他の Bash インスタンスは 3MB 程度なのに対して
+  29029 は 41MB の結果になっている。100M要素の配列や変数が沢山あるみたいだ。
+  A, a, u, v 等の変数を削除して行ったら、2.7MBにまで減少した。然しメモリ使用
+  量はそれでも 580MB のままである。何かメモリリークでもあるのだろうか。
+
+  うーん。巨大配列を作るとその配列を削除してもメモリが開放されないバグがある
+  みたいだ。bash-5.0, bash-dev で確認した。
+
+  $ bash-dev --norc
+  $ A=({000000..999999})
+  $ unset A
+
+  うーん。或いはヒープ管理の都合で断片化してしまって開放できない状態になって
+  いるという可能性もある? 然し、配列を作成して削除した時にそれ以外に何か覚え
+  ておくべきデータが残ったりするのだろうか。不思議である。うーん。やはりそう
+  いうデータがあるとしても高々数十ぐらいだろうと思われてだとすれば開放できな
+  いブロックも高々数十ぐらいの筈で、数百MB残るというのも変だし、何よりほんの
+  少したりとも解放されていないのはかなり怪しい。
+
+  bash-4.4 だとそもそも 100 万要素の配列を作るのに滅茶苦茶時間がかかる。2分17
+  秒かかった。bash-4.4 でも全く解放されないという事が確認できた。うーん。
+
+  更に bash-5.0 で eval 'A=({000000..999999}); unset A' としてもメモリを食っ
+  たままになっている。なのでコマンド実行に関係する問題ではないと思われる。
+
+  * 不思議な事に bash-5.0 で1回目の A=({000000..999999}) は一瞬で終わるが2回
+    目の A=({000000..999999}) には滅茶苦茶時間がかかるという事に気づいた。や
+    はり heap の問題だろうか。。
+
+    $ time A=({000000..999999}); unset A
+
+    real    0m0.665s
+    user    0m0.578s
+    sys     0m0.086s
+    $ time A=({000000..999999}); unset A
+
+    real    1m45.415s
+    user    1m45.130s
+    sys     0m0.077s
+
+    変数名が違っていてもやはり長い時間がかかる様になってしまう。
+
+    何か独自のアロケータを使っている可能性もある気がする。と思ったが bash の
+    実装だと free を呼んでいるだけの気がするのでアロケータは使っていない様な
+    気がする。然し分からないので後でちゃんと確認する。
+
+    と思ったらこの問題に関しては bash-5.1 で修正されたみたいだ。
+
+    bash-dev$ time A=({000000..999999}); unset A
+
+    real    0m0.893s
+    user    0m0.723s
+    sys     0m0.169s
+    bash-dev$ time A=({000000..999999}); unset A
+
+    real    0m0.634s
+    user    0m0.628s
+    sys     0m0.005s
+
+    bash-5.1$ time A=({000000..999999}); unset A
+
+    real    0m0.863s
+    user    0m0.711s
+    sys     0m0.150s
+    bash-5.1$ time A=({000000..999999}); unset A
+
+    real    0m0.738s
+    user    0m0.724s
+    sys     0m0.013s
+
+  * 具体的に調べてみることにする。とにかく unset でメモリが解放されないという
+    事。unset は unbind_variable を呼び出している。unbind_variable は
+    makunbound を呼び出している。makunbound は array_dispose を呼び出している。
+    array_dispose (array.c) は array_dispose_element を呼び出している。
+    array_dispose_element は最初の要素だけを削除している???? と思ったがその前
+    の array_flush が実際には殆どの要素を削除している様だ。うーん。中身を見る
+    とちゃんと free している様に見える。FREE(x) は何かと思ったら if(x)
+    free(x) の事らしい。然し、そうだとしても少しも解放されないというのは確か
+    におかしな事である。うーん。
+
+    念の為に array_dispose_element の呼び出し回数を確認してみた。ちゃんと1M回
+    呼び出されている。つまり、free を呼び出してもちゃんとメモリがシステムに返
+    されるとは限らないという事。以下にも記述がある。
+
+    https://stackoverflow.com/questions/15139436/why-free-doesnt-really-frees-memory
+
+    うーん。使っている領域の数と確保されている領域の数が圧倒的に違ってきたら、
+    いい感じに確保されている領域を開放していくという具合の実装を期待したがそ
+    うでもない様だ。うーん。基本的に一度確保した小さなブロックはもう解放され
+    ないと考えるべきなのだろうか。
+
+    因みに大きな単一の文字列についてはちゃんと解放された。これは余りに大きな
+    領域の場合にはシステムから直接確保して直接解放するからなのだろうと思われ
+    る。
+
+    これは結局 Linux/glibc の malloc の問題の様な気がする。一方で何故
+    bash-5.0 と 5.1 で二回目以降の巨大配列の確保にかかる時間の差があるのかと
+    いう疑問は未だ残っている。
+
+    bisect すると 37adc8b9 らしい。本当だろうか? と思って中を確認した所
+    lib/malloc/malloc.c を変更している。つまり bash は自前の malloc/free を実
+    装してそれを使っているという事。メモリが全然解放されないのもこの実装が原
+    因なのではないか。
+
+    実際に internal_free の実装を確認すると単にリストの末尾に要素を追加してい
+    るだけである。解放する気は全くない様だ。
+
+    /* Put this block on the free list.  */
+    CHAIN (p) = nextf[nunits];
+
+* ./configure --with-bash-malloc=no にしたら改善するのだろうか
+
+  bash-malloc を使う理由は何だろうか。速度に問題があるのだろうか。実際に二種
+  類で比較してみたが大した違いはない。bash-malloc は初回の確保には時間がかか
+  る。二回目については両者とも改善して速度的には同程度である。
+
+  そして振る舞いに関しては同様。解放する気はやはり全然ないようだ。
+
+  うーん。Google Chrome がタブごとにプロセスを分けたというのもこういう事なの
+  かもしれない。ページごとにアロケータを作るにしてもうっかりするとページを跨
+  る参照を作り兼ねないから、それなら完全にプロセスを分けてしまって弱参照を徹
+  底するという事。
+
+2021-08-24
+
+* ${param//pat/&}
+
+  https://lists.gnu.org/archive/html/bug-bash/2021-08/msg00165.html
+  https://lists.gnu.org/archive/html/bug-bash/2021-08/msg00166.html
+  https://lists.gnu.org/archive/html/bug-bash/2021-01/msg00215.html
+
+  ここで ${param//pat/&} で & が一致文字列に変換されるとしている。
+  然し実際に試してみるとこれはかなり際どい変更の様な気がする。
+
+  ./bash --norc
+  $ a='(&)' b='XXX,YYY,ZZZ'
+  $ echo "${b//[X-Z][X-Z][X-Z]/(&)}"
+  (XXX),(YYY),(ZZZ)
+  これは良い。
+  $ echo "${b//[X-Z][X-Z][X-Z]/$a}"
+  (XXX),(YYY),(ZZZ)
+  これもまあ分からなくはない。
+
+  $ echo "${b//[X-Z][X-Z][X-Z]/'(&)'}"
+  (XXX),(YYY),(ZZZ)
+  $ echo "${b//[X-Z][X-Z][X-Z]/"$a"}"
+  (XXX),(YYY),(ZZZ)
+
+  これは困る。更に、literal & を含める手段が存在しない気がする。
+
+  $ echo "${b//[X-Z][X-Z][X-Z]/\&}"
+  XXX,YYY,ZZZ
+  $ echo "${b//[X-Z][X-Z][X-Z]/'&'}"
+  XXX,YYY,ZZZ
+  $ echo "${b//[X-Z][X-Z][X-Z]/"&"}"
+  XXX,YYY,ZZZ
+  $ echo "${b//[X-Z][X-Z][X-Z]/"\&"}"
+  \&,\&,\&
+
+  まあ、未だ有効にはしていないし不完全な実装という事なのだろう。何れもっとちゃ
+  んとした実装になるのだろうと思う。"tagged" というのは後でちゃんと実装する予定
+  という意味なのだろうという気がする。
+
 2021-05-25
 
 * set -e; builtin eval false || true で駄目になるという事
@@ -1041,7 +1218,204 @@
   Done
 -------------------------------------------------------------------------------
 
+2021-09-22
+
+* report29: 2021-09-08 declare -A a; unset 'a[${b[0]}]' で　segfault する [#D0029]
+
+  ./bash -c "declare -A a; unset 'a[\${b[0]}]'"
+  ./bash -c "declare -A a; unset 'a[\`echo [0]\`]'"
+
+  #0  0x00007ffff7de4e35 in raise () from /lib64/libc.so.6
+  #1  0x00007ffff7dcf895 in abort () from /lib64/libc.so.6
+  #2  0x0000000000452fbf in programming_error ()
+  #3  0x00000000004fd4d7 in internal_free.isra ()
+  #4  0x0000000000474c10 in expand_word_internal.isra ()
+  #5  0x00000000004774e0 in expand_subscript_string ()
+  #6  0x000000000048890a in unbind_array_element ()
+  #7  0x00000000004b0ed5 in unset_builtin ()
+  #8  0x000000000043ad4b in execute_builtin.isra ()
+  #9  0x000000000043f69f in execute_command_internal ()
+  #10 0x0000000000442ac3 in execute_connection ()
+  #11 0x000000000043dfd9 in execute_command_internal ()
+  #12 0x00000000004a7191 in parse_and_execute ()
+  #13 0x0000000000423f8b in run_one_command ()
+  #14 0x0000000000422c0a in main ()
+
+  問題が起こっているのは expand_word_internal の中である。実装を見ていると引数
+  に渡している word->word は実はエラーの時には free されるという事を想定してい
+  る様に見える。
+
+  一方で、b19658360 で導入された expand_subscript_string からの
+  expand_word_internal 呼び出しについては、呼び出し元で単に単語を word->word に
+  設定して呼び出しを行っている。これは新しく文字列をコピーしてそれから呼び出す
+  べきなのではないか。
+
+
+  * そもそも unset で ${v[...]} が中途半端に抜き出されるのは変な気がする。
+
+    a 修正案1: VA_ONEWORD を builtins/set.def (unset_builtin) で設定するか、或
+      いは builtins/common.def (builtin_arrayref_flags) で設定するかすれば良い
+      気がする。配列名を渡されている時点で assoc_expand_once であろうとなかろう
+      と同様に処理するべきなのだという気がする。
+
+      →これだと printf -v 'assoc[aaa]]' 等が普通に accept されてしまって不自然
+      なので駄目という事なのだろう。この方針は却下。VA_ONEWORD は nameref で展
+      開した後に assoc[aaa]] みたいになっているのを処理するための物の様に見える。
+      この様な物を明示的に accept する為に assoc_expand_once を使うという事なの
+      だろう。
+
+    うーん。然し何故中途半端な位置まで切り取ってしまうのだろうか。これだと中途
+    半端な位置で切り取られた場合には残りの文字列は無視されて処理されてっしまう
+    気がする。或いは無視させる様な使い方があるのだろうか。と思って
+    dict=([hello]=world); unset -v 'dict[hello]=1234' だとか unset -v
+    'dict[hello]=1234]' だとかで試してみたが "有効な識別子ではありません" と表
+    示されて何も操作はされない。うーん。既にチェックが走るのであればそもそも何
+    故条件付きで ONEWORD の動作をしているのか分からないし、チェックが走っている
+    のにも関わらず dict[${a[0]}] が中途半端に通過してクラッシュするのかも分から
+    ない。"有効な識別子" かどうかを判定しているコードを使って添字を抜き出す事も
+    できるのではないか。そしてその方が正確なのではないか。
+
+    →これは valid_array_reference という関数で先に配列変数かどうかをチェックし
+      ているからである。
+
+    ? skipsubscript (subst.c) はどういう動作をするのだろうか。
+
+      skipsubscript は skip_matched_pair を呼び出していて flags 引数 (特に
+      flags&1) が 0 の時に、様々な quote や ${} $() を処理する様になっている。
+      つまり、flags は "フラットに入れ子も何も考えずに処理します" という宣言な
+      のだと思われる。
+
+    ? valid_array_reference (arrayfunc.c:1187) の flags には何を指定するのか。
+
+      (1) assoc かつ flags が VA_NOEXPAND|VA_ONEWORD を含んでいれば、既に展開済
+        みと考えられるので、'arr['*']' の形をしていれば何でも良い事にする。
+
+      (2) assoc の場合には skipsubscript を呼び出す。
+
+        flags が VA_NOEXPAND を含んでいれば、'arr['/[^]]*/']' の形を全て受け付
+        ける。但し skipsubscript を使って mbchar を考慮に入れて ']' を認識する。
+
+        flags が VA_NOEXPAND を含んでいなければ入れ子を考慮に入れて対応する終端
+        ']' が抽出される。然し、コメントには VA_NOEXPAND が指定されていなければ
+        ならないという具合に書かれている。然し、この条件が崩れていたとしても
+        (3) に進んで結局同じ処理になる。
+
+        ■ここでの疑問は assoc の時に "flags が VA_NOEXPAND を含んでいなければ
+        ならない" という想定が何か実装途中の時の一時的な可能性だったのか、或い
+        は実際にそうなる様にコーディングしなければならない筈だったのかという事
+        である。
+
+      (3) それ以外の時には入れ子を考慮に入れて対応する ']' まで読み飛ばす。
+
+    うーん。と思ったら。skipsubscript の呼び出しに於いても ${} $() を処理するか
+    どうかを第三引数で指定する事ができる様になっている様だ。という事はこの
+    skipsubscript に於いて適切な処理を実行するべきなのではないか?
+
+    b 修正案2 skipsubscript (at unbind_array_element arrayfunc.c:1048) の呼び出
+      しで flags 引数を調整する。
+
+      上の valid_array_reference の実装と合わせるのであれば
+
+      -len = skipsubscript (sub, 0, (flags&VA_NOEXPAND) || (var && assoc_p(var))); /* XXX */
+      +len = skipsubscript (sub, 0, flags&VA_NOEXPAND); /* XXX */
+
+      で十分の気がする。2つ目の条件指定については valid_array_reference のコメ
+      ント "assoc では VA_NOEXPAND が指定されている" というのが対応しているのだ
+      ろう。然し、assoc だからと言って常に literal に ] を見つけるというのは変
+      だし、ちゃんと入れ子を考慮して終端を見つける様にするべきの気がする。
+
+      ? うーん。この変更の side effect としては dict[v[0]] も accept される様に
+        なるという事。確かに index array であればこそ [] の入れ子が考慮に入れら
+        れるのであって、assoc の場合には [] の入れ子は考慮に入れないのだという
+        考え方もあるのである。
+
+        →${dict[v[0]]} は常にちゃんと処理される。という事を考えるとやはり
+          assoc であっても [] を考慮に入れるべきなのだという気がする。
+
+  * 他にも skipsubscript を呼び出している箇所はたくさんある。類似の問題が他にも
+    あるのではないか。大抵の場所は 0 で呼び出している。これは入れ子を処理すると
+    いう方向なのでOK。気にするべきは "入れ子を処理しない" という状況が使われる
+    箇所である。
+
+    ./arrayfunc.c:1048:    len = skipsubscript (sub, 0, flags&VA_NOEXPAND); /* XXX */
+      ← unbind_array_element
+    ./arrayfunc.c:1210:     len = skipsubscript (t, 0, flags&VA_NOEXPAND);
+      ← valid_array_reference
+    ./arrayfunc.c:1304:  ni = skipsubscript (s, ind, flags);        /* XXX - was 0 not flags */
+      ← array_variable_name(s, flags, subp, lenp)
+
+      ./arrayfunc.c:333:  vname = array_variable_name (name, (flags & ASS_NOEXPAND) != 0, &sub, &sublen);
+
+        ←assign_array_element (name, value, flags)
+
+        ./arrayfunc.c:355:  entry = assign_array_element_internal (entry, name, vname, sub, sublen, value, flags);
+        ./arrayfunc.c:362:assign_array_element_internal (entry, name, vname, sub, sublen, value, flags)
+        ./builtins/common.c:1007:    v = assign_array_element (name, value, bindflags);
+        ./builtins/declare.def:952:       var = assign_array_element (name, value, local_aflags);       /* XXX - not aflags */
+        ./subst.c:3298:      entry = assign_array_element (name, value, aflags);
+        ./variables.c:3148:       entry = assign_array_element (newval, value, aflags|ASS_NAMEREF);
+        ./variables.c:3305:                     return (assign_array_element (nameref_cell (nv), value, flags));
+        ./variables.c:3470:    v = assign_array_element (lhs, rhs, flags);
+
+      ./arrayfunc.c:1340:  t = array_variable_name (s, flags, subp, lenp);
+
+        ← array_variable_part (s, flags, subp, lenp)
+
+        ./arrayfunc.c:1382:  var = array_variable_part (s, (flags&AV_NOEXPAND) ? 1 : 0, &t, &len);      /* XXX */
+        ./expr.c:1169:  v = (e == ']') ? array_variable_part (tok, tflag, (char **)0, (int *)0) : find_variable (tok);
+        ./variables.c:3447:      v = array_variable_part (lhs, (flags & ASS_NOEXPAND) != 0, (char **)0, (int *)0);
+
+      ./expr.c:1179:      value = (e == ']') ? array_variable_name (tok, tflag, (char **)0, (int *)0) : tok;
+
+        TODO
+
+    ./expr.c:362:  return (skipsubscript (cp, 0, flags));
+      ← expr_skipsubscript(vp,cp)
+        flags = (isassoc && assoc_expand_once && already_expanded) ? VA_NOEXPAND : 0;
+
+      ./expr.c:1344:    e = expr_skipsubscript (tp, cp);              /* XXX - was skipsubscript */
+
+    ./general.c:467:          newi = skipsubscript (string, indx, (flags & 2) ? 1 : 0);
+    ./subst.c:1843:skipsubscript (string, start, flags)
+
+    うーん。あらゆる所から呼び出されているから判断が難しい。逆に問題が起こりそ
+    うな側から試していくべきなのかもしれない。
+
+      printf -v XXX 及び read XXX は元から問題がなかった。今回の変更による影響
+      もない。declare 'A[v[0]=123]=hello' の様な物に対しても今回の変更による影
+      響はない。これらは何れも初めから自然な振る舞いになっていた。
+
 2021-06-27
+
+* 2021-06-09 report28: bash: 5.2 新機能 READLINE_ARGUMENT [#D0028]
+
+  また早速バグがある様だ。M-1 M-2 etc 等として入力すると引数部分の検出に失敗し
+  てまた bash_execute_unix_command 見つかりませんのエラーが表示される事になる。
+  また vi-command でも同様の問題がある様だ。というか (arg: X) を表示できている
+  のだからそれと同じに処理したら駄目なのだろうか。他の readline bindable
+  function についても正しく引数を処理できているのだから、"bind -x" でも同様の処
+  理によってちゃんと動いて然るべきなのではないのだろうか。
+
+  そもそも根本的な修正をする為には現在の keymap entry を特定するのに使ったbyte
+  数を使うべきなのではないだろうか。その情報は何処にもないのだろうか。調べたが
+  digit-argument の中で次の文字を見て数字だったら処理して、そうでなければ
+  _rl_dispatch を呼び出している。_rl_dispatch は単に一文字キーを読取る為の関数
+  の様な気がする。但し、keymap を指定することができる。
+
+  うーん。どうやら _rl_dispatch または _rl_dispatch_subseq を再帰的に呼び出して
+  解析している様子である。そしてその都度 getkey で文字を読み取っている。一番外
+  側で文字を読み出しているという訳でもない様だ。
+
+  うーん。heuristic には M-{0..9} があったら全て取り除いてしまえば良い様な気が
+  する。然し、binding が普通でない時にはどうしたら良いのか。うーん。取り敢えず
+  既定の binding の場合について考える。digit-argument が呼び出された以上は、必
+  ず何処かで digit-argument が始まって何処かでそれが終了すると考えられる。終了
+  した時に改めて digit-argument が呼び出された時に digit-argument は前回の物に
+  追記される形になる。
+
+  うーん。最後の digit-argument の時に sequence を削除するか、或いは新しいグロー
+  バル変数を用意して実際の seq に使われた keyseq 内の開始位置が分かる様にする
+  か…。
 
 * 2021-02-08 report26: bash: 沢山の行が含まれている時の ${v...} が全て N^2 で遅くなる [#D0027]
 

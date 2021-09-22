@@ -1,0 +1,26 @@
+From 3b789cf1f745cb8755b08f4ded85732ed29e0095 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Wed, 8 Sep 2021 18:54:47 +0900
+Subject: [PATCH 2/4] allow nesting and quoting in assoc subscripts (when
+ !assoc_expand_once)
+
+---
+ arrayfunc.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arrayfunc.c b/arrayfunc.c
+index 95c0fef7..b436ef0b 100644
+--- a/arrayfunc.c
++++ b/arrayfunc.c
+@@ -1045,7 +1045,7 @@ unbind_array_element (var, sub, flags)
+   if (var && assoc_p (var) && (flags&VA_ONEWORD))
+     len = strlen (sub) - 1;
+   else
+-    len = skipsubscript (sub, 0, (flags&VA_NOEXPAND) || (var && assoc_p(var)));	/* XXX */
++    len = skipsubscript (sub, 0, flags&VA_NOEXPAND);	/* XXX */
+   if (sub[len] != ']' || len == 0)
+     {
+       builtin_error ("%s[%s: %s", var->name, sub, _(bash_badsub_errmsg));
+-- 
+2.21.3
+

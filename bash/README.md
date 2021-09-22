@@ -57,6 +57,12 @@
   - ToDo: ■Cygwin については未だ遅い儘である。
 - 2021-06-27 report26: 沢山の行を含む変数について `${v...}` が O(N^2) でスケールする事について
   - https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00138.html
+- 2021-06-27 report27: Fix READLINE_ARGUMENT with `M-1 M-2` and with `vi-arg-digit`
+  - https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00139.html
+- 2021-06-27 report28: quote command and function names in `complete -p`
+  - https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00140.html
+- 2021-09-08 report29: ■
+- 2021-09-22 report30: <kbd>prior</kbd> が `history-search-backward` になった筈なのに動いていない
 
 ## help-bash
 

@@ -1,0 +1,104 @@
+Subject: [PATCH] fix segfault by unset 'assoc[${x[0]}]'
+
+Bash Version:
+  devel branch (441078402919f6f0dd677cad18d55c7a89d294fc),
+  5.1.8(2)-maint (x86_64-pc-linux-gnu)
+
+Description:
+
+  In devel branch, « unset 'assoc[${x[0]}]' » causes a segmentation
+  fault, where `assoc' is the name of an associative array.  This does
+  not happen with Bash 5.1.
+
+  In Bash 4.4--5.1, the same unset command causes the following
+  bad-substitution error:
+
+    bash-4.4: ${x[0: bad substitution
+
+  In Bash 4.0--5.3, the unset command causes the following error:
+
+    bash-4.0: [${x[0]}]: bad array subscript
+
+Repeat-by:
+
+  The following command causes  segmentation fault.
+
+  $ bash-dev -c "declare -A a; unset 'a[\${b[0]}]'"
+
+  The stack trace reads
+
+  #0  0x00007ffff7de4e35 in raise () from /lib64/libc.so.6
+  #1  0x00007ffff7dcf895 in abort () from /lib64/libc.so.6
+  #2  0x0000000000452fbf in programming_error ()
+  #3  0x00000000004fd4d7 in internal_free.isra ()
+  #4  0x0000000000474c10 in expand_word_internal.isra ()
+  #5  0x00000000004774e0 in expand_subscript_string ()
+  #6  0x000000000048890a in unbind_array_element ()
+  #7  0x00000000004b0ed5 in unset_builtin ()
+  #8  0x000000000043ad4b in execute_builtin.isra ()
+  #9  0x000000000043f69f in execute_command_internal ()
+  #10 0x0000000000442ac3 in execute_connection ()
+  #11 0x000000000043dfd9 in execute_command_internal ()
+  #12 0x00000000004a7191 in parse_and_execute ()
+  #13 0x0000000000423f8b in run_one_command ()
+  #14 0x0000000000422c0a in main ()
+
+  This command also causes the same problem:
+
+  $ bash-dev -c "declare -A a; unset 'a[\`echo [0]\`]'"
+
+Fix:
+
+  The segmentation fault is caused in `expand_word_internal (WORD_DESC
+  *word, ...)' (subst.c:10325) which releases the memory block
+  `word->word' when it fails to expand the word.  The problem is that
+  `expand_subscript_string (char *string, ...)' (subst.c:10184) tries
+  to directly pass the pointer `string' to `word->word' for the call
+  of `expand_word_internal (WORD_DESC *word, ...)'. `word->word' needs
+  to be a pointer which may be released on the expansion error.
+
+  * In the first patch `0001-....patch', the argument string is copied
+    using `savestring ()', and the copy is passed to
+    `expand_word_internal' through `td.word'.  Finally, the copy is
+    deleted by `free (td.word)'.  When an expansion error occurs,
+    `NULL' is assigned to `fd.word' by `expand_word_internal', so
+    `free (td.word)'---i.e., `free (NULL)'---does nothing.
+
+  The segmentation fault is fixed by the above patch, but there
+  remains still the same error as bash 4.4.
+
+    bash-patch1: ${x[0: bad substitution
+
+  This is caused by an inconsistency between `valid_array_reference
+  (name,flags)' (arrayfunc.c:1187) and `unbind_array_element
+  (var,sub,flags)' (arrayfunc.c:1033) in the extraction of
+  associative-array subscripts.  Note that `valid_array_reference' is
+  called from `unset_builtin' (builtins/set.def:834) to check if the
+  unset name has the form of an array element.  Also,
+  `unbind_array_element' is called from `unset_builtin' to perform the
+  actual unset.  In `valid_array_reference', the length of the
+  associative-array subscripts are determined as
+
+      else if (isassoc)
+        len = skipsubscript (t, 0, flags&VA_NOEXPAND);  /* VA_NOEXPAND must be 1 */
+
+  whereas in `unbind_array_element', the length is determined as
+
+      if (var && assoc_p (var) && (flags&VA_ONEWORD))
+        len = strlen (sub) - 1;
+      else
+        len = skipsubscript (sub, 0, (flags&VA_NOEXPAND) || (var && assoc_p(var)));  /* XXX */
+
+  `skipsubscript' does not consider the nesting of ${} and $() when
+  bit 1 is set to the third argument.  In the former code, nesting is
+  not considered only when VA_NOEXPAND is specified.  However, in the
+  latter code, nesting is never considered for associative arrays
+  (even when VA_NOEXPAND is not specified).  I believe the former code
+  should be the expected one.
+
+  * In the second patch `0002-....patch', the subscript extraction in
+    `unbind_array_element' is adjusted to match with that of
+    `valid_array_element'.
+
+--
+Koichi
