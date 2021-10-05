@@ -1,5 +1,7 @@
 Subject: devel: Questions about quoting in the new replacement ${var/pat/&}
 
+I have questions on the new feature ${var/pat/&} in the devel branch.
+
 > commit f188aa6a013e89d421e39354086eed513652b492 (upstream/devel)
 > Author: Chet Ramey <chet.ramey@case.edu>
 > Date:   Mon Oct 4 15:30:21 2021 -0400
@@ -22,7 +24,7 @@ with a simple construct, but I feel the current treatment of quoting
 has problems:
 
 1. There is no way to specify an arbitrary string in replacement in a
-  way that isi compatible with both bash 5.1 and 5.2.
+  way that is compatible with both bash 5.1 and 5.2.
 
 2. There is no way to insert a backslash before the matched part
   (which I'd think would be one of the typical usages of &).
@@ -52,7 +54,7 @@ where XXXX is some string that represents the literal "$rep" (i.e.,
   1:X&AYB&Z
 
 I would have expected it to work because $pat will lose special
-meaning and treated literally when it is quoted as "$pat". For
+meaning and be treated literally when it is quoted as "$pat".  For
 example, the glob patterns *?[ etc. and anchors # and % in $pat will
 lose its special meaning when it is quoted:
 
@@ -89,9 +91,9 @@ part.
 
   in Bash 5.2.
 
-* Also, there no way of writing it so that it works in both Bash 5.1
-  and 5.2.  To make it work, one needs to switch the code depending on
-  the bash version as:
+* Also, there is no way of writing it so that it works in both Bash
+  5.1 and 5.2.  To make it work, one needs to switch the code
+  depending on the bash version as:
 
   if ((BASH_VERSINFO[0]*10000+BASH_VERSINFO[1]*100>=50200)); then
     echo "${str/$pat/${rep//&/\\\\&}}"
