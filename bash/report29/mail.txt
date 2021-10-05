@@ -1,4 +1,4 @@
-Subject: [PATCH] fix segfault by unset 'assoc[${x[0]}]'
+Subject: [PATCH] fix segfault caused by unset 'assoc[${x[0]}]'
 
 Bash Version:
   devel branch (441078402919f6f0dd677cad18d55c7a89d294fc),
@@ -14,10 +14,6 @@ Description:
   bad-substitution error:
 
     bash-4.4: ${x[0: bad substitution
-
-  In Bash 4.0--5.3, the unset command causes the following error:
-
-    bash-4.0: [${x[0]}]: bad array subscript
 
 Repeat-by:
 
@@ -53,12 +49,15 @@ Fix:
   of `expand_word_internal (WORD_DESC *word, ...)'. `word->word' needs
   to be a pointer which may be released on the expansion error.
 
-  * In the first patch `0001-....patch', the argument string is copied
-    using `savestring ()', and the copy is passed to
-    `expand_word_internal' through `td.word'.  Finally, the copy is
-    deleted by `free (td.word)'.  When an expansion error occurs,
-    `NULL' is assigned to `fd.word' by `expand_word_internal', so
-    `free (td.word)'---i.e., `free (NULL)'---does nothing.
+  * In the first patch `0001-....patch', the argument `string' of
+    `expand_subscript_string' is copied using `savestring ()', and the
+    copy is passed to `expand_word_internal' through `td.word'.
+    Finally, the copy is deleted by `free (td.word)'.  When an
+    expansion error occurs, `NULL' is assigned to `td.word' by
+    `expand_word_internal', so `free (td.word)'---i.e., `free
+    (NULL)'---does nothing.
+
+  ----------------------------------------
 
   The segmentation fault is fixed by the above patch, but there
   remains still the same error as bash 4.4.
@@ -85,7 +84,7 @@ Fix:
       else
         len = skipsubscript (sub, 0, (flags&VA_NOEXPAND) || (var && assoc_p(var)));  /* XXX */
 
-  `skipsubscript' does not consider the nesting of ${} and $() when
+  `skipsubscript' does not consider the nesting of ${}, $(), etc. when
   bit 1 is set to the third argument.  In the former code, nesting is
   not considered only when VA_NOEXPAND is specified.  However, in the
   latter code, nesting is never considered for associative arrays
@@ -95,6 +94,15 @@ Fix:
   * In the second patch `0002-....patch', the subscript extraction in
     `unbind_array_element' is adjusted to match with that of
     `valid_array_element'.
+
+  After this patch, « unset 'a[${x[0]}]' » works as expected:
+
+    $ declare -A a=([hello]=12345)
+    $ declare -p a
+    declare -A a=([hello]="12345" )
+    $ x=hello; unset -v 'a[${x[0]}]'
+    $ declare -p a
+    declare -A a=()
 
 --
 Koichi
