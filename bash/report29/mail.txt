@@ -43,10 +43,6 @@ Repeat-by:
   #13 0x0000000000423f8b in run_one_command ()
   #14 0x0000000000422c0a in main ()
 
-  This command also causes the same problem:
-
-  $ bash-dev -c "declare -A a; unset 'a[\`echo [0]\`]'"
-
 Fix:
 
   The segmentation fault is caused in `expand_word_internal (WORD_DESC

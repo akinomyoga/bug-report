@@ -404,10 +404,10 @@
 
 * set -e; builtin eval false || true で駄目になるという事
 
-  この問題は実は report20 のすぐ上で起こっている問題で起こっている原因も似たよ
-  うな物である様に思われる。実装を見てみると eval/source/command の場合に
-  parse_and_execute を呼び出す事によって set -e の効果が回復してしまうのを、
-  前後で状態を保存する事によって防いでいる様である。
+  この問題は実は report20 のすぐ上で起こっている問題で、起こっている原因も似た
+  ような物である様に思われる。実装を見てみると eval/source/command の場合に
+  parse_and_execute を呼び出す事によって set -e の効果が回復してしまうのを、前
+  後で状態を保存する事によって防いでいる様である。
 
   ? この実装方法だと他にも問題が生じる様な気がする。eval の内部で set -e した効
     果が外に現れないのではないだろうか。或いはコマンドが終わる度に -e が設定し
@@ -1218,6 +1218,148 @@
   Done
 -------------------------------------------------------------------------------
 
+2021-10-05
+
+* unset -v 'a[`echo 1`]' で bad array subscript エラーが出る [#D0031]
+
+  #D0029 において完全に直ったと思ったら今度は
+
+    $ bash-dev -c "declare -A a; unset 'a[\`echo [0]\`]'"
+
+  が動かない。これについては bash-4.0 でも駄目。
+
+    $ bash-4.0 --norc
+    $ declare -A a; unset 'a[`echo hello`]'
+    bash-4.0: unset: a[`echo hello`]: bad array subscript
+
+  というよりそもそも配列でも動作が怪しい。以下は bash-4.0, 5.1 で再現した。
+
+    $ a[123]=123; declare -p a
+    declare -a a='([123]="123")'
+    $ unset 'a[`echo 123`]'; declare -p a
+    bash-4.0: unset: a[`echo 123`]: bad array subscript
+    declare -a a='([123]="123")'
+    $ unset 'a[`echo`]'; declare -p a
+    bash-4.0: unset: a[`echo`]: bad array subscript
+    declare -a a='([123]="123")'
+    $ unset 'a[`echo`123]'; declare -p a
+    bash-4.0: unset: a[`echo`123]: bad array subscript
+    declare -a a='([123]="123")'
+    $ unset 'a[123`echo`]'; declare -p a
+    declare -a a='()'
+    $ a[123]=123
+    $ unset 'a[123`echo`456]'; declare -p a
+    declare -a a='([123]="123")'
+    $
+
+  どうも最初の ` までしか見ていない様な気がする。` が入っていたら一律でエラーに
+  なるのかと思いきや、何か添字の後に ` があった場合には特に問題にならない。
+
+  うーん。次の結果を見ると最初の ` までしか見ていないという訳でもない? 何故か `
+  が閉じていないと何のエラーも発生しないが、それでも動かない。
+
+    $ a[123]=123
+    $ unset 'a[`echo]'; declare -p a
+    declare -a a=([123]="123")
+    $ unset 'a[`echo`]'; declare -p a
+    bash-5.1: unset: a[`echo`]: bad array subscript
+    declare -a a=([123]="123")
+    $ unset 'a[123`echo]'; declare -p a
+    declare -a a=([123]="123")
+
+  算術式や printf -v の中ではちゃんと動いている。なので `...` が入っていても動
+  いてしかるべき。
+
+    $ x='arr[`echo 123`]=111'
+    $ ((x))
+    $ declare -p arr
+    declare -a arr=([123]="111")
+
+    $ printf -v 'a[`echo 123`]' hello
+    $ declare -p a
+    declare -a a=([123]="hello")
+
+  これは別枠の問題の気がするけれども同時に修正する事にする。PATCH 報告は分ける
+  かもしれない。
+
+  [絞り込み]
+
+  取り敢えず変な事が何処で起こっているのかについて確認する。unset から迫る事に
+  する。以下のコマンドで振る舞いを調べる。
+
+  $ ./bash -c 'a=(); unset -v "a[1\`echo\`2]"'
+
+  skipsubscript を実行した段階ではちゃんと 1`echo`2 を抜き出す事ができている。
+
+  assoc の時は expand_subscript_string を呼び出している。array の時には
+  array_expand_index を呼び出している。と思ったらうーん。ちゃんと動いている。???
+  改めて動かない例について確認する必要がある。以下が動かない。
+
+  $ ./bash -c 'a=(); unset -v "a[\`echo 1\`]"'
+
+  これについては…うーん。どうやら skipsubscript が、最初の文字が ` の時にだけ
+  変な振る舞いをするという事の様である。2文字目以降の場合には特に問題は生じてい
+  ない気がする。取り敢えずこれは修正する事にする。
+
+  ...  i = start + 1;                /* skip over leading bracket */
+
+  うーん。これだ。。。つまり、skipsubscript は [ をスキップする事を想定している。
+  一方で unbind_array_element は [ の直後にポインタがある事を要求している。それ
+  にも関わらず、unbind_array_element は直接ポインタを渡しているが為に、最初の文
+  字が無視されているという事。
+
+  ? ok: 然し、ここで疑問が生じる。何故 unset -v 'a[${x[0]}]' が動くのか? という
+    事。或いは実は動いていなかった? →うーん。どうやら算術式では [] の入れ子を
+    数える為に、{x[0]} となっていてもちゃんと [...] をスキップしてくれてちゃん
+    と終端を探す事ができていたという事の様だ。
+
+  とにかく skipsubscript で +1 するのをやめる様に実装するべきである。
+  skipsubscript の flags として 2 に意味を持たせるのが一つの手である。但し既に
+  使用している箇所で skipsubscript に flag 2 が混入し得る様では大変である。追跡
+  する必要がある。というかその前に skip_matched_pair の呼び出し元から確認する必
+  要がある。
+
+  - ./subst.c:1849 (skipsubscript):  return (skip_matched_pair (string, start, '[', ']', flags));
+
+    と思ったがこの skipsubscript の一箇所しか存在しなかった。
+
+    - ./arrayfunc.c:1077:    len = skipsubscript (sub, 0, flags&VA_NOEXPAND); /* XXX */
+    - ./arrayfunc.c:1240:     len = skipsubscript (t, 0, flags&VA_NOEXPAND);  /* VA_NOEXPAND must be 1 */
+    - ./general.c:467:          newi = skipsubscript (string, indx, (flags & 2) ? 1 : 0);
+    - ./expr.c:361:  flags = (isassoc && assoc_expand_once && already_expanded) ? VA_NOEXPAND : 0;
+      ./expr.c:362:  return (skipsubscript (cp, 0, flags));
+
+      これらは明示的に 1 or 0 なので OK
+
+    - ./arrayfunc.c:1336 (array_variable_name):  ni = skipsubscript (s, ind, flags);        /* XXX - was 0 not flags */
+      これは array_variable_name (s, flags, subp, lenp) からの呼び出しである。
+
+      - ./arrayfunc.c:333:  vname = array_variable_name (name, (flags & ASS_NOEXPAND) != 0, &sub, &sublen);
+
+        これは明示的に 1 or 0 である。
+
+      - ./expr.c:1179:      value = (e == ']') ? array_variable_name (tok, tflag, (char **)0, (int *)0) : tok;
+        tflag = assoc_expand_once && already_expanded;        /* for a start */
+
+        うーん。これは現在の所は問題ないが、将来的に tflag に余分な物が含まれる様になった時に怖い。
+        なので明示的に tflag ? 1 : 0 とする事にする? うーん。でも必要ないかもしれない。
+
+      - ./arrayfunc.c:1372 (array_variable_part):  t = array_variable_name (s, flags, subp, lenp);
+
+        - ./arrayfunc.c:1414:  var = array_variable_part (s, (flags&AV_NOEXPAND) ? 1 : 0, &t, &len);      /* XXX */
+        - ./variables.c:3447:      v = array_variable_part (lhs, (flags & ASS_NOEXPAND) != 0, (char **)0, (int *)0);
+
+          これは明示的に 1 or 0 である。
+
+        - ./expr.c:1169:  v = (e == ']') ? array_variable_part (tok, tflag, (char **)0, (int *)0) : find_variable (tok);
+
+          これは既に見た tflag であり、 assoc_expand_once && already_expanded なのでやはり 1 or 0 である。
+
+  修正した。結局これは独立な問題である様に思われるので、別の patch として提出する事にする。
+
+  →どうやら修正箇所に r0029 と重複がある様なので r0029 の方がついてから調整し
+  て提出する。
+
 2021-09-22
 
 * report30: [bash-5.2] kP/kN bound to history-search-{backward,forward} 65822e50 [#D0030]
@@ -1405,6 +1547,15 @@
       printf -v XXX 及び read XXX は元から問題がなかった。今回の変更による影響
       もない。declare 'A[v[0]=123]=hello' の様な物に対しても今回の変更による影
       響はない。これらは何れも初めから自然な振る舞いになっていた。
+
+  ----------------------------------------------------------------------
+
+  完全に直ったと思ったら今度は
+
+    $ bash-dev -c "declare -A a; unset 'a[\`echo [0]\`]'"
+
+  が動かない。これについては独立した問題である事がはっきりしたので別項目で議論
+  する → #D0031
 
 2021-06-27
 
