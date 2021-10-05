@@ -1220,6 +1220,27 @@
 
 2021-09-22
 
+* report30: [bash-5.2] kP/kN bound to history-search-{backward,forward} 65822e50 [#D0030]
+  prior が動かないと思ったら思い切りミスっている。。。
+
+  lib/readline/terminal.c
+    - look in terminfo for key sequences for page up (kP) and page down
+      (kN) and bind them to history-search-{backward,forward},
+      respectively. From a patch from Xose Vazquez Perez
+      <xose.vazquez@gmail.com>
+
+  @@ -415,6 +419,8 @@ static const struct _tc_string tc_strings[] =
+     { "kD", &_rl_term_kD },^I/* delete */
+     { "kH", &_rl_term_kH },^I/* home down ?? */
+     { "kI", &_rl_term_kI },^I/* insert */
+  +  { "kN", &_rl_term_kN },^I/* page down */
+  +  { "kN", &_rl_term_kP },^I/* page up */
+     { "kd", &_rl_term_kd },
+     { "ke", &_rl_term_ke },^I/* end keypad mode */
+     { "kh", &_rl_term_kh },^I/* home */
+
+  これは報告した。直った。
+
 * report29: 2021-09-08 declare -A a; unset 'a[${b[0]}]' で　segfault する [#D0029]
 
   ./bash -c "declare -A a; unset 'a[\${b[0]}]'"

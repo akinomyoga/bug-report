@@ -1,0 +1,219 @@
+Subject: devel: Questions about quoting in the new replacement ${var/pat/&}
+
+> commit f188aa6a013e89d421e39354086eed513652b492 (upstream/devel)
+> Author: Chet Ramey <chet.ramey@case.edu>
+> Date:   Mon Oct 4 15:30:21 2021 -0400
+> 
+>     enable support for using `&' in the pattern substitution replacement string
+>
+> Any unquoted instances of & in STRING are replaced with the matching
+> portion of PATTERN.  Backslash is used to quote & in STRING; the
+> backslash is removed in order to permit a literal & in the
+> replacement string.  Users should take care if STRING is
+> double-quoted to avoid unwanted interactions between the backslash
+> and double-quoting.  Pattern substitution performs the check for &
+> after expanding STRING; shell programmers should quote backslashes
+> intended to escape the & and inhibit replacement so they survive any
+> quote removal performed by the expansion of STRING.
+
+I would very much like this change introduced in the latest commit
+f188aa6a in devel as it would enable many more string manipulations
+with a simple construct, but I feel the current treatment of quoting
+has problems:
+
+1. There is no way to specify an arbitrary string in replacement in a
+  way that isi compatible with both bash 5.1 and 5.2.
+
+2. There is no way to insert a backslash before the matched part
+  (which I'd think would be one of the typical usages of &).
+
+I below describe the details of each, followed by my suggestion or
+discussion on an alternative design.
+
+----------------------------------------------------------------------
+1. How to specify an arbitrary string in replacement copatibly with
+both bash 5.1 and 5.2?
+
+Currently any & in the replacement is replaced by the matched part
+regardless of whether & is quoted in the parameter-expansion context
+or not.  Even the result of the parameter expansions and other
+substitutions are subject to the special treatment of &, which makes
+it non-trivial to specify an arbitrary string to the replacement
+${var/pat/rep}.
+
+  $ str='X&Y&Z' pat='Y' rep='A&B'
+  $ echo ${str/$pat/XXXX}
+  X&A&B&Z
+
+where XXXX is some string that represents the literal "$rep" (i.e.,
+'A&B').  A naive quoting of "$rep" does not work:
+
+  $ echo "1:${str/$pat/"$rep"}"
+  1:X&AYB&Z
+
+I would have expected it to work because $pat will lose special
+meaning and treated literally when it is quoted as "$pat". For
+example, the glob patterns *?[ etc. and anchors # and % in $pat will
+lose its special meaning when it is quoted:
+
+  $ v='A' p='?'; echo "${v/$p/B}"; echo "${v/"$p"/B}"
+  B
+  A
+  $ v='A' p='#'; echo "${v/$p/B}"; echo "${v/"$p"/B}"
+  BA
+  A
+  $ v='A' p='%'; echo "${v/$p/B}"; echo "${v/"$p"/B}"
+  AB
+  A
+
+Of course, if $rep is not quoted, & in $rep is replaced by the matched
+part.
+
+  $ echo "2:${str/$pat/$rep}"
+  2:X&AYB&Z
+
+* To properly specify an arbitrary string in the replacement, one
+  needs to replace all the characters.
+
+  $ echo "${str/$pat/${rep//&/\\\\&}}"
+
+* When the replacement is not stored in a variable, one needs to
+  create a variable for the replacement, i.e.,
+
+  $ echo "${str/$pat/$(something)}"
+
+  in Bash 5.1 needs to be converted to
+
+  $ tmp=$(something)
+  $ echo "${str/$pat/${tmp//&/\\\\&}}"
+
+  in Bash 5.2.
+
+* Also, there no way of writing it so that it works in both Bash 5.1
+  and 5.2.  To make it work, one needs to switch the code depending on
+  the bash version as:
+
+  if ((BASH_VERSINFO[0]*10000+BASH_VERSINFO[1]*100>=50200)); then
+    echo "${str/$pat/${rep//&/\\\\&}}"
+  else
+    echo "${str/$pat/$rep}"
+  fi
+
+  [ Note: this does not work for the devel branch because the devel
+  branch still has the version 5.1. ]
+
+----------------------------------------------------------------------
+2. How to insert a literal backslash before the matched part?
+
+Another problem is that one cannot put a literal backslash just before
+& without affecting the meaning of &.  Currently if there is any
+backslash before &, & will lose the special meaning and the two
+characters '\&' become '&' after the replacement.
+
+One of typical usages of & in the replacement would be string
+escaping, i.e., quoting special characters in a string so that they do
+not have special meaning and are treated literally.  For example, let
+us consider escaping a string as a glob pattern as in the following
+case:
+
+  $ value='a*b*c' globchars='\*?[('
+  $ escaped=${value//["$globchars"]/XXXX}
+  $ echo "$escaped"
+  a\*b\*c 
+
+where "XXXX" is some string that represents a literal '\' plus &.  I
+naively expect « XXXX = '\'& » would work, which doesn't work
+actually:
+
+  $ echo "${value//["$globchars"]/'\'&}"
+  1:a&b&c
+
+All the other attempts fail:
+
+  $ echo "2a:${value//["$globchars"]/&}"
+  2a:a*b*c
+  $ echo "2b:${value//["$globchars"]/\&}"
+  2b:a*b*c
+  $ echo "2c:${value//["$globchars"]/\\&}"
+  2c:a&b&c
+  $ echo "2d:${value//["$globchars"]/\\\&}"
+  2d:a&b&c
+  $ echo "2e:${value//["$globchars"]/\\\\&}"
+  2e:a\&b\&c
+  $ echo "2f:${value//["$globchars"]/\\\\\&}"
+  2f:a\&b\&c
+  $ echo "2g:${value//["$globchars"]/\\\\\\&}"
+  2g:a\\&b\\&c
+
+  $ backslash='\'
+  $ echo "3a:${value//["$globchars"]/$backslash&}"
+  3a:a&b&c
+  $ echo "3b:${value//["$globchars"]/"$backslash"&}"
+  3b:a&b&c
+
+Is there any way to put a backslash just before the matched part in
+replacements?
+
+----------------------------------------------------------------------
+Suggestion / Discussion
+
+I suggest that '&' has the meaning of the matched part only when it is
+not quoted in the parameter-expansion context ${...} [ Note that
+currently, '&' has the meaning of the matched part when it is not
+quoted by backslash in *the expanded result* ].  I expect the
+following interpretations with this suggestion:
+
+$ echo "${var/$pat/&}"    # & represents the matched part
+$ echo "${var/$pat/\&}"   # & is treated as a literal ampersand
+$ echo "${var/$pat/\\&}"  # A literal backslash plus the matched part
+$ echo "${var/$pat/'\'&}" # A literal backslash plus the matched part
+$ rep='A&B'
+$ echo "${var/$pat/$rep}"   # 'A' plus the mached part plus 'B'
+$ echo "${var/$pat/"$rep"}" # Literal 'A&B'
+
+Here are the rationale:
+
+* It is consistent with the treatment of the glob special characters
+  and anchors # and % in $pat of ${var/$pat}.
+
+* By specifying ${var/$pat/"$rep"} where $rep is an arbitrary string,
+  one can make the code compatible with both Bash 5.1 and 5.2.
+
+* One can intuitively quote & to make it a literal ampersand.  The
+  distinction of the special & in ${var/$pat/&} and the literal
+  ampersand in ${var/$pat/\&} is more intuitive than ${var/$pat/&} vs
+  ${var/$pat/\\&}.
+
+* One can insert a backslash before the matched part by intuitive ways
+  ${var/$pat/'\'&} or ${var/$pat/\\&}.
+
+What do you think?
+
+----------------------------------------------------------------------
+Bash version of devel branch?
+
+By the way, when would the BASH_VERSINFO be updated?  The devel
+version still has the Bash version 5.1.  I would like to reference the
+version information to switch the implementation.  In particular,
+since some incompatible changes are introduced in the devel branch
+(which are supposed to be released as Bash 5.2), I need to switch the
+implementation.
+
+diff --git a/configure.ac b/configure.ac
+index 4e03fb5a..a40b4d88 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -23,8 +23,8 @@ dnl Process this file with autoconf to produce a configure script.
+
+-AC_REVISION([for Bash 5.1, version 5.034])dnl
++AC_REVISION([for Bash 5.2, version 5.034])dnl
+
+-define(bashvers, 5.1)
++define(bashvers, 5.2)
+ define(relstatus, maint)
+
+ AC_INIT([bash], bashvers-relstatus, [bug-bash@gnu.org])
+
+
+--
+Koichi

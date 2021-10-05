@@ -63,6 +63,7 @@
   - https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00140.html
 - 2021-09-08 report29: ■
 - 2021-09-22 report30: <kbd>prior</kbd> が `history-search-backward` になった筈なのに動いていない
+- 2021-10-05 report31: `${var/pat/&}` の設定に関する質問。
 
 ## help-bash
 
