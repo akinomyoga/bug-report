@@ -106,3 +106,109 @@ Fix:
 
 --
 Koichi
+
+================================================================================
+
+> The difference is that valid_array_reference can be called before
+> any of the subscript is expanded, in which case you need to parse
+> things that can be expanded, where unbind_array_element is called
+> after all the expansions are performed (but see below).
+>
+> So let's see if we can talk through this.
+>
+> [...]
+>
+> You're right, there should be no `nesting' considered at all. By the time
+> unbind_array_element is called, since it's only called from unset_builtin,
+> the word and subscript should have already undergone all the expansion
+> they're going to. There should be no need to interpret ${} or $() in the
+> subscript: since associative arrays can have arbitrary subscripts, you
+> should not attempt to parse the subscript contents.
+
+Yeah, I think the above paragraph describes the expected behavior when
+`assoc_expand_once' is turned on.
+
+But in this patch, I actually aim to fix the behavior of the
+backward-compatible mode (with `assoc_expand_once' turned off).  In
+the patch, I suggested to remove `(var && assoc_p(var))' from the
+skipsubscript flag for the nesting consideration as
+
+> -    len = skipsubscript (sub, 0, (flags&VA_NOEXPAND) || (var && assoc_p(var)));	/* XXX */
+> +    len = skipsubscript (sub, 0, flags&VA_NOEXPAND);	/* XXX */
+
+Here, `(flags & VA_NOEXPAND)' is always `1' when `assoc_expand_once'
+is turned on, so the above change does not affect the behavior of
+`assoc_expand_once' mode but affect the behavior of the
+backward-compatible mode.
+
+> However, there is backwards compatibility to consider, which is why
+> assoc_expand_once isn't set by default and the code attempts to run the
+> subscript through word expansion.
+
+Yeah, that's the issue.
+
+> In this example, the quoting prevents the shell from recognizing the
+> word as an array reference before the quote removal occurs and the
+> word gets passed to the unset builtin, so it can't set any hints for
+> unset. unset sees `a[${b[0]}]', which is ambiguous.
+
+I thought the extra expansions are always performed in the
+backward-compatible behavior and never performed in the
+`assoc_expand_once' mode, so there is no ambiguity once the current
+mode is given.
+
+In the backward-compatible mode (i.e., in older Bash and in newer Bash
+with `assoc_expand_once' turned off), the subscripts of « unset -v
+'a[...]' » have been always subject to the extra expansions.  If we
+accept this extra expansions as a design, it is actually well-defined
+and unambiguous, and it always works as expected if one always quotes
+the arguments of `unset' (and other builtins such as `printf -v',
+`read', `mapfile', etc.) as « unset -v 'a[$key]' ».  Actually, this is
+the only way to make it work in all the Bash versions (with
+`assoc_expand_once' turned off for newer versions).
+
+> It can shortcut and say "ok, if it passes valid_array_reference, we should
+> just consider the entire argument as one word as long as the final
+> character is `]'." This is again where backwards compatibility and
+> assoc_expand_once matter.
+>
+> We can apply your change, but it is still incomplete
+
+What is exactly the incompleteness that you focus on in this context?
+I understand that you are not satisfied with the behavior of the
+backward-compatible mode, but once we define the design of the extra
+expansions in the backward-compatible mode, I think this patch will
+make it consistent and there is no incompleteness ``within'' the
+backward-compatible mode.
+
+> (plus it breaks things that currently work, like
+>
+> declare -A a
+> key='$(echo foo)'
+>
+> a['$key']=2
+> declare -p a
+>
+> unset -v "a['\$key']"
+> declare -p a
+>
+> ).
+
+This is related to another bug (which is rather a clear one) that has
+existed since bash-4.0, for which I have a pending report.  The above
+problem is not caused by this patch, but just another bug that has
+been concealed by the current behavior has been revealed.  I was
+planning to submit the report after this patch is processed because
+the codes to be changed in two patches overlap with each other.  Now
+I'll submit the report though there are conflicting changes between
+the two patches.
+
+> The real issue is that it's still going to expand the subscript for
+> backwards compatibility. I think that's going to have to be solved
+> at a higher level.
+
+Yeah, but I feel like this is another design issue which is irrelevant
+for the fix of the present small problem.
+
+--
+Koichi

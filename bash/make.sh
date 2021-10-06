@@ -87,13 +87,13 @@ function list-items {
   ' | ifold -w 80 --indent='- ' --indent-type=spaces --spaces
 }
 
-#list-contributions
+list-contributions
 #list-items "Grisha Levit"                # 20/113 ("From a report by Hyunho Cho <mug896@gmail.com>" が最後の確認済み項目)
 #list-items 'Eduardo A. Bustamante Lopez' # 16/61
 #list-items 'Stephane Chazelas'           # 2/53
 #list-items 'Mike Frysinger'              # 16/50
 #list-items "Martijn Dekker"              # 3/50
 #list-items 'Andreas Schwab'              # 24/58
-#list-items "Koichi Murase"               # 25fix/34
+#list-items "Koichi Murase"               # 31fix/45
 #list-items "Dan Douglas"                 # 0/36
 #list-items "Eric Blake"                  # 13/30

@@ -1220,7 +1220,7 @@
 
 2021-10-05
 
-* unset -v 'a[`echo 1`]' で bad array subscript エラーが出る [#D0031]
+* r0032: unset -v 'a[`echo 1`]' で bad array subscript エラーが出る [#D0031]
 
   #D0029 において完全に直ったと思ったら今度は
 
