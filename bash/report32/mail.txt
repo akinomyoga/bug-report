@@ -1,0 +1,103 @@
+Subject: [PATCH] 4.0..devel: fix a problem that unset 'a[`echo 0`]' causes "bad array subscript" error
+
+[ I initially intended to submit this report after the previous
+report, but a problem related to this report is mentioned in thread
+https://lists.gnu.org/archive/html/bug-bash/2021-10/msg00051.html, I
+now submit this patch.  Note that this patch bases on the code after
+applying the patches provided at
+https://lists.gnu.org/archive/html/bug-bash/2021-10/msg00051.html. ]
+
+Bash Version:
+  All the versions from 4.0 to devel are affected.  The problem should
+  be reproduced independent of the machine type.
+
+Description:
+
+  « unset -v 'a[`echo 0`]' » fails because the first character « ` »
+  of the subscript « `echo 0` » is skipped when checking the ending of
+  the array subscript.
+
+  This is caused by the mismatching of the assumptions on the
+  arguments of `unbind_array_reference (var,sub,flags)' and
+  `skipsubscript (string,start,flags)'.  The former assumes `sub'
+  starts from the next character after `[` while the latter assumes
+  that `string[start]' starts from `[` itself.  However,
+  `unbind_array_reference' directly passes `sub' to `skipsubscript'.
+
+Repeat-By:
+
+  $ bash -c "a=(); unset 'a[\`echo [0]\`]'"
+  bash: line 0: unset: a[`echo [0]`]: bad array subscript
+
+
+  This is caused by the mismatching of the assumption on the argument
+  of `unbind_array_reference' (arrayfunc.c:1062) and the argument of
+  `skipsubscript' (subst.c:1845).
+
+  The function `unbind_array_reference' assumes that the second
+  argument SUB points to just after the beginning `[' as described in
+  the comment of the function (arrayfunc.c:1054):
+
+  > /* This function is called with SUB pointing to just after the beginning
+  >    `[' of an array subscript and removes the array element to which SUB
+  >    expands from array VAR.  A subscript of `*' or `@' unsets the array. */
+  > [...]
+  > int
+  > unbind_array_element (var, sub, flags)
+
+  In this function, another function `skipsubscript' is called as
+
+  > len = skipsubscript (sub, 0, (flags&VA_NOEXPAND) | 2); /* XXX */
+
+  The function `skipsubscript' calls another function `skip_matched_pair'
+  (subst.c:1747).
+
+  > int
+  > skipsubscript (string, start, flags)
+  >      const char *string;
+  >      int start, flags;
+  > {
+  >   return (skip_matched_pair (string, start, '[', ']', flags));
+
+  The function `skip_matched_pair' assumes that `string[start]' points
+  to the beginning `[' itself:
+
+  > /* This function assumes s[i] == open; returns with s[ret] == close; used to
+  >    parse array subscripts.  FLAGS & 1 means to not attempt to skip over
+  >    matched pairs of quotes or backquotes, or skip word expansions; it is
+  >    intended to be used after expansion has been performed and during final
+  >    assignment parsing (see arrayfunc.c:assign_compound_array_list()) or
+  >    during execution by a builtin which has already undergone word expansion. */
+  > static int
+  > skip_matched_pair (string, start, open, close, flags)
+
+  which is inconsistent with the assumption of
+  `unbind_array_reference' that `sub' points to the next character of
+  the beginning `['.
+
+Fix:
+
+  In the attached patch, I added a new flag 2 in the `flags` argument
+  of `skipsubscript', which indicates that `string[start]' points to
+  the next character after the beginning delimiter `open' (`[' in this
+  case).
+
+  Now, the bit `2' of the argument `flags' of `skipsubscript
+  (var,sub,flags)' will change the behavior.  Also,
+  `array_variable_name (s,flags,subp,lenp)' and `array_variable_part
+  (s,flags,subp,lenp)' indirectly calls `skipsubscript' by directly
+  passing its argument `flags'.  I have checked all the existing calls
+  of these functions and confirmed that currently the arguments are
+  always `0' or `1' and never contains the bit `2', so the existing
+  behavior will not change.
+
+  Then, I added a bit `2' in the call of `skipsubscript' from
+  `unbind_array_reference'.  I also changed the argument `flags' of
+  the call of `skipsubscript' in `array_variable_name' with `flags &
+  1' because `array_variable_name' explicitly searches for the
+  beginning `[' and pass its position to `skipsubscript'.
+
+  I also updated the comments of the functions.
+
+--
+Koichi

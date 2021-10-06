@@ -1,0 +1,85 @@
+From 96e2fde3ac9533fd7a40ccb8ad8a0737e00c1a5e Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Tue, 5 Oct 2021 19:12:52 +0900
+Subject: [PATCH] arrayfunc.c (unset_array_element): fix a bug that the first
+ character of array subscript is skipped
+
+---
+ arrayfunc.c |  4 ++--
+ subst.c     | 24 +++++++++++++++---------
+ 2 files changed, 17 insertions(+), 11 deletions(-)
+
+diff --git a/arrayfunc.c b/arrayfunc.c
+index 618f7c69..b75cc0b8 100644
+--- a/arrayfunc.c
++++ b/arrayfunc.c
+@@ -1074,7 +1074,7 @@ unbind_array_element (var, sub, flags)
+   if (var && assoc_p (var) && (flags&VA_ONEWORD))
+     len = strlen (sub) - 1;
+   else
+-    len = skipsubscript (sub, 0, flags&VA_NOEXPAND);	/* XXX */
++    len = skipsubscript (sub, 0, flags&VA_NOEXPAND | 2);	/* XXX */
+   if (sub[len] != ']' || len == 0)
+     {
+       builtin_error ("%s[%s: %s", var->name, sub, _(bash_badsub_errmsg));
+@@ -1330,7 +1330,7 @@ array_variable_name (s, flags, subp, lenp)
+       return ((char *)NULL);
+     }
+   ind = t - s;
+-  ni = skipsubscript (s, ind, flags);	/* XXX - was 0 not flags */
++  ni = skipsubscript (s, ind, flags & 1);	/* XXX - was 0 not flags */
+   if (ni <= ind + 1 || s[ni] != ']')
+     {
+       err_badarraysub (s);
+diff --git a/subst.c b/subst.c
+index b4c84c62..5c7cbae9 100644
+--- a/subst.c
++++ b/subst.c
+@@ -1737,12 +1737,14 @@ unquote_bang (string)
+ 
+ #define CQ_RETURN(x) do { no_longjmp_on_fatal_error = oldjmp; return (x); } while (0)
+ 
+-/* This function assumes s[i] == open; returns with s[ret] == close; used to
+-   parse array subscripts.  FLAGS & 1 means to not attempt to skip over
+-   matched pairs of quotes or backquotes, or skip word expansions; it is
+-   intended to be used after expansion has been performed and during final
+-   assignment parsing (see arrayfunc.c:assign_compound_array_list()) or
+-   during execution by a builtin which has already undergone word expansion. */
++/* This function assumes STRING[START] == OPEN (when (FLAGS & 2) == 0); returns
++   with STRING[ret] == CLOSE; used to parse array subscripts.  FLAGS & 1 means
++   to not attempt to skip over matched pairs of quotes or backquotes, or skip
++   word expansions; it is intended to be used after expansion has been
++   performed and during final assignment parsing (see
++   arrayfunc.c:assign_compound_array_list()) or during execution by a builtin
++   which has already undergone word expansion.  FLAGS & 2 means that
++   STRING[START] is the character just after the beginning OPEN. */
+ static int
+ skip_matched_pair (string, start, open, close, flags)
+      const char *string;
+@@ -1757,7 +1759,9 @@ skip_matched_pair (string, start, open, close, flags)
+   oldjmp = no_longjmp_on_fatal_error;
+   no_longjmp_on_fatal_error = 1;
+ 
+-  i = start + 1;		/* skip over leading bracket */
++  i = start;
++  if ((flags & 2) == 0)
++    i++;		/* skip over leading bracket */
+   count = 1;
+   pass_next = backq = 0;
+   ss = (char *)string;
+@@ -1839,8 +1843,10 @@ skip_matched_pair (string, start, open, close, flags)
+ 
+ #if defined (ARRAY_VARS)
+ /* Flags has 1 as a reserved value, since skip_matched_pair uses it for
+-   skipping over quoted strings and taking the first instance of the
+-   closing character. */
++   skipping over quoted strings and taking the first instance of the closing
++   character.  When FLAGS has a bit 2, STRING[START] is assumed to be the
++   character after the opening `['.  Otherwise, STRING[START] contains the
++   opening `['. */
+ int
+ skipsubscript (string, start, flags)
+      const char *string;
+-- 
+2.21.3
+
