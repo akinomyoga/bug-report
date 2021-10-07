@@ -1,15 +1,16 @@
-From d6b6d53d0ce0a2dd4c0dc3e33a229c8be18ac358 Mon Sep 17 00:00:00 2001
+From ea1654b647186a36c7b580c367e62a035badcbed Mon Sep 17 00:00:00 2001
 From: Koichi Murase <myoga.murase@gmail.com>
 Date: Thu, 7 Oct 2021 10:58:15 +0900
 Subject: [PATCH] spike: refactor "unbind_array_element"
 
 ---
- arrayfunc.c      | 58 +++++++++++++++++++++++++++++-------------------
- builtins/set.def | 10 +++------
- 2 files changed, 38 insertions(+), 30 deletions(-)
+ arrayfunc.c      | 62 ++++++++++++++++++++++++++++--------------------
+ arrayfunc.h      |  2 ++
+ builtins/set.def |  8 ++-----
+ 3 files changed, 40 insertions(+), 32 deletions(-)
 
 diff --git a/arrayfunc.c b/arrayfunc.c
-index 46cf4c8f..f48b0f5c 100644
+index 46cf4c8f..cb410520 100644
 --- a/arrayfunc.c
 +++ b/arrayfunc.c
 @@ -1051,9 +1051,9 @@ quote_array_assignment_chars (list)
@@ -25,7 +26,12 @@ index 46cf4c8f..f48b0f5c 100644
  /* If FLAGS&1 (VA_NOEXPAND) we don't expand the subscript; we just use it
     as-is. If FLAGS&VA_ONEWORD, we don't try to use skipsubscript to parse
     the subscript, we just assume the subscript ends with a close bracket,
-@@ -1069,18 +1069,7 @@ unbind_array_element (var, sub, flags)
+@@ -1064,24 +1064,10 @@ unbind_array_element (var, sub, flags)
+      char *sub;
+      int flags;
+ {
+-  int len;
+   arrayind_t ind;
    char *akey;
    ARRAY_ELEMENT *ae;
  
@@ -41,22 +47,40 @@ index 46cf4c8f..f48b0f5c 100644
 -      return -1;
 -    }
 -  sub[len] = '\0';
-+  len = strlen (sub);
- 
+-
    if (ALL_ELEMENT_SUB (sub[0]) && sub[1] == 0)
      {
-@@ -1210,12 +1199,17 @@ print_assoc_assignment (var, quoted)
+       if (array_p (var) || assoc_p (var))
+@@ -1133,7 +1119,7 @@ unbind_array_element (var, sub, flags)
+ 	    }
+ 	  /* Fall through for behavior 3 */
+ 	}
+-      ind = array_expand_index (var, sub, len+1, 0);
++      ind = array_expand_index (var, sub, strlen (sub) + 1, 0);
+       /* negative subscripts to indexed arrays count back from end */
+       if (ind < 0)
+ 	ind = array_max_index (array_cell (var)) + 1 + ind;
+@@ -1149,7 +1135,7 @@ unbind_array_element (var, sub, flags)
+   else	/* array_p (var) == 0 && assoc_p (var) == 0 */
+     {
+       akey = this_command_name;
+-      ind = array_expand_index (var, sub, len+1, 0);
++      ind = array_expand_index (var, sub, strlen (sub) + 1, 0);
+       this_command_name = akey;
+       if (ind == 0)
+ 	{
+@@ -1210,12 +1196,18 @@ print_assoc_assignment (var, quoted)
  /***********************************************************************/
  
  /* Return 1 if NAME is a properly-formed array reference v[sub]. */
 -
--/* We need to reserve 1 for FLAGS, which we pass to skipsubscript. */
 +/* When NAME is a properly-formed array reference and a non-null argument SUBP
 +   is supplied, '[' and ']' that enclose the subscript are replaced by '\0',
 +   and the pointer to the subscript in NAME is assigned to *SUBP, so that NAME
 +   and SUBP can be later used as the array name and the subscript,
 +   respectively.  When SUBP is the null pointer, the original string NAME will
 +   not be modified. */
+ /* We need to reserve 1 for FLAGS, which we pass to skipsubscript. */
  int
 -valid_array_reference (name, flags)
 -     const char *name;
@@ -67,7 +91,7 @@ index 46cf4c8f..f48b0f5c 100644
  {
    char *t;
    int r, len, isassoc;
-@@ -1249,16 +1243,34 @@ valid_array_reference (name, flags)
+@@ -1249,16 +1241,34 @@ valid_array_reference (name, flags)
  	 existing associative arrays, using isassoc */
        for (r = 1; r < len; r++)
  	if (whitespace (t[r]) == 0)
@@ -106,19 +130,23 @@ index 46cf4c8f..f48b0f5c 100644
  /* Expand the array index beginning at S and extending LEN characters. */
  arrayind_t
  array_expand_index (var, s, len, flags)
+diff --git a/arrayfunc.h b/arrayfunc.h
+index 31d91cc8..9a67f8aa 100644
+--- a/arrayfunc.h
++++ b/arrayfunc.h
+@@ -83,6 +83,8 @@ extern void print_assoc_assignment PARAMS((SHELL_VAR *, int));
+ 
+ extern arrayind_t array_expand_index PARAMS((SHELL_VAR *, char *, int, int));
+ extern int valid_array_reference PARAMS((const char *, int));
++extern int tokenize_array_reference PARAMS((char *, int, char **));
++
+ extern char *array_value PARAMS((const char *, int, int, int *, arrayind_t *));
+ extern char *get_array_value PARAMS((const char *, int, int *, arrayind_t *));
+ 
 diff --git a/builtins/set.def b/builtins/set.def
-index 32dad9ab..36f619a9 100644
+index 32dad9ab..9aa0899b 100644
 --- a/builtins/set.def
 +++ b/builtins/set.def
-@@ -879,7 +879,7 @@ unset_builtin (list)
-       SHELL_VAR *var;
-       int tem;
- #if defined (ARRAY_VARS)
--      char *t;
-+      char *t = NULL;
- #endif
- 
-       name = list->word->word;
 @@ -894,12 +894,8 @@ unset_builtin (list)
  #if defined (ARRAY_VARS)
        unset_array = 0;

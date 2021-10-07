@@ -222,7 +222,7 @@ Koichi
 Does that mean the behavior with `assoc_expand_once' being disabled
 also modified in a way incompatible with older Bash versions?  I have
 been thinking that `shopt -s assoc_expand_once' would be the default
-in future keeping the behavior of `shopt -u assoc_expand_once'.
+in the future keeping the behavior of `shopt -u assoc_expand_once'.
 
 If the behavior of `shopt -u assoc_expand_once' would also be
 modified, I would like to request another switch for the
@@ -244,15 +244,15 @@ I see.
 > fine for the problem it intends to solve, now I'd like to go beyond
 > it and figure out a better architectural solution.
 
-I see.  In order to make such architectual changes, I feel we first
+I see.  In order to make such architectural changes, I feel we first
 need to determine how the behavior should be changed.  I guess such a
 discussion would be again as long as the one in March.  Maybe this
 would become just a repetition of the discussion in March, but to
 summarize,
 
 * I still feel that the cleanest solution is to introduce a special
-  syntax-level rule for `unset arr[...]' where the part `arr[...]' is
-  treated as if the right-hand side of a variable assignment (just
+  the syntax-level rule for `unset arr[...]' where the part `arr[...]'
+  is treated as if the right-hand side of a variable assignment (just
   like in other assignment builtins such as `declare', `local',
   `export', etc.), i.e., pathname expansions and word splitting is not
   performed on the arguments of the form `name[xxx]'.
@@ -268,7 +268,7 @@ summarize,
   expansions of array subscripts are performed the same as the older
   versions of Bash.  I would like to see a specific option for this
   mode rather than `BASH_COMPAT=51' which would involve other
-  behaviral changes.
+  behavioral changes.
 
 * I feel we need to care about the consistency with the extra
   expansions performed in other contexts:
@@ -286,10 +286,10 @@ This will not change the observable behavior, but if I would refactor
 it, I'd make `valid_array_referecen' return the extracted subscript
 and let `unbind_array_element' just receive the extracted subscript
 rather than make `unbind_array_element' again extract the subscript.
-I attach a patch `r0029-0002b-[...].patch' for this strategy.  This
-patch bases on the current devel branch.  This patch gives an
-alternative solution for the following patches (sorry if you have
-already applied some of them):
+I attach a patch `r0029-0002b-refactor-unset.patch' to illustrate this
+strategy.  This patch bases on the current devel branch.  This patch
+gives an alternative solution for the following patches (sorry if you
+have already applied some of them):
 
 - `0002-allow-nesting-and-quoting-in-assoc-subscripts-when-a.patch' in
   https://lists.gnu.org/archive/html/bug-bash/2021-10/msg00051.html
