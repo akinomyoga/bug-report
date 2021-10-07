@@ -1,0 +1,139 @@
+From d6b6d53d0ce0a2dd4c0dc3e33a229c8be18ac358 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Thu, 7 Oct 2021 10:58:15 +0900
+Subject: [PATCH] spike: refactor "unbind_array_element"
+
+---
+ arrayfunc.c      | 58 +++++++++++++++++++++++++++++-------------------
+ builtins/set.def | 10 +++------
+ 2 files changed, 38 insertions(+), 30 deletions(-)
+
+diff --git a/arrayfunc.c b/arrayfunc.c
+index 46cf4c8f..f48b0f5c 100644
+--- a/arrayfunc.c
++++ b/arrayfunc.c
+@@ -1051,9 +1051,9 @@ quote_array_assignment_chars (list)
+ 
+ /* skipsubscript moved to subst.c to use private functions. 2009/02/24. */
+ 
+-/* This function is called with SUB pointing to just after the beginning
+-   `[' of an array subscript and removes the array element to which SUB
+-   expands from array VAR.  A subscript of `*' or `@' unsets the array. */
++/* This function is called with SUB pointing to the subscript terminated by NUL
++   and removes the array element to which SUB expands from array VAR.  A
++   subscript of `*' or `@' unsets the array. */
+ /* If FLAGS&1 (VA_NOEXPAND) we don't expand the subscript; we just use it
+    as-is. If FLAGS&VA_ONEWORD, we don't try to use skipsubscript to parse
+    the subscript, we just assume the subscript ends with a close bracket,
+@@ -1069,18 +1069,7 @@ unbind_array_element (var, sub, flags)
+   char *akey;
+   ARRAY_ELEMENT *ae;
+ 
+-  /* If the caller tells us to treat the entire `sub' as one word, we don't
+-     bother to call skipsubscript. */
+-  if (var && assoc_p (var) && (flags&VA_ONEWORD))
+-    len = strlen (sub) - 1;
+-  else
+-    len = skipsubscript (sub, 0, (flags&VA_NOEXPAND) || (var && assoc_p(var)));	/* XXX */
+-  if (sub[len] != ']' || len == 0)
+-    {
+-      builtin_error ("%s[%s: %s", var->name, sub, _(bash_badsub_errmsg));
+-      return -1;
+-    }
+-  sub[len] = '\0';
++  len = strlen (sub);
+ 
+   if (ALL_ELEMENT_SUB (sub[0]) && sub[1] == 0)
+     {
+@@ -1210,12 +1199,17 @@ print_assoc_assignment (var, quoted)
+ /***********************************************************************/
+ 
+ /* Return 1 if NAME is a properly-formed array reference v[sub]. */
+-
+-/* We need to reserve 1 for FLAGS, which we pass to skipsubscript. */
++/* When NAME is a properly-formed array reference and a non-null argument SUBP
++   is supplied, '[' and ']' that enclose the subscript are replaced by '\0',
++   and the pointer to the subscript in NAME is assigned to *SUBP, so that NAME
++   and SUBP can be later used as the array name and the subscript,
++   respectively.  When SUBP is the null pointer, the original string NAME will
++   not be modified. */
+ int
+-valid_array_reference (name, flags)
+-     const char *name;
++tokenize_array_reference (name, flags, subp)
++     char *name;
+      int flags;
++     char **subp;
+ {
+   char *t;
+   int r, len, isassoc;
+@@ -1249,16 +1243,34 @@ valid_array_reference (name, flags)
+ 	 existing associative arrays, using isassoc */
+       for (r = 1; r < len; r++)
+ 	if (whitespace (t[r]) == 0)
+-	  return 1;
+-      return 0;
+-#else
++	  break;
++      if (r == len)
++	return 0; /* Fail if the subscript contains only whitespaces. */
++#endif
++
++      if (subp)
++	{
++	  t[0] = t[len] = '\0';
++	  *subp = t + 1;
++	}
++
+       /* This allows blank subscripts */
+       return 1;
+-#endif
+     }
+   return 0;
+ }
+ 
++/* Return 1 if NAME is a properly-formed array reference v[sub]. */
++
++/* We need to reserve 1 for FLAGS, which we pass to skipsubscript. */
++int
++valid_array_reference (name, flags)
++     const char *name;
++     int flags;
++{
++  return tokenize_array_reference ((char *)name, flags, (char **)NULL);
++}
++
+ /* Expand the array index beginning at S and extending LEN characters. */
+ arrayind_t
+ array_expand_index (var, s, len, flags)
+diff --git a/builtins/set.def b/builtins/set.def
+index 32dad9ab..36f619a9 100644
+--- a/builtins/set.def
++++ b/builtins/set.def
+@@ -879,7 +879,7 @@ unset_builtin (list)
+       SHELL_VAR *var;
+       int tem;
+ #if defined (ARRAY_VARS)
+-      char *t;
++      char *t = NULL;
+ #endif
+ 
+       name = list->word->word;
+@@ -894,12 +894,8 @@ unset_builtin (list)
+ #if defined (ARRAY_VARS)
+       unset_array = 0;
+       /* XXX valid array reference second arg was 0 */
+-      if (!unset_function && nameref == 0 && valid_array_reference (name, vflags))
+-	{
+-	  t = strchr (name, '[');
+-	  *t++ = '\0';
+-	  unset_array++;
+-	}
++      if (!unset_function && nameref == 0 && tokenize_array_reference (name, vflags, &t))
++	unset_array = 1;
+ #endif
+       /* Get error checking out of the way first.  The low-level functions
+ 	 just perform the unset, relying on the caller to verify. */
+-- 
+2.21.3
+
