@@ -1,3 +1,147 @@
+
+Thank you for the reply and sorry for my late reply.  I am busy now.
+
+> > ----------------------------------------------------------------------
+> > Suggestion / Discussion
+> >
+> > I suggest that '&' has the meaning of the matched part only when it is
+> > not quoted in the parameter-expansion context ${...} [ Note that
+> > currently, '&' has the meaning of the matched part when it is not
+> > quoted by backslash in *the expanded result* ].  I expect the
+> > following interpretations with this suggestion:
+>
+> The quoting outside the ${...} doesn't affect whether REP is quoted. This
+> is consistent with how POSIX specifies the pattern removal expansions, and
+> how bash has worked since bash-4.3.
+
+I agree that the quoting outside ${...} (I mean something like «
+"${...}" ») should not affect the treatment of PAT or REP in
+${var/PAT/REP}.  In the original email, I intended the quoting
+*inside* the ${...} such as « ${var/PAT/"&"} » or « ${var/PAT/\&} ».
+
+> So both of these, for instance, will expand to `&' *because of how bash
+> already works*, regardless of whether or not we attach meaning to `&' in
+> the replacement string.
+>
+> > $ echo "${var/$pat/&}"    # & represents the matched part
+> > $ echo "${var/$pat/\&}"   # & is treated as a literal ampersand
+
+Yes.  As a result, both are replaced with `&' in bash-5.1.  However,
+in devel, the `&'s in both cases are further replaced with the mached
+parts in the final expansion results by `strcreplace', so anyway the
+current devel breaks what you say *how bash already works* after
+combining quote removal and the new strcreplce.  I would not request
+to change *how bash already works* but would like to request
+preserving *how bash already works* that is observable to users in a
+bit more situations including « ${var/$pat/\&} », « ${var/$pat/"$rep"}
+», etc. in a consistent way with quoting PAT in ${var/PAT}.
+
+> This next one will expand to `\&' again due to existing behavior,
+> regardless of what we do with it, due to how quote removal works.
+> And so on.
+>
+> > $ echo "${var/$pat/\\&}"  # A literal backslash plus the matched part
+
+I know why they behave like that in the current implementation in
+devel, but knowing that, I have proposed a change on the design.
+
+> > $ echo "${var/$pat/'\'&}" # A literal backslash plus the matched part
+> > $ rep='A&B'
+> > $ echo "${var/$pat/$rep}"   # 'A' plus the mached part plus 'B'
+> > $ echo "${var/$pat/"$rep"}" # Literal 'A&B'
+>
+> Rather than dance around behind the scenes trying to invisibly quote &,
+> but only in certain contexts where it would not otherwise be escaped by
+> double quoting, I would be more in favor of adding an option to enable the
+> feature and allowing the normal rules of double quoted strings to apply.
+
+I thought the proposed quoting rule is well-defined as the similar
+treatment is already implemented for glob characters in PAT of
+${var/PAT}.  This kind of passing the quoting state to the next
+process is also used in `=~' operator of the conditional command, such
+as « [[ str =~ $regex ]] » vs « [[ str =~ "$literal" ]] ».
+
+If the new behavior is introduced in the current way, which requires
+extra quoting, through a new option, I would like to propose making
+the default of the option disabling the new feature.
+
+> > Here are the rationale:
+> >
+> > * It is consistent with the treatment of the glob special characters
+> >   and anchors # and % in $pat of ${var/$pat}.
+>
+> Yeah, doing that was probably a mistake, but we have to live with it now.
+> Those are really part of the pattern operator itself, not properties of
+> the pattern. But nevertheless.
+
+Oh, I have not thought of the possibility that the treatment of
+quoting removal of ${var/$pat} might be considered a mistake.
+However, if I understand it correctly, the similar treatment is
+already standardized in POSIX for ``quoting characters within the
+braces'' (as ${var#"$xxx"} and ${var%"$xxx"}):
+
+> quoted from POSIX XCU 2.6.2
+> https://pubs.opengroup.org/onlinepubs/9699919799.2018edition/utilities/V3_chap02.html#tag_18_06_02
+>
+> The following four varieties of parameter expansion provide for
+> substring processing. [...] Enclosing the full parameter expansion
+> string in double-quotes shall not cause the following four varieties
+> of pattern characters to be quoted, whereas quoting characters
+> within the braces shall have this effect. [...]
+>
+> ${parameter%[word]} ...
+> ${parameter%%[word]} ...
+> ${parameter#[word]} ...
+> ${parameter##[word]} ...
+>
+> Examples
+>
+> [...]
+>
+> The double-quoting of patterns is different depending on where the
+> double-quotes are placed:
+>
+> "${x#*}"
+>   The <asterisk> is a pattern character.
+>
+> ${x#"*"}
+>   The literal <asterisk> is quoted and not special.
+
+In the final example, the normal expansion result of `"*"' is `*' but
+this should not be directly passed to the pattern matching engine to
+achive the behavior POSIX defines.
+
+> > * One can intuitively quote & to make it a literal ampersand.  The
+> >   distinction of the special & in ${var/$pat/&} and the literal
+> >   ampersand in ${var/$pat/\&} is more intuitive than ${var/$pat/&} vs
+> >   ${var/$pat/\\&}.
+>
+> Not if you take into account the word expansions the replacement
+> string undergoes. For example, if you use ${var/$pat/\&} in
+> bash-5.1, you're going to get a `&' in the output, not `\&'.  Now
+> you invite the questions of why bash expands things differently
+> whether or not there is a `&' in the replacement string, and since
+> the non-special bash-5.1 expanded that to `&', why should bash-5.2
+> not treat it as a replacement?
+>
+> I guess the question is why not let the normal shell word expansion
+> rules apply, and work with the result.
+
+I think that that (i.e., letting the normal expansion rules apply and
+working with the result) is what the current devel does.  But I am
+proposing a different behavior that is similar to the treatment of PAT
+in ${var/PAT} where *the normal expansion rules plus expansion of `&'
+is performed at once* in the observable behavior (but of course the
+real implementation can be different as in the case of PAT in
+${var/PAT} that the expansion and the pattern matching is actually
+processed in separate steps but by introducing internal quoting in the
+expansion step).
+
+--
+Koichi
+
+==============================================================================
+
 Subject: devel: Questions about quoting in the new replacement ${var/pat/&}
 
 I have questions on the new feature ${var/pat/&} in the devel branch.
@@ -5,7 +149,7 @@ I have questions on the new feature ${var/pat/&} in the devel branch.
 > commit f188aa6a013e89d421e39354086eed513652b492 (upstream/devel)
 > Author: Chet Ramey <chet.ramey@case.edu>
 > Date:   Mon Oct 4 15:30:21 2021 -0400
-> 
+>
 >     enable support for using `&' in the pattern substitution replacement string
 >
 > Any unquoted instances of & in STRING are replaced with the matching
@@ -121,7 +265,7 @@ case:
   $ value='a*b*c' globchars='\*?[('
   $ escaped=${value//["$globchars"]/XXXX}
   $ echo "$escaped"
-  a\*b\*c 
+  a\*b\*c
 
 where "XXXX" is some string that represents a literal '\' plus &.  I
 naively expect « XXXX = '\'& » would work, which doesn't work
