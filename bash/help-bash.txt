@@ -1,4 +1,47 @@
 
+------------------------------------------------------------------------------
+2021-10-24
+
+Note: これは恐らく結局返信せずに終わった。
+
+> my apologies if there's a much easier solution for the following
+> problem - in this case please let me know!
+
+We can always define a shell function (which would work in all the POSIX shells):
+
+read_line() { read line || test -n "$line"; }
+printf '%s' "$input" | while read_line; do printf '  %s\n'; done
+
+> [...] (probably relying on undocumented features)
+
+All the POSIX shells (bash, zsh, ksh, dash, etc.) behave in this way
+and I guess this is the behavior implied by the POSIX standard:
+
+> XBD 3.206 (https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap03.html#tag_03_206)
+> 3.206 Line
+>   A sequence of zero or more non- <newline> characters plus a terminating <newline> character.
+>
+> XCU 4 read (https://pubs.opengroup.org/onlinepubs/9699919799/utilities/read.html)
+> NAME
+>   read - read from standard input into shell variables
+> [...]
+>
+> DESCRIPTION
+>   The read utility shall read a single logical line from standard input into one or more shell variables.
+> [...]
+>
+> EXIT STATUS
+>   The following exit values shall be returned:
+>   0
+>     Successful completion.
+>   >0
+>     End-of-file was detected or an error occurred.
+
+--
+Koichi
+
+------------------------------------------------------------------------------
+
 2021-08-25 [#H0007]
 
 https://lists.gnu.org/archive/html/bug-bash/2021-08/msg00163.html
