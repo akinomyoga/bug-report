@@ -1,4 +1,99 @@
 
+> --- a/CHANGES
+> +++ b/CHANGES
+> @@ -1,3 +1,326 @@
+> +This document details the changes between this version, bash-5.2-alpha, and
+> +the previous version, bash-5.1-release.
+>
+> [...]
+>
+> +x. New shell option: patsub_replacement. When enabled, a `&' in the replacement
+> +   string of the pattern substitution expansion is replaced by the portion of
+> +   the string that matched the pattern. Backslash will escape the `&' and
+> +   insert a literal `&'.
+>
+> [...]
+
+I haven't received replies to my previous reply, but let me write a
+related discussion again. The current behavior is as follows:
+
+$ bash-dev --norc
+$ shopt | grep patsub
+patsub_replacement      on
+$ var=ABCDE value='(K&R)'
+$ echo "${var//C/$value}"
+AB(KCR)DE
+$ echo "${var//C/"$value"}"     # (My suggestion of "quoting &")
+AB(KCR)DE     # (the current patsub_replacement isn't designed to work for this)
+$ echo "${var//C/(K\\&R)}"
+AB(K&R)DE
+$ echo "${var//C/\\\\\\\\}"
+AB\\\\DE
+$ echo "${var//C/\\\\\\\\&}"
+AB\\CDE
+
+Today I tried to modify my script so that it works with `shopt -s
+patsub_replacement', and now I become more skeptical about making
+patsub_replacement default and also about its current design.
+
+I needed to modify more places than I initially expected, and also it
+is not simple to simply perform the replacement that contains
+arbitrary strings. Then, I checked other existing Bash programs and
+found that most of the large Bash programs/frameworks are affected,
+which include "bashdb", "bash-completion", "bash-it",
+"bash-oo-framework", "neofetch", and "bashtop" (plus mine, "ble.sh").
+The programs that seemed to be fine among the ones I have checked were
+only "oh-my-bash", "romkatv/gitstatus" and "git-prompt.bash". So I
+feel it is better to make patsub_replacement off by default. I attach
+"affected.txt", the list of lines from these programs that can be
+broken by "patsub_replacement" depending on the user inputs,
+configurations and the system status:
+
+Also, it is not simple to correctly write the codes so that it works
+for both sides of patsub_replacement on/off. If it was a standalone
+Bash program, we can just set `shopt -u patsub_replacement' at the
+beginning of the script file, but debuggers (bashdb), shell
+configurations (bash-completion, bash-it, ble.sh, etc.) and shell
+libraries (shell libraries, ...) cannot assume one specific side of
+the settings of `patsub_replacement' because that option is under the
+control of the main program or the user of the interactive shell. I
+have thought about how we can correctly write, e.g., «
+result=${result// /$string} » as simply as possible (see the attached
+"workaround.sh"), but I still feel they are all too non-trivial to
+replace the simple « result=${result// /$string} ». I don't think
+everyone can write it correctly.
+
+Sorry, but I'd like to still push treating the quoted replacement (as
+$string in « result=${result// /$string} ») literally just like the
+glob operators in ${var//"$pat"} or ${var#"$pat"} (as recently
+explained in e.g.
+https://lists.gnu.org/archive/html/help-bash/2022-01/msg00022.html).
+In Chet's previous reply, it is explained that
+
+> > > * It is consistent with the treatment of the glob special characters
+> > >   and anchors # and % in $pat of ${var/$pat}.
+> >
+> > Yeah, doing that was probably a mistake, but we have to live with it now.
+> > Those are really part of the pattern operator itself, not properties of
+> > the pattern. But nevertheless.
+
+but I don't feel it is a mistake but rather natural than introducing
+an extra level of unescaping/unquoting. It might be just because I got
+used to it, but
+
+> However, if I understand it correctly, similar treatment is
+> already standardized in POSIX for ``quoting characters within the
+> braces'' (as ${var#"$xxx"} and ${var%"$xxx"}):
+>
+> > quoted from POSIX XCU 2.6.2
+> > https://pubs.opengroup.org/onlinepubs/9699919799.2018edition/utilities/V3_chap02.html#tag_18_06_02
+> > [...]
+
+which means most shell implementations agreed with its behavior for
+glob operators in ${var#pat} and ${var%pat}.
+
+==============================================================================
+
 Thank you for the reply and sorry for my late reply.  I am busy now.
 
 > > ----------------------------------------------------------------------

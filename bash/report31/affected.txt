@@ -1,0 +1,70 @@
+./bashdb-5.0-1.1.2/lib/fns.sh:33:    result=${result// /$string}
+
+./bash-completion/bash_completion:741:    ((${#COMPREPLY[@]} == 1)) && COMPREPLY=(${COMPREPLY/#/$prefix})
+./bash-completion/bash_completion:920:        option=${option/"${BASH_REMATCH[1]}"/"${BASH_REMATCH[2]}"}
+./bash-completion/bash_completion:955:                line=${line/"${BASH_REMATCH[0]}"/"${BASH_REMATCH[1]}"}
+./bash-completion/bash_completion:1020:    COMPREPLY+=("${sigs[@]/#${1-}SIG/${1-}}")
+./bash-completion/completions/_mount.linux:27:            $split && COMPREPLY=(${COMPREPLY[@]/#/$prev,})
+./bash-completion/completions/_mount.linux:209:            $split && COMPREPLY=(${COMPREPLY[@]/#/"$prev,"})
+./bash-completion/completions/_umount.linux:119:            $split && COMPREPLY=(${COMPREPLY[@]/#/$prev,})
+./bash-completion/completions/chromium-browser:21:                    COMPREPLY=("${COMPREPLY[@]/#/$prefix}")
+./bash-completion/completions/cppcheck:29:            $split && COMPREPLY=(${COMPREPLY[@]/#/"$prev,"})
+./bash-completion/completions/cvs:9:        entries=("${entries[@]/#/${prefix:-}}")
+./bash-completion/completions/info:52:        infopath="${infopath//://$cur* }"
+./bash-completion/completions/kcov:38:                    COMPREPLY=(${COMPREPLY/#/$prev,})
+./bash-completion/completions/man:80:        manpath="${manpath//://*man$sect/$cur* } ${manpath//://*cat$sect/$cur* }"
+./bash-completion/completions/man:82:        manpath="${manpath//://*man$sect/ } ${manpath//://*cat$sect/ }"
+./bash-completion/completions/mutt:121:        [[ -n $spoolfile ]] && eval cur="${cur/^!/$spoolfile}"
+./bash-completion/completions/povray:19:            COMPREPLY=(${COMPREPLY[@]/#/$pfx})
+./bash-completion/completions/povray:39:            COMPREPLY=(${COMPREPLY[@]/%.pov/.$oext})
+./bash-completion/completions/povray:43:            COMPREPLY=(${COMPREPLY[@]/#/$pfx})
+./bash-completion/completions/povray:55:            COMPREPLY=("${COMPREPLY[@]/#/${pfx}[}")
+./bash-completion/completions/pylint:87:            ((${#COMPREPLY[@]} == 1)) && COMPREPLY=(${COMPREPLY/#/$prefix})
+./bash-completion/completions/smartctl:91:    [[ -n $prefix ]] && COMPREPLY=("${COMPREPLY[@]/#/$prefix}")
+
+./bash-it/completion/available/sdkman.completion.bash:15:                               CANDIDATES="${SDKMAN_CANDIDATES_CSV//,/${IFS:0:1}}"
+./bash-it/plugins/available/alias-completion.plugin.bash:87:                        COMP_LINE=\${COMP_LINE/$alias_name/$alias_cmd $alias_args}
+
+./bash-oo-framework/lib/util/exception.sh:157:  local underlinedObjectInLine="${errLine/$stringToMarkWithoutSlash/$underlinedObject}"
+
+./neofetch/neofetch:3012:        song="${song_format/\%artist\%/$artist}"
+./neofetch/neofetch:3013:        song="${song/\%album\%/$album}"
+./neofetch/neofetch:3014:        song="${song/\%title\%/$title}"
+./neofetch/neofetch:4087:    ascii_data="${ascii_data//\$\{c1\}/$c1}"
+./neofetch/neofetch:4088:    ascii_data="${ascii_data//\$\{c2\}/$c2}"
+./neofetch/neofetch:4089:    ascii_data="${ascii_data//\$\{c3\}/$c3}"
+./neofetch/neofetch:4090:    ascii_data="${ascii_data//\$\{c4\}/$c4}"
+./neofetch/neofetch:4091:    ascii_data="${ascii_data//\$\{c5\}/$c5}"
+./neofetch/neofetch:4092:    ascii_data="${ascii_data//\$\{c6\}/$c6}"
+./neofetch/neofetch:4611:    string="${string/:/${reset}${colon_color}${separator:=:}${info_color}}"
+./neofetch/neofetch:4628:                        "${underline// /$underline_char}${reset} "
+./neofetch/neofetch:4808:    bar+="${bar_color_elapsed}${prog// /${bar_char_elapsed}}"
+./neofetch/neofetch:4809:    bar+="${bar_color_total}${total// /${bar_char_total}}"
+
+./bashtop/bashtop:953:                                  line_array=(${input_line/${key}/${key// /}})
+./bashtop/bashtop:994:                  math="${math//x/$found}"
+./bashtop/bashtop:1933:                 text="${r_tmp// /$text}"
+./bashtop/bashtop:2356: proc_array[0]="${proc_array[0]/ ${selected}/${symbol}${selected}}"
+./bashtop/bashtop:2624: proc_array[0]="${proc_array[0]/ ${selected}/${symbol}${selected}}"
+
+./sentaku/sentaku:829:          _s_show="${_s_show//$w/\\e[31${negative}m$w\\e[${negative}m}"
+
+./sbp/segments/git.bash:55:        outgoing_filled="${upstream_stripped/ahead /${outgoing_icon}}"
+./sbp/segments/git.bash:56:        upstream_status="${outgoing_filled/behind /${incoming_icon}}"
+
+./ble.sh/keymap/vi.sh:6974:    ins=${ins//[!$'\n']/"$s"}
+./ble.sh/lib/core-syntax.sh:976:      a=${a//@h/$histc1}
+./ble.sh/lib/core-syntax.sh:977:      a=${a//@q/$histc2}
+./ble.sh/lib/core-syntax.sh:982:    a=${a//@h/$histc1}
+./ble.sh/lib/core-syntax.sh:983:    a=${a//@q/$histc2}
+./ble.sh/lib/core-syntax.sh:2255:    rex_event=${rex_event//@A/$A}
+./ble.sh/lib/core-syntax.sh:2266:    rex_quicksub=${rex_quicksub//@A/[$histc2]}
+./ble.sh/lib/core-syntax.sh:2267:    rex_quicksub=${rex_quicksub//@C/$histc2}
+./ble.sh/lib/core-syntax.sh:4453:    a=\\   ; b="\\$a"; ret="${ret//"$a"/$b}"
+./ble.sh/src/edit.sh:604:    a='\' b='\\' text=${text//"$a"/$b}
+./ble.sh/src/util.sh:118:          ble/array#push specs "${var[@]/%/=$value}" # #D1570 WA checked
+./ble.sh/src/util.sh:777:    ARR=("${ARR[@]::$2}" "${sARR[@]/#/$4}" "${ARR[@]:$3}")' # WA #D1570 checked
+./ble.sh/src/util.sh:806:  ret="${ret// /$1}"
+./ble.sh/src/util.sh:1083:      a=${chars1:i:1} b=\\${chars2:i:1} ret=${ret//"$a"/$b}
+./ble.sh/src/util.sh:5305:  ble/util/put "${_ble_term_visible_bell_show//'%message%'/$sgr$message}" >&2
+./ble.sh/src/util.sh:5622:  local ret=${_ble_term_Ss//@1/$state}
