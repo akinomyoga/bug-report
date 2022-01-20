@@ -1,4 +1,87 @@
 
+Thank you for your consideration and for implementing it.  I have
+tried the latest devel branch and played with it.  I now really like
+its behavior.  Thank you very much for taking it into consideration.
+
+> I generally make new functionality that's controlled by a separate option
+> off by default in releases. I'll do the same here. It's on now so we can
+> evaluate its effects. It's hard to get enough people to test alpha and
+> beta releases, so who knows what good that will do.
+
+I see, I have not noticed it.  Thank you for your explanation and
+sorry for the noise.
+
+> It probably won't be in bash-5.2-alpha, since I already froze and tested
+> that, but the behavior will be different in the next devel branch push
+> after that.
+
+Does that meen it will be in bash-5.2-beta or in besh-5.3?  I am
+interested in what would be the behavior of the release version of
+bash-5.2, which would affect how I will modify my script.
+
+> I still like the simpler explanation: if bash-5.1 expanded `string' to
+> something that contained an unescaped `&', replace it. If it expanded to
+> something that contained a literal '\&' you'll get a `&'. Backslash-escaped
+> backslashes produce a single literal backslash. But allowing double quotes
+> to inhibit the replacement is probably better for backwards compatibility,
+> even with patsub_replacement off by default.
+
+Is this an explanation that will be put in ChangeLog or in Bash
+Reference Manual?  I have checked how the quoting of anchor
+characters, # and %, in ${var/#prefix} and ${var/%suffix} is explained
+in Bash Reference Manual but could not find the mention about the
+quoting.  For the pattern matching operators, I found an explanation:
+
+> From https://www.gnu.org/software/bash/manual/html_node/Pattern-Matching.html:
+>
+> [...] The special pattern characters must be quoted if they are to
+> be matched literally.
+
+but I feel the detailed behavior is actually not so clear from this
+explanation.
+
+$ value='(K&R)' var=ABCDE
+$ echo ${var//C/$value}
+AB(KCR)DE
+$ echo ${var//C/"$value"}
+AB(K&R)DE
+$ echo ${var//C/"$value"$value}
+AB(K&R)(KCR)DE
+$ echo ${var//C/\&}
+AB&DE
+$ echo ${var//C/&}
+ABCDE
+$ echo ${var//C/\\&}
+AB\CDE
+$ echo ${var//C/\\\&}
+AB\&DE
+$ echo ${var//C/\\}
+AB\DE
+$ echo ${var//C/\\\\}
+AB\\DE
+$ echo ${var//C/\\\\\\}
+AB\\\DE
+$ echo ${var//C/\\\\\\\\}
+AB\\\\DE
+$ echo ${var//C/\\\\\\\\&}
+AB\\\\CDE
+$ echo ${var//C/\\\\\\\\\&}
+AB\\\\&DE
+$ echo ${var//C/<&>}
+AB<C>DE
+$ echo ${var//C/'&'}
+AB&DE
+$ echo ${var//C/\'&\'}
+AB'C'DE
+$ echo ${var//C/"&"}
+AB&DE
+$ echo ${var//C/"\&"}
+AB\&DE
+$ echo ${var//C/""&}
+ABCDE
+
+==============================================================================
+
 > --- a/CHANGES
 > +++ b/CHANGES
 > @@ -1,3 +1,326 @@
