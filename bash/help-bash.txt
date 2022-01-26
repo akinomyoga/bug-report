@@ -1,3 +1,136 @@
+2022-01-26 [#H0008]
+
+2022年1月26日(水) 8:31 Christoph Anton Mitterer <calestyo@scientia.net>:
+> - The encoded values associated with <period>, <slash>, <newline>, and
+>   <carriage-return> shall be invariant across all locales supported by
+>   the implementation.”
+>   => which means AFAIU, that these will have the same binary
+>      representation in any locale/encoding.
+> - Likewise, the byte values used to encode <period>, <slash>,
+>   <newline>, and <carriage-return> shall not occur as part of any
+>   other character in any locale.”
+>   => which means AFAIU that it cannot happen, that a invalidly
+>     encoded character + the sentinel form together a valid character
+>     and thus the sentinel cannot be stripped of, as no partial byte
+>     sequence could be completed by these bytes/characters to a valid
+>     character in any locale/encoding.
+> (see 6.1 Portable Character Set [1])
+
+Thanks for the information. That's good to know.
+
+> So if that holds true... simply appending . or / as sentinel within the
+> command substitution, and removing that afterwards (without any need
+> for locale changes) should *always* work, regardless of the
+> locale/encoding.
+>
+> Can anyone confirm this?
+
+No.  I guess that should practically work in most cases, but I don't
+think POSIX requires that it should always work.  When the data is not
+encoded by the current LC_CTYPE or contains misencoded byte sequences,
+it is difficult to impose any well-defined requirements on how the
+implementation should treat them.  In fact XBD 6.1 says that the
+result is unspecified:
+
+https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap06.html#tag_06_01
+> POSIX.1-2017 places only the following requirements on the encoded
+> values of the characters in the portable character set:
+>
+> * If the encoded values associated with each member of the portable
+>   character set are not invariant across all locales supported by
+>   the implementation, if an application uses any pair of locales
+>   where the character encodings differ, or accesses data from an
+>   application using a locale which has different encodings from the
+>   locales used by the application, the results are unspecified.
+
+For example, suppose we have an encoding where bytes X and Y are used
+for the first and second bytes of double-byte characters, L is used
+for single-byte characters, and these sets of bytes X, Y, and L are
+disjoint (e.g., a byte that belongs to Y does not belong to the other
+sets). According to the above quotes on the POSIX, <period>, <slash>,
+etc. are required to be in L. Data correctly encoded in that encoding
+should look like e.g. "LLXYLLXYLLXYXYLL" where "X" and "Y".always need
+to appear in pairs. The combination "XL" is not allowed in the
+correctly encoded data, but how the implementation should behave when
+it actually finds "XL"? One possible behavior is to replace "XL" with
+"<Error>" where <Error> is a replacement character such as "�"
+(U+FFFD) or "?" that indicates that there was originally misencoded
+data at its position. Now let us consider misencoded data "X" suffixed
+by <period>. I wouldn't be surprised even if there is an
+implementation that converts (or sanitize) "X<period>" to "�" before
+storing it in a variable. Then the trailing <period> cannot be
+removed, and even the original byte X is replaced by different data.
+
+> @Koichi, with respect to your replies back then (especially your
+> comments about ISO/IEC 2022):
+>
+> On Tue, 2021-06-01 at 11:55 +0900, Koichi Murase wrote:
+> > It seems the solution is also given there; set temporary LC_ALL=C
+> > (though it is pointed out that this doesn't work with yash).
+>
+> I found several more shells that seem to not support changing LC_ALL
+> during runtime (at least without effect for the shell itself): [2],
+> [3]
+
+These shells seem to support only the locale "LC_CTYPE=C" which is
+exactly what we want to force the shell for the present purpose, so
+there aren't any problems for the present purpose, are they?
+
+> > There is no problem in UTF-8 where "x" will never appear as a valid
+> > trailing byte in multibyte characters.
+
+First of all, I think I need to clarify that, in that paragraph, I
+have explained the reason why you could not reproduce the broken
+behavior reported in the StackOverflow discussion with *a specific
+implementation* that you use under the UTF-8 LC_CTYPE.  So actually I
+did not mean that "UTF-8 does not have problem under any hypothetical
+implementation of POSIX shells".
+
+> But AFAIU, command substitution is defined to capture any stdout (i.e.
+> also invalid encoded stuff), except for NUL and trailing newlines.
+> So UTF-8 itself has no problem, but there is no guarantee, that the
+> command must generate only valid UTF-8.
+
+In addition, by "no problem in UTF-8", I did not mean that "*data*
+correctly encoded in UTF-8 does not have problems", which is trivially
+true to say nothing.  What I described is that the specific
+implementation of the UTF-8 *decoder* that you had used did not have
+the problem with misencoded data because it is possible to implement
+it in that way due to the aspect of UTF-8 encoding scheme.
+
+> > but "." isn't affected (as far as the answering person tried in
+> > Debian, FreeBSD, and Solaris), but this is not really a robust
+> > statement.
+>
+> It became more robust not with what Thorsten Glaser pointed out.
+
+Yes, that is right that it is actually more robust than I though then.
+Thank you for the information.  I haven't thought that POSIX imposes
+requirements on the details of the encoding so that the full support
+for ISO-2022 encoding is actually not allowed in the POSIX systems.
+
+> >  In theory, ISO/IEC 2022 encoding allows to change the meaning of
+> > C0 (\x00-\x1F), GL (\x21-\x7E), C1 (\x80-\x9F), and GR (\xA0-\xAF)
+> > by locking shift escape sequences. In particular, all the bit
+> > combinations (i.e.  bytes) in GL which contain ASCII "." and "x"
+> > can be used for trailing bytes of 94^n character sets (such as
+> > LC_CTYPE=ja_JP.ISO-2022-JP). The only two bit-combinations that
+> > are unaffected by the ISO/IEC 2022 shifts are SP (space \x20) and
+> > DEL (^? or \x7F). But actually, the encodings that are fully
+> > ISO/IEC 2022 have hardly used as user locales because most
+> > utilities have problems in dealing with such context-dependent
+> > encoding schemes.
+>
+> Would that "shifting" simply not be allowed in a POSIX compliant
+> shell/locale/encoding?
+
+Yeah, right.  It turned out by the comments by Thorsten Glaser that
+you quoted.
+
+--
+Koichi
+
+==============================================================================
 
 ------------------------------------------------------------------------------
 2021-10-24
