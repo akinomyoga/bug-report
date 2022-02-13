@@ -133,9 +133,48 @@ Koichi
 ==============================================================================
 
 ------------------------------------------------------------------------------
+2022-02-08 [#H0008]
+
+https://lists.gnu.org/archive/html/help-bash/2022-02/msg00023.html
+
+コマンドを実行した時の時刻をプロンプトに表示する方法について。OP は PS0 をプロ
+ンプトと同じ行に表示したいという様な事を書いていたが、実の所 bind を色々弄った
+ら行けるのではないかと思って試して、その方法を投稿した。
+
+------------------------------------------------------------------------------
+2022-01-12
+
+# 2022年1月12日(水) 0:12 Tathastu Pandya via Bug reports for the GNU
+# Bourne Again SHell <bug-bash@gnu.org>:
+# 
+# > Just as PROMPT COMMAND thats get executed every time before any
+# > commamd.
+# 
+# PROMPT_COMMAND is executed _after_ any command (except for the first
+# prompt).
+# 
+# > Is there a way to execute predefined command after every command is
+# > executedeg.
+# 
+# PROMPT_COMMAND=postcmd
+# _prev_histcmd=
+# postcmd() {
+#   local status=$?
+#   if [[ ! $_prev_histcmd || $HISTCMD == $_prev_histcmd ]]; then
+#     _prev_histcmd=$HISTCMD
+#     return
+#   fi
+#   local lastcmd=$(HISTTIMEFORMAT=x history 1)
+#   lastcmd=${lastcmd#*x}
+#   echo "$status, $lastcmd" > ~/your-record.txt
+# }
+
+結局返信はしなかった。
+
+------------------------------------------------------------------------------
 2021-10-24
 
-Note: これは恐らく結局返信せずに終わった。
+https://lists.gnu.org/archive/html/bug-bash/2021-10/msg00154.html
 
 > my apologies if there's a much easier solution for the following
 > problem - in this case please let me know!
@@ -174,7 +213,6 @@ and I guess this is the behavior implied by the POSIX standard:
 Koichi
 
 ------------------------------------------------------------------------------
-
 2021-08-25 [#H0007]
 
 https://lists.gnu.org/archive/html/bug-bash/2021-08/msg00163.html
