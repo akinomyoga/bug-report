@@ -1,0 +1,181 @@
+From 50007ff655e5ad4c96e3ab2329ef8730a88fafa2 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sat, 12 Mar 2022 16:03:28 +0900
+Subject: [PATCH 1/3] fix backslash quoting of invisible character ^\ (by
+ extending sh_charvis)
+
+---
+ externs.h        |  2 +-
+ lib/sh/shquote.c | 14 +++++-----
+ lib/sh/strvis.c  | 67 +++++++++++++++++++++++++++++-------------------
+ 3 files changed, 48 insertions(+), 35 deletions(-)
+
+diff --git a/externs.h b/externs.h
+index 86557501..85c093a9 100644
+--- a/externs.h
++++ b/externs.h
+@@ -472,7 +472,7 @@ extern int ansic_shouldquote PARAMS((const char *));
+ extern char *ansiexpand PARAMS((char *, int, int, int *));
+ 
+ /* declarations for functions defined in lib/sh/strvis.c */
+-extern int sh_charvis PARAMS((const char *, size_t *, size_t, char *, size_t *));
++extern int sh_charvis PARAMS((const char *, size_t *, size_t, char *, size_t *, int));
+ extern char *sh_strvis PARAMS((const char *));
+ 
+ /* declarations for functions defined in lib/sh/timeval.c.  No prototypes
+diff --git a/lib/sh/shquote.c b/lib/sh/shquote.c
+index 622fcbb0..58d1739a 100644
+--- a/lib/sh/shquote.c
++++ b/lib/sh/shquote.c
+@@ -39,7 +39,7 @@
+ extern char *ansic_quote PARAMS((char *, int, int *));
+ extern int ansic_shouldquote PARAMS((const char *));
+ 
+-extern int sh_charvis PARAMS((const char *, size_t *, size_t, char *, size_t *));
++extern int sh_charvis PARAMS((const char *, size_t *, size_t, char *, size_t *, int));
+ 
+ /* Default set of characters that should be backslash-quoted in strings */
+ static const char bstab[256] =
+@@ -338,18 +338,18 @@ sh_backslash_quote_for_double_quotes (string, flags)
+ 
+   for (rind = sind = 0; c = string[sind]; sind++)
+     {
+-      /* Backslash-newline disappears within double quotes, so don't add one. */
+-
+-      if ((sh_syntaxtab[c] & CBSDQUOTE) && c != '\n')
+-	result[rind++] = '\\';
+-
+       if (flags & 1)
+ 	{
+-	  sh_charvis (string, &sind, slen, result, &rind);
++	  sh_charvis (string, &sind, slen, result, &rind, 1);
+ 	  sind--;		/* sh_charvis consumes an extra character */
+ 	  continue;
+ 	}
+ 
++      /* Backslash-newline disappears within double quotes, so don't add one. */
++
++      if ((sh_syntaxtab[c] & CBSDQUOTE) && c != '\n')
++	result[rind++] = '\\';
++
+       /* I should probably use the CSPECL flag for these in sh_syntaxtab[] */
+       else if (c == CTLESC || c == CTLNUL)
+ 	result[rind++] = CTLESC;		/* could be '\\'? */
+diff --git a/lib/sh/strvis.c b/lib/sh/strvis.c
+index 97eee1fc..97651f72 100644
+--- a/lib/sh/strvis.c
++++ b/lib/sh/strvis.c
+@@ -29,6 +29,7 @@
+ #include "chartypes.h"
+ #include "bashintl.h"
+ #include "shmbutil.h"
++#include "syntax.h"
+ 
+ #define SAFECHAR(c)   ((c) == ' ' || (c) == '\t')
+ 
+@@ -52,55 +53,67 @@
+ #define UNMETA(c)	((c) & 0x7f)
+ #endif
+ 
++/* If (FLAGS & 1) == 1, additional backslash quoting for the inside of the
++   double quotes is performed. */
+ int
+-sh_charvis (s, sindp, slen, ret, rindp)
++sh_charvis (s, sindp, slen, ret, rindp, flags)
+      const char *s;
+      size_t *sindp;
+      size_t slen;
+      char *ret;
+      size_t *rindp;
++     int flags;
+ {
+   unsigned char c;
+   size_t si, ri;
+   const char *send;
++  int skip;
+   DECLARE_MBSTATE;
+ 
+   si = *sindp;
+   ri = *rindp;
+   c = s[*sindp];
++  skip = 0;
+ 
+   send = (locale_mb_cur_max > 1) ? s + slen : 0;
+ 
+-  if (SAFECHAR (c))
++  if (!SAFECHAR (c))
+     {
+-      ret[ri++] = c;
+-      si++;
+-    }
+-  else if (c == RUBOUT)
+-    {
+-      ret[ri++] = '^';
+-      ret[ri++] = '?';
+-      si++;
+-    }
+-  else if (CTRL_CHAR (c))
+-    {
+-      ret[ri++] = '^';
+-      ret[ri++] = UNCTRL (c);
+-      si++;
++      if (c == RUBOUT)
++	{
++	  ret[ri++] = '^';
++	  c = '?';
++	}
++      else if (CTRL_CHAR (c))
++	{
++	  ret[ri++] = '^';
++	  c = UNCTRL (c);
++	}
++#ifdef HANDLE_MULTIBYTE
++      else if ((locale_utf8locale && (c & 0x80)) ||
++	  (locale_mb_cur_max > 1 && is_basic (c) == 0))
++	{
++	  /* We assume that the multi-byte chars are safe in double quotes, so
++	     we just copy them without caring the backslash quoting. */
++	  COPY_CHAR_I (ret, ri, s, send, si);
++	  skip = 1;
++	}
++#endif
++      else if (META_CHAR (c))
++	{
++	  ret[ri++] = 'M';
++	  ret[ri++] = '-';
++	  c = UNMETA (c);
++	}
+     }
+-  else if (locale_utf8locale && (c & 0x80))
+-    COPY_CHAR_I (ret, ri, s, send, si);
+-  else if (locale_mb_cur_max > 1 && is_basic (c) == 0)
+-    COPY_CHAR_I (ret, ri, s, send, si);
+-  else if (META_CHAR (c))
++
++  if (!skip)
+     {
+-      ret[ri++] = 'M';
+-      ret[ri++] = '-';
+-      ret[ri++] = UNMETA (c);
++      if ((flags & 1) && (sh_syntaxtab[c] & CBSDQUOTE) && ret[c] != '\n')
++	ret[ri++] = '\\';
++      ret[ri++] = c;
+       si++;
+     }
+-  else
+-    ret[ri++] = s[si++];
+   
+   *sindp = si;
+   *rindp = ri;
+@@ -141,7 +154,7 @@ sh_strvis (string)
+   sind = 0;
+ 
+   while (string[sind])
+-    sind = sh_charvis (string, &sind, slen, ret, &retind);
++    sind = sh_charvis (string, &sind, slen, ret, &retind, 0);
+ 
+   ret[retind] = '\0';
+   return ret;
+-- 
+2.35.1
+

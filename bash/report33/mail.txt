@@ -1,0 +1,65 @@
+Subject: [PATCH] Fix escaping of \034 (^\) in paths for \w, \W, and \s
+
+I have tried the latest devel branch to see the behavior of the
+escaping of directory names (\w, \W) in the prompt as discussed in the
+thread [1] implemented in the recent commit b4e5e550. It now works as
+expected, but I noticed that the escaping of \034 is incomplete.
+
+[1] https://lists.gnu.org/archive/html/bug-bash/2022-01/msg00051.html
+
+----
+
+Bash Version: 5.2 (devel branch)
+Commit b6a567e7f13406952cbb1d1adb2f00b2260a871e
+Commit b4e5e5505cc4495c6237c32a65ba62ebcc497b31
+
+Description:
+
+  The escaping of the invisible characters in the directory names in
+  the prompt escapes \w, \W and the path in \s has been implemented in
+  the function `sh_backslash_quote_for_double_quotes'
+  (lib/sh/shquote.c:323) in commit b4e5e550.  The primary purpose of
+  the function `sh_backslash_quote_for_double_quotes' is to quote
+  special characters in double quotes with a backslash.  When the
+  escaping of the invisible characters are turned on by the argument
+  FLAG, a backslash in the visible representation of $'\034', '^\', it
+  not properly escaped by another backslash.  This may break the
+  escaping of the succeeding special character.
+
+Repeat-By:
+
+    bash-dev$ PS1='\w\$ '
+    ~$ mkdir $'\034$(echo hello)'
+    ~$ cd !$
+    ^\hello$
+
+  Here, we expect '^\$(echo hello)' for the visible representation of
+  the directory name. Here the command substitution in the directory
+  name is unexpectedly evaluated replaced by its stdout `hello'.
+  
+Fix:
+
+  In the attached patch `0001-fix-prompt-charvis-A.patch', the
+  escaping of the invisible characters is processed before the
+  backslash quoting so that the backslash quoting is also applied to
+  the results of the escaping of invisible characters.  With this
+  patch, the string is processed twice from the beginning to the end
+  because the escaping of the invisible characters and the quoting of
+  the special characters in double quotes are processed separately.
+
+  To process both quoting in a single pass properly, I have prepared
+  another alternative patch `0001-fix-prompt-charvis-A.patch' where I
+  have exnteded the function `sh_charvis (lib/sh/strvis.c)' to accept
+  an extra argument FLAGS.  When FLAGS has the bit (FLAGS & 1),
+  `sh_charvis' quote special characters of double quotes by a
+  backslash.
+
+  However, I think the first patch is better because it is cleaner and
+  also because I do not think that the performance can be a problem
+  for the results of \w, \W and \s. [ Note that the function
+  `sh_backslash_quote_for_double_quotes' is currently called with
+  (flags & 1) (enable the invisible-character escaping) only for \w,
+  \W and \s ]
+
+--
+Koichi
