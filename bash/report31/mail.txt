@@ -12,9 +12,9 @@ Description:
   When `shopt -s patsub_replacement' is turned on and the pattern
   string `pat' of ${var/$pat/"&"} is just an anchoring character `#'
   or `%', the internal escape of `&' (i.e., `\&') remains in the
-  result of the the parameter expansion.  Also, with the same
-  condition, the unquoted & in ${var/$pat/&} remains a literal & where
-  we expect it to be expanded to an empty string.
+  result of the parameter expansion.  Also, with the same condition,
+  the unquoted & in ${var/$pat/&} remains a literal & where we expect
+  it to be expanded to an empty string.
 
 Repeat-By:
 
@@ -37,7 +37,7 @@ Repeat-By:
 
   where unquoted & does not become an empty string, and quoted &'s
   become \&.  In particular, with ${v/$pat/"<&>"}, a backslash
-  originally not present are inserted in the expanded result.  I
+  originally not present is inserted in the expanded result.  I
   instead expect the following result for consistency with the other
   cases:
 

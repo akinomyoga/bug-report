@@ -294,46 +294,6 @@
   る参照を作り兼ねないから、それなら完全にプロセスを分けてしまって弱参照を徹
   底するという事。
 
-2021-08-24
-
-* ${param//pat/&}
-
-  https://lists.gnu.org/archive/html/bug-bash/2021-08/msg00165.html
-  https://lists.gnu.org/archive/html/bug-bash/2021-08/msg00166.html
-  https://lists.gnu.org/archive/html/bug-bash/2021-01/msg00215.html
-
-  ここで ${param//pat/&} で & が一致文字列に変換されるとしている。
-  然し実際に試してみるとこれはかなり際どい変更の様な気がする。
-
-  ./bash --norc
-  $ a='(&)' b='XXX,YYY,ZZZ'
-  $ echo "${b//[X-Z][X-Z][X-Z]/(&)}"
-  (XXX),(YYY),(ZZZ)
-  これは良い。
-  $ echo "${b//[X-Z][X-Z][X-Z]/$a}"
-  (XXX),(YYY),(ZZZ)
-  これもまあ分からなくはない。
-
-  $ echo "${b//[X-Z][X-Z][X-Z]/'(&)'}"
-  (XXX),(YYY),(ZZZ)
-  $ echo "${b//[X-Z][X-Z][X-Z]/"$a"}"
-  (XXX),(YYY),(ZZZ)
-
-  これは困る。更に、literal & を含める手段が存在しない気がする。
-
-  $ echo "${b//[X-Z][X-Z][X-Z]/\&}"
-  XXX,YYY,ZZZ
-  $ echo "${b//[X-Z][X-Z][X-Z]/'&'}"
-  XXX,YYY,ZZZ
-  $ echo "${b//[X-Z][X-Z][X-Z]/"&"}"
-  XXX,YYY,ZZZ
-  $ echo "${b//[X-Z][X-Z][X-Z]/"\&"}"
-  \&,\&,\&
-
-  まあ、未だ有効にはしていないし不完全な実装という事なのだろう。何れもっとちゃ
-  んとした実装になるのだろうと思う。"tagged" というのは後でちゃんと実装する予定
-  という意味なのだろうという気がする。
-
 2021-05-25
 
 * set -e; builtin eval false || true で駄目になるという事
@@ -883,6 +843,44 @@
 -------------------------------------------------------------------------------
 
 2022-07-18
+
+* report31: 2021-08-24 ${param//pat/&} [#D0034]
+
+  https://lists.gnu.org/archive/html/bug-bash/2021-08/msg00165.html
+  https://lists.gnu.org/archive/html/bug-bash/2021-08/msg00166.html
+  https://lists.gnu.org/archive/html/bug-bash/2021-01/msg00215.html
+
+  ここで ${param//pat/&} で & が一致文字列に変換されるとしている。
+  然し実際に試してみるとこれはかなり際どい変更の様な気がする。
+
+  ./bash --norc
+  $ a='(&)' b='XXX,YYY,ZZZ'
+  $ echo "${b//[X-Z][X-Z][X-Z]/(&)}"
+  (XXX),(YYY),(ZZZ)
+  これは良い。
+  $ echo "${b//[X-Z][X-Z][X-Z]/$a}"
+  (XXX),(YYY),(ZZZ)
+  これもまあ分からなくはない。
+
+  $ echo "${b//[X-Z][X-Z][X-Z]/'(&)'}"
+  (XXX),(YYY),(ZZZ)
+  $ echo "${b//[X-Z][X-Z][X-Z]/"$a"}"
+  (XXX),(YYY),(ZZZ)
+
+  これは困る。更に、literal & を含める手段が存在しない気がする。
+
+  $ echo "${b//[X-Z][X-Z][X-Z]/\&}"
+  XXX,YYY,ZZZ
+  $ echo "${b//[X-Z][X-Z][X-Z]/'&'}"
+  XXX,YYY,ZZZ
+  $ echo "${b//[X-Z][X-Z][X-Z]/"&"}"
+  XXX,YYY,ZZZ
+  $ echo "${b//[X-Z][X-Z][X-Z]/"\&"}"
+  \&,\&,\&
+
+  まあ、未だ有効にはしていないし不完全な実装という事なのだろう。何れもっとちゃ
+  んとした実装になるのだろうと思う。"tagged" というのは後でちゃんと実装する予定
+  という意味なのだろうという気がする。
 
 * report22: [2021-12-21] trap handler の中で jobs を実行すると偽情報が表示される [#D0033]
   ble.sh #D1435 で判明した事。

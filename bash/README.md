@@ -45,6 +45,7 @@
 - report21: read timeout を select/pselect を使って再実装
   - https://lists.gnu.org/archive/html/bug-bash/2021-02/msg00059.html
 - report22: ■trap handler の中で jobs を実行すると偽情報が表示される
+  - https://lists.gnu.org/archive/html/bug-bash/2022-07/msg00117.html
 - report23: [reply] $(case esac) に関連する問題
   - https://lists.gnu.org/archive/html/bug-bash/2021-02/msg00097.html
   - 関連 https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00097.html by Chet `parse_comsub` 再実装
@@ -61,18 +62,21 @@
   - https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00139.html
 - 2021-06-27 report28: quote command and function names in `complete -p`
   - https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00140.html
-- 2021-10-05 report29: ■devel: fix segfault by `unset 'assoc[${x[0]}]'`
+- 2021-10-05 report29: devel: fix segfault by `unset 'assoc[${x[0]}]'`
   - https://lists.gnu.org/archive/html/bug-bash/2021-10/msg00051.html
+  - ■問題の segfault は修正された気がするが refactoring に関する議論は pending?
 - 2021-09-22 report30: <kbd>prior</kbd> が `history-search-backward` になった筈なのに動いていない
   - https://lists.gnu.org/archive/html/bug-bash/2021-09/msg00055.html
 - 2021-10-05 report31: ■`${var/pat/&}` の設定に関する質問。
   - https://lists.gnu.org/archive/html/bug-bash/2021-10/msg00050.html
   - https://lists.gnu.org/archive/html/bug-bash/2022-01/msg00036.html
-- 2021-10-06 report32: ■4.0..devel: fix a problem that unset ``'a[`echo 0`]'`` causes "bad array subscript" error
+  - PATCH https://lists.gnu.org/archive/html/bug-bash/2022-07/msg00119.html
+- 2021-10-06 report32: 4.0..devel: fix a problem that unset ``'a[`echo 0`]'`` causes "bad array subscript" error
   - https://lists.gnu.org/archive/html/bug-bash/2021-10/msg00059.html
 - 2022-03-12 report33: Fix escaping of `\034` (`^\`) in paths for `\w`, `\W`, and `\s`
   - https://lists.gnu.org/archive/html/bug-bash/2022-03/msg00020.html
-  - 結局返事はなかったが修正は適用されていた。最初の返信の時点で修正済みだったのかもしれない
+  - https://lists.gnu.org/archive/html/bug-bash/2022-03/msg00022.html
+  - 結局、更新パッチに対して返事はなかったが修正は適用されていた。最初の返信の時点で修正済みだったのかもしれない
 
 ## help-bash
 
