@@ -1,0 +1,69 @@
+From 3ff6e8b3fcb131676a7c7542b25d48b5768c8ea7 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 24 Jan 2022 22:31:51 +0900
+Subject: [PATCH 1/3] fix ${v/#PAT/"REP"}: process patsub_replacement also for
+ the special cases
+
+---
+ subst.c | 28 +++++++++++++++-------------
+ 1 file changed, 15 insertions(+), 13 deletions(-)
+
+diff --git a/subst.c b/subst.c
+index 163f42c1..666127c8 100644
+--- a/subst.c
++++ b/subst.c
+@@ -8930,36 +8930,38 @@ pat_subst (string, pat, rep, mflags)
+    *	    STRING and return the result.
+    *	3.  A null STRING with a matching pattern means to append REP to
+    *	    STRING and return the result.
+-   * These don't understand or process `&' in the replacement string.
+    */
+   if ((pat == 0 || *pat == 0) && (mtype == MATCH_BEG || mtype == MATCH_END))
+     {
+-      replen = STRLEN (rep);
++      if (mflags & MATCH_EXPREP)
++	rstr = strcreplace (rep, '&', "", 2);
++      else
++	rstr = rep;
++      rslen = STRLEN (rstr);
+       l = STRLEN (string);
+-      ret = (char *)xmalloc (replen + l + 2);
+-      if (replen == 0)
++      ret = (char *)xmalloc (rslen + l + 2);
++      if (rslen == 0)
+ 	strcpy (ret, string);
+       else if (mtype == MATCH_BEG)
+ 	{
+-	  strcpy (ret, rep);
+-	  strcpy (ret + replen, string);
++	  strcpy (ret, rstr);
++	  strcpy (ret + rslen, string);
+ 	}
+       else
+ 	{
+ 	  strcpy (ret, string);
+-	  strcpy (ret + l, rep);
++	  strcpy (ret + l, rstr);
+ 	}
++      if (rstr != rep)
++	free (rstr);
+       return (ret);
+     }
+   else if (*string == 0 && (match_pattern (string, pat, mtype, &s, &e) != 0))
+     {
+-      replen = STRLEN (rep);
+-      ret = (char *)xmalloc (replen + 1);
+-      if (replen == 0)
+-	ret[0] = '\0';
++      if (mflags & MATCH_EXPREP)
++	return strcreplace (rep, '&', "", 2);
+       else
+-	strcpy (ret, rep);
+-      return (ret);
++	return savestring (rep);
+     }
+ 
+   ret = (char *)xmalloc (rsize = 64);
+-- 
+2.36.1
+

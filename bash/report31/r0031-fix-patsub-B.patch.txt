@@ -1,0 +1,82 @@
+From 0ae5daa351eff978ac01daec96a84300b8b039ac Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 24 Jan 2022 21:50:39 +0900
+Subject: [PATCH 1/2] fix ${var/#PAT/"REP"}: turn off patsub_replacement with
+ #% anchors
+
+---
+ subst.c | 51 +++++++++++++++++++++++++++------------------------
+ 1 file changed, 27 insertions(+), 24 deletions(-)
+
+diff --git a/subst.c b/subst.c
+index 163f42c1..87957976 100644
+--- a/subst.c
++++ b/subst.c
+@@ -9157,30 +9157,6 @@ parameter_brace_patsub (varname, value, estatep, patsub, quoted, pflags, flags)
+      pattern removal expansions. */
+   pat = getpattern (lpatsub, quoted, 1);
+ 
+-  if (rep)
+-    {
+-      /* We want to perform quote removal on the expanded replacement even if
+-	 the entire expansion is double-quoted because the parser and string
+-	 extraction functions treated quotes in the replacement string as
+-	 special.  THIS IS NOT BACKWARDS COMPATIBLE WITH BASH-4.2. */
+-      if (shell_compatibility_level > 42 && patsub_replacement == 0)
+-	rep = expand_string_if_necessary (rep, quoted & ~(Q_DOUBLE_QUOTES|Q_HERE_DOCUMENT), expand_string_unsplit);
+-      else if (shell_compatibility_level > 42 && patsub_replacement)
+-	rep = expand_string_for_patsub (rep, quoted & ~(Q_DOUBLE_QUOTES|Q_HERE_DOCUMENT));
+-      /* This is the bash-4.2 code. */      
+-      else if ((mflags & MATCH_QUOTED) == 0)
+-	rep = expand_string_if_necessary (rep, quoted, expand_string_unsplit);
+-      else
+-	rep = expand_string_to_string_internal (rep, quoted, expand_string_unsplit);
+-
+-      /* Check whether or not to replace `&' in the replacement string after
+-	 expanding it, since we want to treat backslashes quoting the `&'
+-	 consistently. */
+-      if (patsub_replacement && rep && *rep && shouldexp_replacement (rep))
+-	mflags |= MATCH_EXPREP;
+-
+-    }
+-
+   /* ksh93 doesn't allow the match specifier to be a part of the expanded
+      pattern.  This is an extension.  Make sure we don't anchor the pattern
+      at the beginning or end of the string if we're doing global replacement,
+@@ -9201,6 +9177,33 @@ parameter_brace_patsub (varname, value, estatep, patsub, quoted, pflags, flags)
+   else
+     mflags |= MATCH_ANY;
+ 
++  if (rep)
++    {
++      /* We want to perform quote removal on the expanded replacement even if
++	 the entire expansion is double-quoted because the parser and string
++	 extraction functions treated quotes in the replacement string as
++	 special.  THIS IS NOT BACKWARDS COMPATIBLE WITH BASH-4.2. */
++      if (shell_compatibility_level > 42)
++	{
++	  if (patsub_replacement && (mflags & (MATCH_BEG | MATCH_END)) == 0)
++	    rep = expand_string_for_patsub (rep, quoted & ~(Q_DOUBLE_QUOTES|Q_HERE_DOCUMENT));
++	  else
++	    rep = expand_string_if_necessary (rep, quoted & ~(Q_DOUBLE_QUOTES|Q_HERE_DOCUMENT), expand_string_unsplit);
++	}
++      /* This is the bash-4.2 code. */
++      else if ((mflags & MATCH_QUOTED) == 0)
++	rep = expand_string_if_necessary (rep, quoted, expand_string_unsplit);
++      else
++	rep = expand_string_to_string_internal (rep, quoted, expand_string_unsplit);
++
++      /* Check whether or not to replace `&' in the replacement string after
++	 expanding it, since we want to treat backslashes quoting the `&'
++	 consistently. */
++      if (patsub_replacement && (mflags & (MATCH_BEG | MATCH_END)) == 0 && rep && *rep && shouldexp_replacement (rep))
++	mflags |= MATCH_EXPREP;
++
++    }
++
+   /* OK, we now want to substitute REP for PAT in VAL.  If
+      flags & MATCH_GLOBREP is non-zero, the substitution is done
+      everywhere, otherwise only the first occurrence of PAT is
+-- 
+2.36.1
+

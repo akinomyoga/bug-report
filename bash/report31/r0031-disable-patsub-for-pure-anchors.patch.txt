@@ -1,0 +1,49 @@
+From 07a9188f31d7210cc93a32e34a250b9730d6bfeb Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 24 Jan 2022 22:55:09 +0900
+Subject: [PATCH 2/3] fix ${v/#PAT/"REP"}: disable patsub_replacement for
+ ${v/#/REP} and ${v/%/REP}
+
+---
+ subst.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/subst.c b/subst.c
+index 666127c8..c974c82b 100644
+--- a/subst.c
++++ b/subst.c
+@@ -9161,13 +9161,20 @@ parameter_brace_patsub (varname, value, estatep, patsub, quoted, pflags, flags)
+ 
+   if (rep)
+     {
++      int patsub_replacement_active = patsub_replacement;
++      /* We treat ${a[@]/#/rep} and ${a[@]/%/rep} (with literal '#' or '%') as
++	 a special case where patsub_replacement is disabled so that rep is
++	 directly prefixed or suffixed. */
++      if ((lpatsub[0] == '#' || lpatsub[0] == '%') && lpatsub[1] == '\0')
++	patsub_replacement_active = 0;
++
+       /* We want to perform quote removal on the expanded replacement even if
+ 	 the entire expansion is double-quoted because the parser and string
+ 	 extraction functions treated quotes in the replacement string as
+ 	 special.  THIS IS NOT BACKWARDS COMPATIBLE WITH BASH-4.2. */
+-      if (shell_compatibility_level > 42 && patsub_replacement == 0)
++      if (shell_compatibility_level > 42 && patsub_replacement_active == 0)
+ 	rep = expand_string_if_necessary (rep, quoted & ~(Q_DOUBLE_QUOTES|Q_HERE_DOCUMENT), expand_string_unsplit);
+-      else if (shell_compatibility_level > 42 && patsub_replacement)
++      else if (shell_compatibility_level > 42 && patsub_replacement_active)
+ 	rep = expand_string_for_patsub (rep, quoted & ~(Q_DOUBLE_QUOTES|Q_HERE_DOCUMENT));
+       /* This is the bash-4.2 code. */      
+       else if ((mflags & MATCH_QUOTED) == 0)
+@@ -9178,7 +9185,7 @@ parameter_brace_patsub (varname, value, estatep, patsub, quoted, pflags, flags)
+       /* Check whether or not to replace `&' in the replacement string after
+ 	 expanding it, since we want to treat backslashes quoting the `&'
+ 	 consistently. */
+-      if (patsub_replacement && rep && *rep && shouldexp_replacement (rep))
++      if (patsub_replacement_active && rep && *rep && shouldexp_replacement (rep))
+ 	mflags |= MATCH_EXPREP;
+ 
+     }
+-- 
+2.36.1
+

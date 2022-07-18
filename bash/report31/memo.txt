@@ -1,0 +1,123 @@
+
+
+------------------------------------------------------------------------------
+
+* ${v/%$empty/"$rep"} に於いて $rep の内部 quoting がそのまま出力されてしまうバグ。
+
+  > ble.sh #D1753 より
+  >
+  > うーん。不思議だ。bash-5.2 のバグだろうか。うーん。これはバグである。という
+  > か /% 等の様にパターンが空の時には escape は処理されないのである。
+  > 
+  >   $ var= rep='&'; echo "${var/%/"$rep"}"
+  > 
+  > もう少し細かく確認する。
+  > 
+  >   $ var=a rep='\'; echo "${var/a/"$rep"}"
+  >   \
+  >   $ var=a rep='\'; echo "${var/%a/"$rep"}"
+  >   \
+  >   $ var= rep='\'; echo "${var/%/"$rep"}"
+  >   \\
+  > 
+  > うーん。Bash に報告しようと思ったが思ったよりも複雑である。
+
+  新しく patsub_replacement の quoting を実装してもらったが ${var/#/"REP"} の振る
+  舞いが変だ。
+
+  現在どの様に振る舞うか・実装されているかについて確認する。
+
+  * pat の展開結果が unquoted # の場合には問答無用でそのまま先頭・末尾にくっつける。
+  * pat の展開結果が unquoted # + (何か) の場合にはちゃんと展開を実行する。
+  * それ以外の時 (anchor なしの時) にはちゃんと展開する。
+
+  a 一つの修正方針として unquoted # がある時には展開は全くしないという物を作って
+    みたがこれは違うという気がする。現に pattern が残っている場合にはちゃんと展開
+    も実行するのだから、これを動かなくしてしまうのはおかしい。
+
+  b もう一つの修正方針は unquoted # + empty の場合でも MATCH_EXPREP が指定されて
+    いる場合にはちゃんと処理をするという方法。これが自然である。今までは unquoted
+    '#' + empty の時には & の置換をしなかったがこの場合には置換を実行することにな
+    る。
+
+    1 一つの実装方針は　MATCH_EXPREP が指定されている場合は真面目に処理するという
+      物。つまり、スキップはしないで後ろのループで処理する。
+
+      x スキップしない様に書き換えようと思ったが改めて確認してみた所
+      match_pattern は pat が空だと何もしない様になっているので、後ろのループでは
+      処理できない。
+
+    2 もう一つの実装はその場で MATCH_EXPREP がある場合だけ特別に処理を実行すると
+      いう物。
+
+    これは 2 で実装するしかない様に思われる。
+
+  c 或いはもう一つの方針は /#/ という明らかな場合に限って & の処理を実施しないと
+    いう物。これが一番便利な気がする。
+
+    - これを実装するにはどうしたら良いか。/#/ の時には quote もしないし
+      MATCH_EXPREP も指定しないという形にすれば良い。
+
+      後は b をベースにすれば良い。
+
+  取り敢えず実装したこれは後で報告すれば良い。
+
+  2022-07-18 報告の為に改めて振る舞いを整理する。現在の振る舞いは以下の様になっ
+  ている。
+
+    $ v=1234 pat=2; echo "${v/$pat/<&>}, ${v/$pat/<\&>}, ${v/$pat/"<&>"}"
+    1234, &234, &234
+    $ v=1234 pat=#1; echo "${v/$pat/<&>}, ${v/$pat/<\&>}, ${v/$pat/"<&>"}"
+    1234, &234, &234
+    $ v=1234 pat=#; echo "${v/$pat/<&>}, ${v/$pat/<\&>}, ${v/$pat/"<&>"}"
+    &1234, \&1234, \&1234
+
+  pat の中身によって & の quote の振る舞いが変るのは変だ。特に "&" と quote し
+  た物が \& に変換されるというのは特に変な振る舞いである。"&" が quote されうる
+  という想定の上で rep を処理するのだとしたら、その場合は pat がどうであれ、や
+  はり "&" が quote されたという前提の下で読み取った rep をその様に取り扱うべき
+  である。
+
+  それとは別に特別に literal に ${v/#/&} の時に限っては & の quote を解釈しない
+  という様な取り扱いも可能かもしれないが微妙かもしれない。
+
+
+
+patsub_replacement
+
+
+
+* compat42 まで考え始めると何が起こるのか不明である。
+
+------------------------------------------------------------------------------
+
+I found an unwanted behavior in the new treatment of the quoting of patsub &.
+
+Bash Version: 5.2
+  - the latest devel branch 2a1c81bf
+  - Note: compiled with relstatus=release
+
+Description:
+
+  When PAT is empty with the form ${var/%PAT/REP} and ${var/#PAT/REP}, the
+  internal quoting of REP remains in the result. I believe we should process
+  the unquoted operator & and the internal quoting even when PAT was expanded
+  to an empty value.
+
+Repeat-By:
+
+  $ bash-dev --norc
+  $ shopt -p patsub_replacement
+  shopt -s patsub_replacement
+  $ var= rep='\'; echo "${var/%/"$rep"}"
+  \\     # --> expected result is a single '\'
+  $ var= rep='\'; echo "${var/#$empty/"$rep"}"
+  \\     # --> expected result is a single '\'
+
+  When PAT is non-empty, it works as expected.
+
+  $ var=a rep='\'; echo "${var/%a/"$rep"}"
+  \      # --> expected
+
+--
+Koichi

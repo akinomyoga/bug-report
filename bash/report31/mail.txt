@@ -1,3 +1,63 @@
+2022-07-18
+
+[PATCH] Fix leaked internal escapes of patsub_replacement ${var/$pat/"&"} with pat=# or pat=%
+
+Here is another patch that was pending.
+
+Bash Version: 5.2
+Commit 87a6e89edc7cb1af057e2c15666df189595d305b (the current devel)
+
+Description:
+
+  When `shopt -s patsub_replacement' is turned on and the pattern
+  string `pat' of ${var/$pat/"&"} is just an anchoring character `#'
+  or `%', the internal escape of `&' (i.e., `\&') remains in the
+  result of the the parameter expansion.  Also, with the same
+  condition, the unquoted & in ${var/$pat/&} remains a literal & where
+  we expect it to be expanded to an empty string.
+
+Repeat-By:
+
+  When `pat' contains non-anchoring characters, the expected result of
+  the expansions is obtained as
+
+  $ bash-dev --norc
+  $ shopt -s patsub_replacement
+  $ v=1234 pat=2; echo "${v/$pat/<&>}, ${v/$pat/<\&>}, ${v/$pat/"<&>"}"
+  1<2>34, 1<&>34, 1<&>34
+  $ v=1234 pat=#1; echo "${v/$pat/<&>}, ${v/$pat/<\&>}, ${v/$pat/"<&>"}"
+  <1>234, <&>234, <&>234
+
+  Here, unquoted & in the replacement is expanded to the matched
+  string as expected while quoted &'s are expanded to the literal `&'.
+  However, only when pat=# or pat=%, the result becomes
+
+  $ v=1234 pat=#; echo "${v/$pat/<&>}, ${v/$pat/<\&>}, ${v/$pat/"<&>"}"
+  <&>1234, <\&>1234, <\&>1234
+
+  where unquoted & does not become an empty string, and quoted &'s
+  become \&.  In particular, with ${v/$pat/"<&>"}, a backslash
+  originally not present are inserted in the expanded result.  I
+  instead expect the following result for consistency with the other
+  cases:
+
+  <>1234, <&>1234, <&>1234
+
+Fix:
+
+  I attach a patch `r0031-fix-patsub.patch.txt'.
+
+  I guess the original intent of the related code has been to disable
+  patsub_replacement for ${var/#/...} and ${var/%/...} where the
+  pattern `# + <empty string>' or `% + <empty string>' is explicitly
+  specified (not through a parameter expansion $pat), but I would
+  still think we should keep the special treatment of unquoted & for
+  these cases as well when patsub_replacement is turned on for
+  consistency with other cases.
+
+--
+Koichi
+
 ==============================================================================
 
 Thank you for your consideration and for implementing it.  I have
