@@ -10,35 +10,53 @@ Compilation CFLAGS: -g -O2 -Wno-parentheses -Wno-format-security
 uname output: Linux chatoyancy 5.6.13-100.fc30.x86_64 #1 SMP Fri May 15 00:36:06 UTC 2020 x86_64 x86_64 x86_64 GNU/Linux
 Machine Type: x86_64-pc-linux-gnu
 
-Bash Version: 5.1
-Patch Level: 4
-Release Status: release
+Bash Version: 5.1.4, also in the current devel 87a6e89e
 
 Description:
 
   In interactive shells, the foreground dead jobs (i.e., foreground
-  jobs that have already terminated) in trap handlers are treated as
-  if they are the background dead jobs.  (1) When `jobs' is called in
-  a trap handler, all the foreground jobs that have already terminated
-  in the same call of the trap handler are printed.  (2) When `wait
-  -n' is called in a trap handler, it immediately returns with the
-  exit status of the previous foreground dead job.  I'll describe them
-  in detail in the following Repeat-By section.
+  jobs that have already terminated) in trap handlers, commands called
+  throught `bind -x', and `PROMPT_COMMAND' (let us call these three
+  contexts as the affected context. Note: There might be even other
+  similar contexts) are treated as if they are the background dead
+  jobs.  This causes several unintended behaviors: (1) When `jobs' is
+  called in the affectet contexts, all the foreground jobs that have
+  already terminated in the same call of the affected contexts are
+  printed.  (2) When `wait -n' is called in the affected contexts, it
+  immediately returns with the exit status of the previous foreground
+  dead job.
 
   These behaviors are different from those in the normal case where
-  `jobs' and `wait -n' are executed outside the trap handler, and I
-  don't see the rationale for this behavior change.  The behavior is
-  just annoying.  However, this behavior seems to be unchanged at
-  least since bash-1.14 (the oldest one found in
-  https://ftp.gnu.org/gnu/bash/) for `jobs', and bash-4.3 for `wait
-  -n' (when the option `wait -n' is first introduced).
+  `jobs' and `wait -n' are executed outside the trap handler, and I do
+  not see the reasoning for this behavior difference between inside
+  and outside of the affected contexts.  I hope the behavior in the
+  affected contexts would be similar to that in the normal contexts
+  where the foreground dead job informations are not printed.
+
+  A quick example is here:
+
+    $ PROMPT_COMMAND='for a in {0..9};do (true);done;jobs'
+
+  This reports every time 10 foreground dead job entries, which is
+  unexpected.  The detailed explanation and other examples are
+  presented in the next section.  I have received related reports
+  twice in different projects, once in 2022-12 and the other in the
+  last week:
+
+    https://github.com/akinomyoga/ble.sh/issues/78#issue-771281403
+    https://github.com/petobens/trueline/pull/46#issuecomment-1179853850
+
+  I have actually created a patch about one years ago after I first
+  received the report, but they were pending because I was not sure
+  what would be the intended behavior.  Here, I submit possible
+  patches (depending on the intended behavior) with explanations.
 
 Repeat-By:
 
   (1) `jobs' prints the information of all the foreground dead jobs in
   trap handlers.  This reproduces in all the versions of Bash that I
   tested from 1.14 to devel branch.  This one was originally reported
-  by `eximus (@3ximus)' at
+  by Fabio (@3ximus) at
 
     https://github.com/akinomyoga/ble.sh/issues/78#issue-771281403
 
@@ -54,17 +72,18 @@ Repeat-By:
     $ f
     [1] 62465
     [1]+  Running                 ( sleep 1; exit 1 ) &
-    $
+    $      <-- (wait more than 1 sec and press RET)
     [1]+  Exit 1                  ( sleep 1; exit 1 )
 
   However, when this function is executed inside the trap handler, the
-  the foreground job "%2 (exit 2)" is also reported by `jobs':
+  the foreground job "%2 (exit 2)" is also reported by `jobs', which
+  is not expected:
 
     $ trap f INT
     $ ^C          /* <-- Here type C-c */
     [1]+  Running                 ( sleep 1; exit 1 ) &
     [2]   Exit 2                  ( exit 2 )
-    $
+    $      <-- (wait more than 1 sec and press RET)
     [1]+  Exit 1                  ( sleep 1; exit 1 )
 
   When there are many forks (subshells and external command
@@ -128,10 +147,22 @@ Repeat-By:
     [1]+  Exit 1                  ( sleep 1; exit 1 )
 
 
+  (3) The same also happens in PROMPT_COMMAND.  The `jobs` command in
+  the following `PROMPT_COMMAND' always report `(true)' as a
+  terminated job.
+
+    $ bash --norc
+    $ PROMPT_COMMAND='(true);jobs'
+
+  This was originally reported by Pedro Ferrari (@petobens) in the
+  following discussion:
+
+    https://github.com/petobens/trueline/pull/46
+
 Fix:
 
   The reason that the behavior changes between the outside and inside
-  of the trap handlers can be understood from the function body of
+  of the affected contexts can be understood from the function body of
   `notify_and_cleanup ()' in `jobs.c'.
 
   > void
@@ -146,19 +177,19 @@ Fix:
   >   cleanup_dead_jobs ();
   > }
 
-  The condition of the second `if' statement is usually satisfied but
-  unsatisfied in the trap handlers.  In normal situation,
-  `notify_of_job_status ()' just mark a foreground dead job as
-  `J_NOTIFIED' without printing the job information unless the job is
-  in the `WIFSIGNALED' state (terminated by a signal?).  Then, the
-  subsequent call of `clean_up_dead_jobs ()' removes the jobs marked
-  as `J_NOTIFIED'.  In this way, the foreground jobs are immediately
-  removed from the job list in a normal situation.  However, in the
-  trap handlers, `notify_of_job_status ()' is not called, so
-  foreground dead jobs are never marked as `J_NOTIFIED' and therefore
-  survive after the call of `cleanup_dead_jobs ()'.  Actually, any
-  foreground jobs created in a trap handler would never be removed
-  until the end of the trap handler.
+  The condition of the second `if' statement is satisfied in normal
+  contexts but unsatisfied in the affected contexts.  In normal
+  situation, `notify_of_job_status ()' just marks a foreground dead
+  job as `J_NOTIFIED' without printing the job information unless the
+  job is in the `WIFSIGNALED' state (terminated by a signal?).  Then,
+  the subsequent call of `clean_up_dead_jobs ()' removes the jobs
+  marked as `J_NOTIFIED'.  In this way, the foreground jobs are
+  immediately removed from the job list in a normal context.  However,
+  in the affected contexts, `notify_of_job_status ()' is not called,
+  so foreground dead jobs are never marked as `J_NOTIFIED' and
+  therefore survive after the call of `cleanup_dead_jobs ()'.
+  Actually, any foreground jobs created in a trap handler would never
+  be removed until the end of the trap handler.
 
   The actual work of `wait -n' is done in the function
   `wait_for_any_job (flags, ps)' in `jobs.c'.  In the description of
@@ -167,28 +198,77 @@ Fix:
   background jobs.  However, in the implementation, it isn't actually
   checked whether the job is foreground or background.  This is the
   reason that `wait -n' immediately terminates with a foreground dead
-  job in trap handlers.  I think this implementation is based on the
-  assumption that the foreground dead jobs would be immediately
+  job in the affected contexts.  I think this implementation is based
+  on the assumption that the foreground dead jobs would be immediately
   removed so that the dead jobs are only the background ones when
   `wait_for_any_job ()' is called.  In fact, this assumption is
-  correct in normal cases, but this is not the case in trap handlers.
+  correct in normal cases, but this is not the case in the affected
+  contexts.
 
 
-  So, I think the quick fix is to remove the foreground dead jobs
-  immediately in `cleanup_dead_jobs ()' regardless of `J_NOTIFIED'.
-  This is a one-line fix (see the attached patch [■■■]).  There is
-  mostly no use for the job entries of foreground dead jobs, so they
-  can be removed safely in most cases.
+  Option 1: I think the quickest fix is to remove the foreground dead
+  jobs immediately in `cleanup_dead_jobs ()' regardless of
+  `J_NOTIFIED'.  This is a one-line fix [see the attached patch
+  `r0022-foreground-dead-job-fix1.patch.txt'].  There is mostly no use
+  for the job entries of foreground dead jobs, so they can be removed
+  safely in most cases.
 
-  ----
+  However, the problem of option 1 is that the job information of the
+  foreground jobs of the `WIFSIGNALED' state (i.e., the foreground
+  jobs terminated by a signal) will not be printed.
 
-  The only exception is the case for the foreground jobs of the
-  `WIFSIGNALED' state.
+    $ bash-dev --norc    <-- the current devel
+    $ trap 'echo begin;for a in {0..3}; do (kill -9 $BASHPID); done;echo end' INT
+    $ ^C     <-- press C-c
+    begin
+    end
 
+    Killed
+    Killed
+    Killed
+    Killed
+    $ bash-r0022-fix1 --norc    <-- the devel patched with option 1
+    $ trap 'echo begin;for a in {0..3}; do (kill -9 $BASHPID); done;echo end' INT
+    $ ^C
+    begin
+    end
 
-  However, I believe the foreground dead jobs needs to be immediately
+  Option 2: Here, another naive fix is that we print the information
+  of the foreground jobs terminated by a signal and removes the entry
+  [see the attached patch `r0022-foreground-dead-job-fix2.patch.txt'].
 
+  However, I guess this conflicts with the original reason that
+  `notify_of_job_status ()' is not called in the affected contexts; I
+  guess we do not want to print job informations in the middle of trap
+  handlers or the other affected contexts, but instead print them at
+  the end of the trap handler. See the following example:
 
+    $ bash-r0022-fix2 --norc    <-- the devel patched with option 2
+    $ trap 'echo begin;for a in {0..3}; do (kill -9 $BASHPID); done;echo end' INT
+    $ ^C
+    begin
+    Killed
+    Killed
+    Killed
+    Killed
+    end
 
-	[Description of how to fix the problem.  If you don't know a
-	fix for the problem, don't include this section.]
+  Option 3: So, we can defer the deletion of the foreground jobs
+  terminated by signals and only removes the foreground dead jobs that
+  are not terminated by signals.  We may remove the foreground jobs
+  terminated by signals later [see
+  `r0022-foreground-dead-job-fix3.patch.txt'].  With this, the 
+
+    $ bash-r0022-fix3 --norc    <-- the devel patched with option 3
+    $ trap 'echo begin;for a in {0..3}; do (kill -9 $BASHPID); done;echo end' INT
+    $ ^C
+    begin
+    end
+
+    Killed
+    Killed
+    Killed
+    Killed
+
+--
+Koichi

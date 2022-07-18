@@ -1,0 +1,56 @@
+From 7c0ee1548390f2929c315e388a2e5a4a52ae6841 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Thu, 11 Feb 2021 01:21:21 +0900
+Subject: [PATCH 1/2] clean up fg dead jobs in trap (Option 2)
+
+---
+ jobs.c | 33 +++++++++++++++++++++++++++++++--
+ 1 file changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/jobs.c b/jobs.c
+index 2c91fb0e..b49c5cf6 100644
+--- a/jobs.c
++++ b/jobs.c
+@@ -1226,8 +1226,37 @@ cleanup_dead_jobs ()
+       if (i > js.j_lastj && jobs[i])
+ 	INTERNAL_DEBUG(("cleanup_dead_jobs: job %d non-null after js.j_lastj (%d)", i, js.j_lastj));
+ 
+-      if (jobs[i] && DEADJOB (i) && IS_NOTIFIED (i))
+-	delete_job (i, 0);
++      if (jobs[i] && DEADJOB (i))
++	{
++	  if (IS_NOTIFIED (i))
++	    delete_job (i, 0);
++	  else if (IS_FOREGROUND (i))
++	    {
++	      /* The control path usually does not come here because foreground
++		 dead jobs are already notified in `notify_of_job_status'.
++		 However, the control path can come here in trap handlers where
++		 `notify_of_job_status' is skipped.  When the job is terminated
++		 by a signal (the exist status is larger than 128), it is
++		 notified even in trap handlers. */
++	      WAIT s;
++	      int termsig;
++	      s = raw_job_exit_status (i);
++	      termsig = WTERMSIG (s);
++#if !defined (DONT_REPORT_SIGPIPE)
++	      if (termsig && WIFSIGNALED (s) && termsig != SIGINT)
++#else
++	      if (termsig && WIFSIGNALED (s) && termsig != SIGINT && termsig != SIGPIPE)
++#endif
++		{
++		  fprintf (stderr, "%s", j_strsignal (termsig));
++		  if (WIFCORED (s))
++		    fprintf (stderr, _(" (core dumped)"));
++		  fprintf (stderr, "\n");
++		}
++
++	      delete_job (i, 0);
++	    }
++	}
+     }
+ 
+ #if defined (PROCESS_SUBSTITUTION)
+-- 
+2.36.1
+
