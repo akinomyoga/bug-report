@@ -16,11 +16,11 @@ Description:
 
   In interactive shells, the foreground dead jobs (i.e., foreground
   jobs that have already terminated) in trap handlers, commands called
-  throught `bind -x', and `PROMPT_COMMAND' (let us call these three
+  through `bind -x', and `PROMPT_COMMAND' (let us call these three
   contexts as the affected context. Note: There might be even other
   similar contexts) are treated as if they are the background dead
   jobs.  This causes several unintended behaviors: (1) When `jobs' is
-  called in the affectet contexts, all the foreground jobs that have
+  called in the affected contexts, all the foreground jobs that have
   already terminated in the same call of the affected contexts are
   printed.  (2) When `wait -n' is called in the affected contexts, it
   immediately returns with the exit status of the previous foreground
@@ -31,14 +31,14 @@ Description:
   not see the reasoning for this behavior difference between inside
   and outside of the affected contexts.  I hope the behavior in the
   affected contexts would be similar to that in the normal contexts
-  where the foreground dead job informations are not printed.
+  where the foreground dead job information is not printed.
 
   A quick example is here:
 
     $ PROMPT_COMMAND='for a in {0..9};do (true);done;jobs'
 
   This reports every time 10 foreground dead job entries, which is
-  unexpected.  The detailed explanation and other examples are
+  unexpected.  Its detailed explanation and other examples are
   presented in the next section.  I have received related reports
   twice in different projects, once in 2022-12 and the other in the
   last week:
@@ -46,7 +46,7 @@ Description:
     https://github.com/akinomyoga/ble.sh/issues/78#issue-771281403
     https://github.com/petobens/trueline/pull/46#issuecomment-1179853850
 
-  I have actually created a patch about one years ago after I first
+  I have actually created a patch about one year ago after I first
   received the report, but they were pending because I was not sure
   what would be the intended behavior.  Here, I submit possible
   patches (depending on the intended behavior) with explanations.
@@ -137,7 +137,7 @@ Repeat-By:
     wait status: 1
 
   However, when it is executed in a trap handler, `wait -n'
-  immediately returns and report the status `2' which is the exit
+  immediately returns and reports the status `2' which is the exit
   status of the already-terminated foreground job `(exit 2)':
 
     $ trap g INT
@@ -148,7 +148,7 @@ Repeat-By:
 
 
   (3) The same also happens in PROMPT_COMMAND.  The `jobs` command in
-  the following `PROMPT_COMMAND' always report `(true)' as a
+  the following `PROMPT_COMMAND' always reports `(true)' as a
   terminated job.
 
     $ bash --norc
@@ -178,7 +178,7 @@ Fix:
   > }
 
   The condition of the second `if' statement is satisfied in normal
-  contexts but unsatisfied in the affected contexts.  In normal
+  contexts but unsatisfied in the affected contexts.  In a normal
   situation, `notify_of_job_status ()' just marks a foreground dead
   job as `J_NOTIFIED' without printing the job information unless the
   job is in the `WIFSIGNALED' state (terminated by a signal?).  Then,
@@ -213,8 +213,8 @@ Fix:
   for the job entries of foreground dead jobs, so they can be removed
   safely in most cases.
 
-  However, the problem of option 1 is that the job information of the
-  foreground jobs of the `WIFSIGNALED' state (i.e., the foreground
+  However, the problem with option 1 is that the job information of
+  the foreground jobs of the `WIFSIGNALED' state (i.e., the foreground
   jobs terminated by a signal) will not be printed.
 
     $ bash-dev --norc    <-- the current devel
@@ -239,7 +239,7 @@ Fix:
 
   However, I guess this conflicts with the original reason that
   `notify_of_job_status ()' is not called in the affected contexts; I
-  guess we do not want to print job informations in the middle of trap
+  guess we do not want to print job information in the middle of trap
   handlers or the other affected contexts, but instead print them at
   the end of the trap handler. See the following example:
 
