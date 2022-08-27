@@ -25,15 +25,18 @@ function enumerate-change-items {
   '
 }
 
-# enumerate-change-items | awk '
-#   if (match($0, /(by|from) ([^<>]*) <([^<>[:space:]]*@[[:alnum:].-]+\.[[:alpha:]]+)>/, m) > 0) {
-#     name = m[2];
-#     sub(/^.*\y(by|from) /, "", name);
-#     print m[3] ":" name;
-#   }
-# '
+function sub:generate-chlog-dict {
+  enumerate-change-items | awk '
+    match($0, /(by|[Ff]rom|with) ([^<>]*) <([^<>[:space:]]*@[[:alnum:].-]+\.[[:alpha:]]+)>/, m) > 0 {
+      name = m[2];
+      sub(/^.*\y(by|[Ff]rom|with) /, "", name);
+      if (name ~ /\y(by|[Ff]rom|with)$/) next;
+      print m[3] ":" name;
+    }' | sort -u
+  #| sort -t : -k 2 | uniq
+}
 
-function list-contributions {
+function sub:list-contributions {
   {
     echo "__mode_dict__"
     cat chlog.dict.dat
@@ -87,7 +90,7 @@ function list-items {
   ' | ifold -w 80 --indent='- ' --indent-type=spaces --spaces
 }
 
-list-contributions
+#list-contributions
 #list-items "Grisha Levit"                # 20/113 ("From a report by Hyunho Cho <mug896@gmail.com>" が最後の確認済み項目)
 #list-items 'Eduardo A. Bustamante Lopez' # 16/61
 #list-items 'Stephane Chazelas'           # 2/53
@@ -97,3 +100,5 @@ list-contributions
 #list-items "Koichi Murase"               # 31fix/45
 #list-items "Dan Douglas"                 # 0/36
 #list-items "Eric Blake"                  # 13/30
+
+sub:"$@"

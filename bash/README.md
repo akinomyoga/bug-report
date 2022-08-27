@@ -31,7 +31,11 @@
 - report14: Resolve inconsisteny of keyseq representation of `\C-\\` (0x5c)
   - https://lists.gnu.org/archive/html/bug-bash/2020-01/msg00037.html
 - report15: Exit status by no-argument `return` for function calls in trap handlers
+  - Ref https://lists.gnu.org/archive/html/bug-bash/2014-03/msg00053.html
+  - Ref https://github.com/akinomyoga/ble.sh/issues/48
   - https://lists.gnu.org/archive/html/bug-bash/2020-04/msg00089.html
+  - https://www.mail-archive.com/austin-group-l@opengroup.org/msg06011.html
+  - https://lists.gnu.org/archive/html/bug-bash/2022-08/threads.html#00009
   - ■結局この問題は pending である
 - report16: Implement rehashing for associative arrays (Re: speeding up hash_search?)
   - https://lists.gnu.org/archive/html/bug-bash/2020-04/msg00121.html
@@ -45,6 +49,8 @@
 - report21: read timeout を select/pselect を使って再実装
   - https://lists.gnu.org/archive/html/bug-bash/2021-02/msg00059.html
 - report22: ■trap handler の中で jobs を実行すると偽情報が表示される
+  - Ref https://github.com/akinomyoga/ble.sh/issues/78#issue-771281403
+  - Ref https://github.com/petobens/trueline/pull/46#issuecomment-1179853850
   - https://lists.gnu.org/archive/html/bug-bash/2022-07/msg00117.html
 - report23: [reply] $(case esac) に関連する問題
   - https://lists.gnu.org/archive/html/bug-bash/2021-02/msg00097.html
@@ -67,7 +73,7 @@
   - ■問題の segfault は修正された気がするが refactoring に関する議論は pending?
 - 2021-09-22 report30: <kbd>prior</kbd> が `history-search-backward` になった筈なのに動いていない
   - https://lists.gnu.org/archive/html/bug-bash/2021-09/msg00055.html
-- 2021-10-05 report31: ■`${var/pat/&}` の設定に関する質問。
+- 2021-10-05 report31: `${var/pat/&}` の設定に関する質問。
   - https://lists.gnu.org/archive/html/bug-bash/2021-10/msg00050.html
   - https://lists.gnu.org/archive/html/bug-bash/2022-01/msg00036.html
   - PATCH https://lists.gnu.org/archive/html/bug-bash/2022-07/msg00119.html
@@ -77,6 +83,9 @@
   - https://lists.gnu.org/archive/html/bug-bash/2022-03/msg00020.html
   - https://lists.gnu.org/archive/html/bug-bash/2022-03/msg00022.html
   - 結局、更新パッチに対して返事はなかったが修正は適用されていた。最初の返信の時点で修正済みだったのかもしれない
+- 2022-04-13 report34: add-compgen-zflag
+  - Ref https://github.com/scop/bash-completion/issues/704#issuecomment-1091631732
+  - Ref https://github.com/ohmybash/oh-my-bash/issues/341#issuecomment-1168073038
 
 ## help-bash
 
