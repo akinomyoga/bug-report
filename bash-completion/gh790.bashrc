@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
 HISTFILE=H
-_test1() { printf '\e7\n\e[J'; declare -p COMP_WORDS; printf '<%s>' "$@"; printf '\e8'; } && complete -F _test1 test1
+source ~/.mwg/src/ble.sh/out/ble.sh -o complete_auto_complete= -o complete_menu_filter=
+
+_test1() { printf '\e7\n\n\e[J'; declare -p COMP_WORDS COMP_CWORD COMP_LINE COMP_POINT; printf '<%s>' "$@"; printf '\e8'; COMPREPLY=(alpha beta gamma); } && complete -F _test1 test1
 
 function setbreak {
   COMP_WORDBREAKS=$1$IFS
