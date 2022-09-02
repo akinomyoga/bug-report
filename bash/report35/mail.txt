@@ -1,4 +1,3 @@
-
 From: murase
 To: bug-bash@gnu.org
 Subject: [PATCH] Calling `trap xxx INT' in completion functions of `complete -F' leaves readline in a strange state
@@ -30,7 +29,7 @@ Description:
   readline is left in a strange state where C-c does not respond and
   the first character of the next user command is dropped.  This is
   caused by missing `rl_set_signals ()' after using `trap xxx INT' in
-  the completion fucntions.
+  the completion functions.
 
 Repeat-By:
 
@@ -44,8 +43,8 @@ Repeat-By:
   $
 
   In the above case, there is no response to [C-c] although we are
-  expecting [C-c] printing `^C' and clearing the command line. Also,
-  the subsequent [RET] causes an execution of the command, but somehow
+  expecting [C-c] to print `^C' and clear the command line.  Also, the
+  subsequent [RET] causes the execution of the command, but somehow
   the first character of the command line is missing.
 
   We can observe similar behaviors also with the following cases
@@ -75,8 +74,8 @@ Fix:
     is called by `compgen', so we need a reliable way to test it (see
     the code comment starting with XXX in the patch).  The case where
     `compgen -F xxx 2>/dev/null' is called inside another completion
-    function `yyy' with `complete -F yyy' should also be cared (cf the
-    test case of cmd4).
+    function `yyy' with `complete -F yyy' should also be taken care of
+    (cf the test case of cmd4).
 
     I excluded a concrete implementation for the test from the above
     patch because this is not an essential part of the fix and also
@@ -94,8 +93,8 @@ Fix:
     `readline () @ lib/readline/readline.c', particularly
     `rl_clear_signals ()'.  Because of this missing call to
     `rl_clear_signals ()', the next call to `rl_set_signals ()' in
-    `readline ()' does nothing, so the signals for readline is not set
-    up.
+    `readline ()' does nothing, so the signals for readline are not
+    set up.
 
     I initially naively thought we could also set up an unwind frame
     in `readline ()' but realized that the unwind mechanism is
