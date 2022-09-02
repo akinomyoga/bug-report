@@ -1,0 +1,409 @@
+
+bash-completion の _comp_finalize で INT に対する Workaround を実装したらテスト
+に全て失敗する様になった。調べていくと、compfunc の中で trap を実行した時に
+readline の設定する sighandler が消滅する事が原因である事が分かった。テストは
+^C を用いて状態をクリアして次のテストに進んだり応答を読み取ったりする事になって
+いるがこれが動かなくなる。問題を再現するコードは以下の通り。
+
+  % LANG=C PS1='\$ ' bash --norc
+  $ _echo() { trap 'echo INT' INT; : do_stuff; trap - INT; } && complete -F _echo echo
+  $ echo a[TAB][C-c][RET]
+
+  bash: cho: command not found
+  $
+
+うーん。これは complete -F の関数の呼び出しの後に readline の介入を復元する様に
+関数を呼び出せば直るのではないか。readline が trap に介入しているのにちゃんと対
+応できていないという事なのだろうか。うーん。completion function が readline が
+有効になっていない状態で呼び出される事はあるのだろうか。例えば compgen 等を介し
+て。
+
+ble.sh#D1345 と同様に rl の sighandler が呼び出されなくなる事による問題かと思っ
+たが違うかもしれない。rl_set_handlers から各種の handler を再設定していて INT
+もその内の一つである。然し、実際に rl_set_handlers を呼び出す様にしても
+bash-completino のテストは止まるし、上の簡単な test case でもやはり問題は残って
+いる。ちゃんと rl_set_handlers() が呼び出されている事も確認した。
+
+| diff --git a/pcomplete.c b/pcomplete.c
+| index 9612406d..05abc192 100644
+| --- a/pcomplete.c
+| +++ b/pcomplete.c
+| @@ -1169,6 +1169,8 @@ gen_shell_function_matches (cs, cmd, text, line, ind, lwords, nw, cw, foundp)
+|    /* Now clean up and destroy everything. */
+|    dispose_words (cmdlist);
+|    unbind_compfunc_variables (0);
+| +  if (found)
+| +    rl_set_signals();
+| 
+|    /* The list of completions is returned in the array variable COMPREPLY. */
+|    v = find_variable ("COMPREPLY");
+
+と思ったら rl_clear_signals と rl_set_signals を両方呼び出したら直った。
+
+| diff --git a/pcomplete.c b/pcomplete.c
+| index 9612406d..fcaf2e54 100644
+| --- a/pcomplete.c
+| +++ b/pcomplete.c
+| @@ -1150,7 +1150,9 @@ gen_shell_function_matches (cs, cmd, text, line, ind, lwords, nw, cw, foundp)
+| 
+|    pps = &ps;
+|    save_parser_state (pps);
+| +  rl_clear_signals ();
+|    begin_unwind_frame ("gen-shell-function-matches");
+| +  add_unwind_protect (rl_set_signals, (char *)NULL);
+|    add_unwind_protect (restore_parser_state, (char *)pps);
+|    add_unwind_protect (dispose_words, (char *)cmdlist);
+|    add_unwind_protect (unbind_compfunc_variables, (char *)0);
+
+然しこれでも補完が走っている途中に C-c で中断するとやはり変な状態に入ってしまう。
+
+$ _echo() { trap 'echo INT:$FUNCNAME; trap - INT' INT; for ((i=0;i<1000000;i++)); do true; done; trap - INT; } && complete -F _echo echo
+$ echo a[TAB][C-c]
+
+うーん。以下がちゃんと色々な設定で動く修正だ。
+
+| diff --git a/pcomplete.c b/pcomplete.c
+| index 9612406d..af4dd8e6 100644
+| --- a/pcomplete.c
+| +++ b/pcomplete.c
+| @@ -1150,6 +1150,7 @@ gen_shell_function_matches (cs, cmd, text, line, ind, lwords, nw, cw, foundp)
+| 
+|    pps = &ps;
+|    save_parser_state (pps);
+| +  rl_clear_signals ();
+|    begin_unwind_frame ("gen-shell-function-matches");
+|    add_unwind_protect (restore_parser_state, (char *)pps);
+|    add_unwind_protect (dispose_words, (char *)cmdlist);
+| @@ -1158,6 +1159,7 @@ gen_shell_function_matches (cs, cmd, text, line, ind, lwords, nw, cw, foundp)
+|    fval = execute_shell_function (f, cmdlist);
+| 
+|    discard_unwind_frame ("gen-shell-function-matches");
+| +  rl_set_signals ();
+|    restore_parser_state (pps);
+| 
+|    found = fval != EX_NOTFOUND;
+
+#1 $ _echo() { trap 'echo INT:$FUNCNAME; trap - INT; kill -INT $$' INT; for ((i=0;i<1000000;i++)); do true; done; trap - INT; } && complete -F _echo echo
+#2 $ _echo() { trap 'echo INT:$FUNCNAME; trap - INT' INT; for ((i=0;i<1000000;i++)); do true; done; trap - INT; } && complete -F _echo echo
+#3 $ _echo() { trap 'echo INT:$FUNCNAME' INT; for ((i=0;i<1000000;i++)); do true; done; trap - INT; } && complete -F _echo echo
+#4 $ _echo() { trap - INT; } && complete -F _echo echo
+
+add_unwind_protect も加えると #1 の場合に駄目の様だ。
+add_unwind_protect がなければ #1..#4 が全てちゃんと動く。
+因みに修正前は全て動かない。
+
+add_unwind_protect がある時に #1 に対しては rl_set_signals が二回呼び出されてい
+る。この呼出のタイミングが不味いのではないかという気がするがよく分からない。こ
+れが実行された後にまたシグナルが変更される可能性はあるのだろうか。
+
+? というか何故 unwind_frame がそれを設定した関数の中で実行されるのだろうか
+
+  →うーん。この後すぐに throw_to_top_level において sh_longjmp で外までジャン
+  プしているので中で実行していても問題ないという事の様だ。
+
+  しかしだとしても何故このタイミングで run_sig_handlers を実行して変な事になる
+  のかはよく分からない。trap の設定の復元などとも関係しているのだろうか。或いは
+  run_pending_traps の中で run_sig_handlers を実行すると何か問題が起こるのだろ
+  うか。
+
+  | Breakpoint 1, 0x00000000004f22f0 in rl_set_signals ()
+  | (gdb) bt
+  | #0  0x00000000004f22f0 in rl_set_signals ()
+  | #1  0x0000000000485317 in unwind_frame_run_internal.constprop ()
+  | #2  0x00000000004872d1 in throw_to_top_level ()
+  | #3  0x00000000004ae559 in parse_and_execute ()
+  | #4  0x0000000000482271 in _run_trap_internal ()
+  | #5  0x0000000000482e96 in run_pending_traps ()
+  | #6  0x000000000043d1da in execute_command_internal ()
+  | #7  0x0000000000440bf6 in execute_command ()
+  | #8  0x000000000043e1ff in execute_command_internal ()
+  | #9  0x0000000000443acb in execute_connection ()
+  | #10 0x000000000043d9fb in execute_command_internal ()
+  | #11 0x0000000000440bf6 in execute_command ()
+  | #12 0x0000000000443a8e in execute_connection ()
+  | #13 0x000000000043d9fb in execute_command_internal ()
+  | #14 0x000000000043e0e6 in execute_command_internal ()
+  | #15 0x0000000000442afc in execute_function ()
+  | #16 0x000000000044302b in execute_shell_function ()
+  | #17 0x00000000004a3d4d in gen_shell_function_matches.constprop.0.isra ()
+  | #18 0x00000000004a4de9 in gen_compspec_completions ()
+  | #19 0x00000000004a5973 in programmable_completions ()
+  | #20 0x000000000049ca7e in attempt_shell_completion ()
+  | #21 0x00000000004e1cac in gen_completion_matches ()
+  | #22 0x00000000004e1ee2 in rl_complete_internal ()
+  | #23 0x00000000004d6a97 in _rl_dispatch_subseq ()
+  | #24 0x00000000004d7050 in readline_internal_char ()
+  | #25 0x00000000004d794d in readline ()
+  | #26 0x00000000004254d8 in yy_readline_get ()
+  | #27 0x0000000000428579 in shell_getc.part ()
+  | #28 0x000000000042b45a in read_token.constprop ()
+  | #29 0x0000000000430a4e in yyparse ()
+  | #30 0x0000000000424727 in parse_command ()
+  | #31 0x00000000004248f4 in read_command ()
+  | #32 0x0000000000424a96 in reader_loop ()
+  | #33 0x0000000000423511 in main ()
+  | (gdb) c
+  | Continuing.
+  | 
+  | Breakpoint 1, 0x00000000004f22f0 in rl_set_signals ()
+  | (gdb) bt
+  | #0  0x00000000004f22f0 in rl_set_signals ()
+  | #1  0x00000000004d7935 in readline ()
+  | #2  0x00000000004254d8 in yy_readline_get ()
+  | #3  0x0000000000428579 in shell_getc.part ()
+  | #4  0x000000000042b45a in read_token.constprop ()
+  | #5  0x0000000000430a4e in yyparse ()
+  | #6  0x0000000000424727 in parse_command ()
+  | #7  0x00000000004248f4 in read_command ()
+  | #8  0x0000000000424a96 in reader_loop ()
+  | #9  0x0000000000423511 in main ()
+  | (gdb)
+
+? unwind_protect を設定する順序が関係あるのだろうかと思って調べてみたが違う様だ。
+  rl_set_signals の unwind_protect を最後に設定する様にしたがそれでも振る舞いは
+  変わらない。
+
+? 或いは trap handler の中で実行すると駄目という事なのだろうか。
+
+* reject: trap の後に clear/reset/set signal 等が呼び出される事によって unwind
+  を登録しなくても良くなっているのかもしれないと思ったがそういう訳ではなかった。
+
+2022-09-02 改めて何が起こっているのか詳しく調べる事にする。INT handler がそれぞ
+れどの様になっているのか調べる事にする。
+
+$ #1 設定
+$ echo a[TAB][C-c]
+1662081469.522960(pid=1115003)(signals.c:530 rl_clear_signals)clear:1 INT=0x4f2280
+1662081469.523078(pid=1115003)(signals.c:579 rl_clear_signals)clear:2 INT=0x4873a0
+1662081469.523180(pid=1115003)(./trap.def:198 trap_builtin)trap/set
+INT:_echo
+1662081470.118470(pid=1115003)(./trap.def:204 trap_builtin)trap/revert
+1662081470.118530(pid=1115003)(signals.c:420 rl_set_signals)set:1 (flag=0) INT=0x4873a0
+1662081470.118552(pid=1115003)(signals.c:518 rl_set_signals)set:2 (flag=1) INT=0x4f2280
+
+1662081470.118577(pid=1115003)(signals.c:420 rl_set_signals)set:1 (flag=1) INT=0x4873a0
+1662081470.118586(pid=1115003)(signals.c:518 rl_set_signals)set:2 (flag=1) INT=0x4873a0
+
+1回目の rl_set_signals でちゃんと元の rl handler を復元している。然し、何故か2
+回目の rl_set_signals を呼び出した時点でまた元の handler に戻ってしまっている。
+何処かでsignalが再設定されているという事になると思われるが、少なくとも
+rl_clear_signals は呼び出されていない。何処か別の場所で rl_clear_signals に相当
+する操作が行われているという事か。
+
+元々の (rl のない) INT handler は old_int に保存されている。然し old_int は
+rl_{clear,set}_signals の中でしか保存されていない。という事は別の箇所で signal
+handler が記録されていて、それが復元されていると考えるべきだろうか。
+
+うーん。何処で設定されているのかは分かった。1回目の rl_set_signals の後に sig.c
+set_signal_handler が3回呼び出されている。これを調整するのに失敗しているのであ
+る。何処で呼び出されているのか改めて調べる。
+
+Note: https://stackoverflow.com/questions/36993909/debugging-a-program-that-uses-sigint-with-gdb
+handle SIGINT noprint nostop pass
+
+| gdb$ b rl_set_signals
+| gdb$ b set_signal_handler
+| gdb$ handle SIGINT noprint nostop pass
+| 1662082442.180760(pid=1117675)(./trap.def:198 trap_builtin)trap/set
+| 1662082442.180787(pid=1117675)(trap.c:824 set_signal)INT=0x482460
+| 1662082542.567125(pid=1117675)(sig.c:813 set_signal_handler)INT=0x482460
+| INT:_echo
+| 1662082624.207451(pid=1117675)(sig.c:813 set_signal_handler)INT=(nil)
+|   #0  0x00000000004875e0 in set_signal_handler ()
+|   #1  0x0000000000483b59 in restore_default_signal ()
+|   #2  0x00000000004b9daf in trap_builtin ()
+|   #3  0x000000000043a95b in execute_builtin ()
+|   #4  0x00000000004402ec in execute_command_internal ()
+|   #5  0x0000000000443b1b in execute_connection ()
+|   #6  0x000000000043da4b in execute_command_internal ()
+|   #7  0x0000000000440c46 in execute_command ()
+|   #8  0x0000000000443ade in execute_connection ()
+|   #9  0x000000000043da4b in execute_command_internal ()
+|   #10 0x00000000004aea41 in parse_and_execute ()
+|   #11 0x0000000000482201 in _run_trap_internal ()
+|   #12 0x0000000000482e26 in run_pending_traps ()
+|   #13 0x000000000043dafa in execute_command_internal ()
+|   #14 0x0000000000440c46 in execute_command ()
+|   #15 0x000000000043e24f in execute_command_internal ()
+|   #16 0x0000000000443b1b in execute_connection ()
+|   #17 0x000000000043da4b in execute_command_internal ()
+|   #18 0x0000000000440c46 in execute_command ()
+|   #19 0x0000000000443ade in execute_connection ()
+|   #20 0x000000000043da4b in execute_command_internal ()
+|   #21 0x000000000043e136 in execute_command_internal ()
+|   #22 0x0000000000442b4c in execute_function ()
+|   #23 0x000000000044307b in execute_shell_function ()
+|   #24 0x00000000004a3e7d in gen_shell_function_matches.constprop.0.isra ()
+|   #25 0x00000000004a4f19 in gen_compspec_completions ()
+|   #26 0x00000000004a5aa3 in programmable_completions ()
+|   #27 0x000000000049cbae in attempt_shell_completion ()
+|   #28 0x00000000004e1e3c in gen_completion_matches ()
+|   #29 0x00000000004e2072 in rl_complete_internal ()
+|   #30 0x00000000004d6c27 in _rl_dispatch_subseq ()
+|   #31 0x00000000004d71e0 in readline_internal_char ()
+|   #32 0x00000000004d7add in readline ()
+|   #33 0x00000000004254d8 in yy_readline_get ()
+|   #34 0x0000000000428579 in shell_getc.part ()
+|   #35 0x000000000042b49a in read_token.constprop ()
+|   #36 0x0000000000430a9e in yyparse ()
+|   #37 0x0000000000424727 in parse_command ()
+|   #38 0x00000000004248f4 in read_command ()
+|   #39 0x0000000000424a96 in reader_loop ()
+|   #40 0x0000000000423511 in main ()
+| 1662082624.207594(pid=1117675)(./trap.def:204 trap_builtin)trap/revert
+| 1662082705.407998(pid=1117675)(sig.c:813 set_signal_handler)INT=0x4874c0
+|   #0  0x00000000004875e0 in set_signal_handler ()
+|   #1  0x00000000004b9f0c in trap_builtin ()
+|   #2  0x000000000043a95b in execute_builtin ()
+|   #3  0x00000000004402ec in execute_command_internal ()
+|   #4  0x0000000000443b1b in execute_connection ()
+|   #5  0x000000000043da4b in execute_command_internal ()
+|   #6  0x0000000000440c46 in execute_command ()
+|   #7  0x0000000000443ade in execute_connection ()
+|   #8  0x000000000043da4b in execute_command_internal ()
+|   #9  0x00000000004aea41 in parse_and_execute ()
+|   #10 0x0000000000482201 in _run_trap_internal ()
+|   #11 0x0000000000482e26 in run_pending_traps ()
+|   #12 0x000000000043dafa in execute_command_internal ()
+|   #13 0x0000000000440c46 in execute_command ()
+|   #14 0x000000000043e24f in execute_command_internal ()
+|   #15 0x0000000000443b1b in execute_connection ()
+|   #16 0x000000000043da4b in execute_command_internal ()
+|   #17 0x0000000000440c46 in execute_command ()
+|   #18 0x0000000000443ade in execute_connection ()
+|   #19 0x000000000043da4b in execute_command_internal ()
+|   #20 0x000000000043e136 in execute_command_internal ()
+|   #21 0x0000000000442b4c in execute_function ()
+|   #22 0x000000000044307b in execute_shell_function ()
+|   #23 0x00000000004a3e7d in gen_shell_function_matches.constprop.0.isra ()
+|   #24 0x00000000004a4f19 in gen_compspec_completions ()
+|   #25 0x00000000004a5aa3 in programmable_completions ()
+|   #26 0x000000000049cbae in attempt_shell_completion ()
+|   #27 0x00000000004e1e3c in gen_completion_matches ()
+|   #28 0x00000000004e2072 in rl_complete_internal ()
+|   #29 0x00000000004d6c27 in _rl_dispatch_subseq ()
+|   #30 0x00000000004d71e0 in readline_internal_char ()
+|   #31 0x00000000004d7add in readline ()
+|   #32 0x00000000004254d8 in yy_readline_get ()
+|   #33 0x0000000000428579 in shell_getc.part ()
+|   #34 0x000000000042b49a in read_token.constprop ()
+|   #35 0x0000000000430a9e in yyparse ()
+|   #36 0x0000000000424727 in parse_command ()
+|   #37 0x00000000004248f4 in read_command ()
+|   #38 0x0000000000424a96 in reader_loop ()
+|   #39 0x0000000000423511 in main ()
+| 1662082789.927995(pid=1117675)(signals.c:420 rl_set_signals)set:1 (flag=0) INT=0x4874c0
+| 1662082789.928131(pid=1117675)(signals.c:518 rl_set_signals)set:2 (flag=1) INT=0x4f2420
+|   #0  0x00000000004f2480 in rl_set_signals ()
+|   #1  0x00000000004852d7 in unwind_frame_run_internal.constprop ()
+|   #2  0x0000000000487381 in throw_to_top_level ()
+|   #3  0x00000000004ae689 in parse_and_execute ()
+|   #4  0x0000000000482201 in _run_trap_internal ()
+|   #5  0x0000000000482e26 in run_pending_traps ()
+|   #6  0x000000000043dafa in execute_command_internal ()
+|   #7  0x0000000000440c46 in execute_command ()
+|   #8  0x000000000043e24f in execute_command_internal ()
+|   #9  0x0000000000443b1b in execute_connection ()
+|   #10 0x000000000043da4b in execute_command_internal ()
+|   #11 0x0000000000440c46 in execute_command ()
+|   #12 0x0000000000443ade in execute_connection ()
+|   #13 0x000000000043da4b in execute_command_internal ()
+|   #14 0x000000000043e136 in execute_command_internal ()
+|   #15 0x0000000000442b4c in execute_function ()
+|   #16 0x000000000044307b in execute_shell_function ()
+|   #17 0x00000000004a3e7d in gen_shell_function_matches.constprop.0.isra ()
+|   #18 0x00000000004a4f19 in gen_compspec_completions ()
+|   #19 0x00000000004a5aa3 in programmable_completions ()
+|   #20 0x000000000049cbae in attempt_shell_completion ()
+|   #21 0x00000000004e1e3c in gen_completion_matches ()
+|   #22 0x00000000004e2072 in rl_complete_internal ()
+|   #23 0x00000000004d6c27 in _rl_dispatch_subseq ()
+|   #24 0x00000000004d71e0 in readline_internal_char ()
+|   #25 0x00000000004d7add in readline ()
+|   #26 0x00000000004254d8 in yy_readline_get ()
+|   #27 0x0000000000428579 in shell_getc.part ()
+|   #28 0x000000000042b49a in read_token.constprop ()
+|   #29 0x0000000000430a9e in yyparse ()
+|   #30 0x0000000000424727 in parse_command ()
+|   #31 0x00000000004248f4 in read_command ()
+|   #32 0x0000000000424a96 in reader_loop ()
+|   #33 0x0000000000423511 in main ()
+| 1662082986.758237(pid=1117675)(sig.c:813 set_signal_handler)INT=0x4874c0
+|   #0  0x00000000004875e0 in set_signal_handler ()
+|   #1  0x0000000000424bc3 in reader_loop ()
+|   #2  0x0000000000423511 in main ()
+| 1662083029.209772(pid=1117675)(sig.c:813 set_signal_handler)INT=0x4874c0
+|   #0  0x00000000004875e0 in set_signal_handler ()
+|   #1  0x0000000000424bc3 in reader_loop ()
+|   #2  0x0000000000423511 in main ()
+| 1662083069.750332(pid=1117675)(sig.c:813 set_signal_handler)INT=0x4874c0
+|   #0  0x00000000004875e0 in set_signal_handler ()
+|   #1  0x000000000042559f in yy_readline_get ()
+|   #2  0x0000000000428579 in shell_getc.part ()
+|   #3  0x000000000042b49a in read_token.constprop ()
+|   #4  0x0000000000430a9e in yyparse ()
+|   #5  0x0000000000424727 in parse_command ()
+|   #6  0x00000000004248f4 in read_command ()
+|   #7  0x0000000000424a96 in reader_loop ()
+|   #8  0x0000000000423511 in main ()
+| 1662083146.666604(pid=1117675)(signals.c:420 rl_set_signals)set:1 (flag=1) INT=0x4874c0
+| 1662083146.666718(pid=1117675)(signals.c:518 rl_set_signals)set:2 (flag=1) INT=0x4874c0
+|   #0  0x00000000004f2480 in rl_set_signals ()
+|   #1  0x00000000004d7ac5 in readline ()
+|   #2  0x00000000004254d8 in yy_readline_get ()
+|   #3  0x0000000000428579 in shell_getc.part ()
+|   #4  0x000000000042b49a in read_token.constprop ()
+|   #5  0x0000000000430a9e in yyparse ()
+|   #6  0x0000000000424727 in parse_command ()
+|   #7  0x00000000004248f4 in read_command ()
+|   #8  0x0000000000424a96 in reader_loop ()
+|   #9  0x0000000000423511 in main ()
+
+うーん。どうやら reader_loop という一番外側まで戻ってしまうが、その時に
+rl_clear_signals されないというのが問題である様な気がする。改めて reader_loop
+について調べてみる事にする。
+
+reader_loop -> read_command -> parse_command -> yyparse -> ... -> readline とい
+う具合に呼び出されている。うーん。readline でちゃんと unwind を設定する? という
+か unwind で一体何処まで遡るのかに依存する。うーん。longjmp で何処かで戻るか調
+べた所、どうやら reader_loop まで戻っている。つまり、readline についても unwind
+を設定するべき。
+
+と思ったがそもそも readline の中には unwind の仕組みはない様だ。というかそもそ
+も jump_to_top_level 自体が bash 側が勝手にやっている事であって readline の側で
+は全然関知していない。
+
+
+a readline にそういう仕組みを取り入れる? → 現実的でない。
+b うーん。reader_loop の戻ってきた箇所で rl_clear_signals を実行する?
+
+
+* compgen -F の時は除外する必要がある気がする。
+
+  うーん。interactive_shell と interactive の違いとは何だろうか。shell.c に変数
+  が定義されていて説明がついている。
+
+  /* Non-zero means that at this moment, the shell is interactive.  In
+     general, this means that the shell is at this moment reading input
+     from the keyboard. */
+  int interactive = 0;
+
+  /* Non-zero means that the shell was started as an interactive shell. */
+  int interactive_shell = 0;
+
+  うーん。然し、compgen -F を実行してみるとその中では interactive = 1 になって
+  いる。compgen -F の中から実行している時には状態を弄らない様にしたい。うーん。
+  然し、compfunc の中で更に compgen を呼び出しているという場合も考えると、単に
+  interactive かどうかだとか、或いは readline() の中にいるかどうかだとかで判定
+  する訳には行かない。結局、
+
+  a compgen から呼び出されているかどうかを直接判定する方法
+
+  または
+
+  b push/pop する仕組み (然しこれは難しいだろう。もしちゃんと balance する事が
+    保証できるのであれば現在の様な実装になっていない。特に readline が自身で設
+    定している set/clear が longjmp でバランスしなくなる可能性があるから。
+
+  c それよりは readline から現在の set_signals_flag の状態を取得するインターフェ
+    イスを追加して、それを元に元の状態を復元する様にする。

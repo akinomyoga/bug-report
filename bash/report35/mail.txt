@@ -1,0 +1,107 @@
+
+From: murase
+To: bug-bash@gnu.org
+Subject: [PATCH] Calling `trap xxx INT' in completion functions of `complete -F' leaves readline in a strange state
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -O2 -flto=auto -ffat-lto-objects -fexceptions -g
+-grecord-gcc-switches -pipe -Wall -Werror=format-security
+-Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS
+-specs=/usr/lib/rpm/redhat/redhat-hardened-cc1
+-fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1
+-m64 -mtune=generic -fasynchronous-unwind-tables
+-fstack-clash-protection -fcf-protection
+uname output: Linux chatoyancy 5.18.17-200.fc36.x86_64 #1 SMP
+PREEMPT_DYNAMIC Thu Aug 11 14:36:06 UTC 2022 x86_64 x86_64 x86_64
+GNU/Linux
+Machine Type: x86_64-redhat-linux-gnu
+
+Bash Version: 5.1
+Patch Level: 16
+Release Status: release
+
+Description:
+
+  In Bash versions from 4.3 to the current devel, after calling `trap'
+  for SIGINT in completion functions specified to `complete -F',
+  readline is left in a strange state where C-c does not respond and
+  the first character of the next user command is dropped.  This is
+  caused by missing `rl_set_signals ()' after using `trap xxx INT' in
+  the completion fucntions.
+
+Repeat-By:
+
+  Here is a reduced test case.
+
+  $ bash --norc
+  $ _cmd0() { trap - INT; } && complete -F _cmd0 cmd0
+  $ cmd0 a        <---- here, press [TAB][C-c][RET]
+
+  bash: md0: command not found
+  $
+
+  In the above case, there is no response to [C-c] although we are
+  expecting [C-c] printing `^C' and clearing the command line. Also,
+  the subsequent [RET] causes an execution of the command, but somehow
+  the first character of the command line is missing.
+
+  We can observe similar behaviors also with the following cases
+  (where the number 1000000 may be adjusted depending on the speed of
+  the machine so that C-c is received within the for loop).
+
+  $ _cmd1() { trap 'echo INT:$FUNCNAME' INT; for ((i=0;i<1000000;i++)); do true; done; trap - INT; } && complete -F _cmd1 cmd1
+  $ cmd1 a[TAB][C-c]
+
+  $ _cmd2() { trap 'echo INT:$FUNCNAME; trap - INT' INT; for ((i=0;i<1000000;i++)); do true; done; trap - INT; } && complete -F _cmd2 cmd2
+  $ cmd2 a[TAB][C-c]
+
+  $ _cmd3() { trap 'echo INT:$FUNCNAME; trap - INT; kill -INT $$' INT; for ((i=0;i<1000000;i++)); do true; done; trap - INT; } && complete -F _cmd3 cmd3
+  $ cmd3 a[TAB][C-c]
+
+  $ _cmd4() { compgen -F _cmd3 &>/dev/null; } && complete -F _cmd4 cmd4
+  $ cmd4 a[TAB][C-c]
+
+Fix:
+
+  I attach a patch [0001-fix-rlsig-compfunctrap.patch.txt] that
+  explains an essential part of a possible fix.
+
+  * I would like to perform `rl_clear_signals ()' and `rl_set_signals
+    ()' only when it is called from the built-in programmable
+    completion directly caused by the user key inputs but not when it
+    is called by `compgen', so we need a reliable way to test it (see
+    the code comment starting with XXX in the patch).  The case where
+    `compgen -F xxx 2>/dev/null' is called inside another completion
+    function `yyy' with `complete -F yyy' should also be cared (cf the
+    test case of cmd4).
+
+    I excluded a concrete implementation for the test from the above
+    patch because this is not an essential part of the fix and also
+    there are multiple possible implementations.  I attach an example
+    patch [0002-example-flags.patch.txt] of implementing it by adding
+    a parameter `flags' to `gen_compspec_completions' and
+    `gen_shell_function_matches'.
+
+  * The change in `pcomplete.c' solves test cases cmd1..cmd3, but test
+    cases cmd3 and cmd4 remain not working.
+
+    This is because `trap - INT; kill -INT $$' makes the control to
+    ``longjmp'' from `jump_to_top_level () @ sig.c' to the top-level
+    `reader_loop () @ eval.c' without running the cleanup code in
+    `readline () @ lib/readline/readline.c', particularly
+    `rl_clear_signals ()'.  Because of this missing call to
+    `rl_clear_signals ()', the next call to `rl_set_signals ()' in
+    `readline ()' does nothing, so the signals for readline is not set
+    up.
+
+    I initially naively thought we could also set up an unwind frame
+    in `readline ()' but realized that the unwind mechanism is
+    implemented in Bash, so readline cannot rely on it. Instead, the
+    patch clears the readline signals in `reader_loop ()'---the
+    longjmp destination.
+
+--
+Koichi

@@ -1,0 +1,5 @@
+_cmd0() { trap - INT; } && complete -F _cmd0 cmd0
+_cmd1() { trap 'echo INT:$FUNCNAME' INT; for ((i=0;i<1000000;i++)); do true; done; trap - INT; } && complete -F _cmd1 cmd1
+_cmd2() { trap 'echo INT:$FUNCNAME; trap - INT' INT; for ((i=0;i<1000000;i++)); do true; done; trap - INT; } && complete -F _cmd2 cmd2
+_cmd3() { trap 'echo INT:$FUNCNAME; trap - INT; kill -INT $$' INT; for ((i=0;i<1000000;i++)); do true; done; trap - INT; } && complete -F _cmd3 cmd3
+_cmd4() { compgen -F _cmd3 &>/dev/null; } && complete -F _cmd4 cmd4

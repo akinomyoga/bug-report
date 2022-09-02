@@ -86,6 +86,7 @@
 - 2022-04-13 report34: add-compgen-zflag
   - Ref https://github.com/scop/bash-completion/issues/704#issuecomment-1091631732
   - Ref https://github.com/ohmybash/oh-my-bash/issues/341#issuecomment-1168073038
+- 2022-09-02 report35: `trap INT` in `complete -F` causes missing readline signal setups
 
 ## help-bash
 

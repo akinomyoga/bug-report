@@ -1,0 +1,151 @@
+From 8aa4358d6c296110b5547623f05ef2eb13156b89 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 2 Sep 2022 18:33:51 +0900
+Subject: [PATCH 2/4] Example: implement progcomp flag by a new parameter FLAGS
+
+---
+ pcomplete.c | 51 ++++++++++++++++++++++++++++++++++++---------------
+ 1 file changed, 36 insertions(+), 15 deletions(-)
+
+diff --git a/pcomplete.c b/pcomplete.c
+index f7b2811c..d12c0cf3 100644
+--- a/pcomplete.c
++++ b/pcomplete.c
+@@ -124,7 +124,7 @@ static STRINGLIST *gen_wordlist_matches PARAMS((COMPSPEC *, const char *));
+ static STRINGLIST *gen_shell_function_matches PARAMS((COMPSPEC *, const char *,
+ 						   const char *,
+ 						   char *, int, WORD_LIST *,
+-						   int, int, int *));
++						   int, int, int *, int));
+ static STRINGLIST *gen_command_matches PARAMS((COMPSPEC *, const char *,
+ 					    const char *,
+ 					    char *, int, WORD_LIST *,
+@@ -135,6 +135,20 @@ static STRINGLIST *gen_progcomp_completions PARAMS((const char *, const char *,
+ 						 int, int, int *, int *,
+ 						 COMPSPEC **));
+ 
++/* This flag is supposed to be passed to the parameter, FLAGS, of
++   `gen_compspec_completions_internal ()' and
++   `gen_shell_function_matches ()'.  This flag is specified when the
++   compspec completion is directly caused by the programmable
++   completion system from inside readline.  This flag is not specified
++   when the compspec completion is called externally using the
++   interface `gen_compspec_completions ()' including the case from the
++   `compgen' builtin. */
++#define GENCOMPSPEC_PROGCOMP 0x1
++static STRINGLIST *gen_compspec_completions_internal PARAMS((COMPSPEC *,
++							const char *,
++							const char *, int, int,
++							int *, int));
++
+ static char *pcomp_filename_completion_function PARAMS((const char *, int));
+ 
+ #if defined (ARRAY_VARS)
+@@ -1103,7 +1117,7 @@ build_arg_list (cmd, cname, text, lwords, ind)
+    variable, this does nothing if arrays are not compiled into the shell. */
+ 
+ static STRINGLIST *
+-gen_shell_function_matches (cs, cmd, text, line, ind, lwords, nw, cw, foundp)
++gen_shell_function_matches (cs, cmd, text, line, ind, lwords, nw, cw, foundp, flags)
+      COMPSPEC *cs;
+      const char *cmd;
+      const char *text;
+@@ -1112,6 +1126,7 @@ gen_shell_function_matches (cs, cmd, text, line, ind, lwords, nw, cw, foundp)
+      WORD_LIST *lwords;
+      int nw, cw;
+      int *foundp;
++     int flags;
+ {
+   char *funcname;
+   STRINGLIST *sl;
+@@ -1123,12 +1138,6 @@ gen_shell_function_matches (cs, cmd, text, line, ind, lwords, nw, cw, foundp)
+ #if defined (ARRAY_VARS)
+   ARRAY *a;
+ #endif
+-  /* XXX - Are there any robust way to test if it is directly invoked for the
+-     programmable completions but not for the compgen builtin (called directly
+-     by users or called while the programmable completions inside another -F)?
+-     Maybe, we can add another parameter, such as FLAGS, to this function and
+-     `gen_compspec_completions ()'? */
+-  int performed_for_programmable_completions = lwords != NULL;
+ 
+   found = 0;
+   if (foundp)
+@@ -1157,7 +1166,7 @@ gen_shell_function_matches (cs, cmd, text, line, ind, lwords, nw, cw, foundp)
+   pps = &ps;
+   save_parser_state (pps);
+   begin_unwind_frame ("gen-shell-function-matches");
+-  if (performed_for_programmable_completions)
++  if (flags & GENCOMPSPEC_PROGCOMP)
+     {
+       rl_clear_signals ();
+       add_unwind_protect (rl_set_signals, (char *)NULL);
+@@ -1169,7 +1178,7 @@ gen_shell_function_matches (cs, cmd, text, line, ind, lwords, nw, cw, foundp)
+   fval = execute_shell_function (f, cmdlist);  
+ 
+   discard_unwind_frame ("gen-shell-function-matches");
+-  if (performed_for_programmable_completions)
++  if (flags & GENCOMPSPEC_PROGCOMP)
+     rl_set_signals ();
+   restore_parser_state (pps);
+ 
+@@ -1332,6 +1341,18 @@ gen_compspec_completions (cs, cmd, word, start, end, foundp)
+      const char *word;
+      int start, end;
+      int *foundp;
++{
++  return gen_compspec_completions_internal (cs, cmd, word, start, end, foundp, 0);
++}
++
++static STRINGLIST *
++gen_compspec_completions_internal (cs, cmd, word, start, end, foundp, flags)
++     COMPSPEC *cs;
++     const char *cmd;
++     const char *word;
++     int start, end;
++     int *foundp;
++     int flags;
+ {
+   STRINGLIST *ret, *tmatches;
+   char *line;
+@@ -1343,8 +1364,8 @@ gen_compspec_completions (cs, cmd, word, start, end, foundp)
+   found = 1;
+ 
+ #ifdef DEBUG
+-  debug_printf ("gen_compspec_completions (%s, %s, %d, %d)", cmd, word, start, end);
+-  debug_printf ("gen_compspec_completions: %s -> %p", cmd, cs);
++  debug_printf ("gen_compspec_completions_internal (%s, %s, %d, %d)", cmd, word, start, end);
++  debug_printf ("gen_compspec_completions_internal: %s -> %p", cmd, cs);
+ #endif
+   ret = gen_action_completions (cs, word);
+ #ifdef DEBUG
+@@ -1435,7 +1456,7 @@ gen_compspec_completions (cs, cmd, word, start, end, foundp)
+   if (cs->funcname)
+     {
+       foundf = 0;
+-      tmatches = gen_shell_function_matches (cs, cmd, word, line, pcomp_ind - start, lwords, nw, cw, &foundf);
++      tmatches = gen_shell_function_matches (cs, cmd, word, line, pcomp_ind - start, lwords, nw, cw, &foundf, flags);
+       if (foundf != 0)
+ 	found = foundf;
+       if (tmatches)
+@@ -1443,7 +1464,7 @@ gen_compspec_completions (cs, cmd, word, start, end, foundp)
+ #ifdef DEBUG
+ 	  if (progcomp_debug)
+ 	    {
+-	      debug_printf ("gen_shell_function_matches (%p, %s, %s, %p, %d, %d) -->", cs, cmd, word, lwords, nw, cw);
++	      debug_printf ("gen_shell_function_matches (%p, %s, %s, %p, %d, %d, %d) -->", cs, cmd, word, lwords, nw, cw, flags);
+ 	      strlist_print (tmatches, "\t");
+ 	      rl_on_new_line ();
+ 	    }
+@@ -1607,7 +1628,7 @@ gen_progcomp_completions (ocmd, cmd, word, start, end, foundp, retryp, lastcs)
+   pcomp_curcmd = cmd;
+   pcomp_curtxt = word;
+ 
+-  ret = gen_compspec_completions (cs, cmd, word, start, end, foundp);
++  ret = gen_compspec_completions_internal (cs, cmd, word, start, end, foundp, GENCOMPSPEC_PROGCOMP);
+ 
+   pcomp_curcs = oldcs;
+   pcomp_curcmd = oldcmd;
+-- 
+2.37.2
+
