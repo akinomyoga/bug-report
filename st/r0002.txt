@@ -1,0 +1,14 @@
+
+
+DECSCUSR(0)
+
+https://github.com/microsoft/terminal/issues/1604 Windows Termianl
+https://gitlab.com/gnachman/iterm2/-/issues/8769 iTerm2
+https://invent.kde.org/utilities/konsole/-/commit/97f101af8a10b4f273775545ac53e7938b4b5c8e konsole
+
+https://github.com/mintty/mintty/issues/1154 mintty (これは DECRQSS についての話)
+
+
+
+
+
