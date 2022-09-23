@@ -28,6 +28,8 @@
     途中で makedoc を作るルールがありません、と表示されるので、
     makedoc.exe と拡張子まで指定して生成させて make をやりなおす。
 
+    Note: 2022-09-23 最新版で試してみたらこの修正は必要なくなっていた。
+
   * "ld: Unsupported PEI architecture: pei-i386"
     x86_64-pc-cygwin/winsup/cygwin でこのエラーが発生した時は
     古い cygwin.sc が残っている。特に x86 から x86_64 に切り替えた時。
