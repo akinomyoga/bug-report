@@ -1,0 +1,115 @@
+From: murase
+To: bug-bash@gnu.org
+Subject: [PATCH] 4.3..devel: Fix printf %d "'X" affected by intermediate mbstate_t
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: cygwin
+Compiler: gcc
+Compilation CFLAGS: -DPROGRAM='bash.exe' -DCONF_HOSTTYPE='x86_64'
+-DCONF_OSTYPE='cygwin' -DCONF_MACHTYPE='x86_64-unknown-cygwin'
+-DCONF_VENDOR='unknown' -DLOCALEDIR='/usr/share/locale'
+-DPACKAGE='bash' -DSHELL -DHAVE_CONFIG_H -DRECYCLES_PIDS -I.
+-I/usr/src/bash-4.4.12-3.x86_64/src/bash-4.4
+-I/usr/src/bash-4.4.12-3.x86_64/src/bash-4.4/include
+-I/usr/src/bash-4.4.12-3.x86_64/src/bash-4.4/lib -DWORDEXP_OPTION
+-ggdb -O2 -pipe -Wimplicit-function-declaration
+-fdebug-prefix-map=/usr/src/bash-4.4.12-3.x86_64/build=/usr/src/debug/bash-4.4.12-3
+-fdebug-prefix-map=/usr/src/bash-4.4.12-3.x86_64/src/bash-4.4=/usr/src/debug/bash-4.4.12-3
+-Wno-parentheses -Wno-format-security
+uname output: CYGWIN_NT-10.0 letsnote2019 3.3.3(0.341/5/3) 2021-12-03 16:35 x86_64 Cygwin
+Machine Type: x86_64-unknown-cygwin
+
+Bash Version: 4.4
+Patch Level: 12
+Release Status: release
+
+Description:
+
+  With a multi-byte encoding that has a non-trivial intermediate state
+  (mbstate_t), « printf %d "'<char>" » can be affected by the internal
+  mbstate_t of `mbtowc'/`mblen' to produce a wrong result.  Also, it
+  can leave the internal mbstate_t in an intermediate state.
+
+  This is because `mbtowc', which uses the internal mbstate_t, is used
+  by the printf builtin to get the character code of <char>.  Instead,
+  `mbrtowc' that receives `mbstate_t *' as an argument can be used
+  with a properly initialized mbstate_t.  In the codebase, there are
+  several other similar codes relying on an undefined state of the
+  internal mbstate_t.
+
+Repeat-By:
+
+  I faced a problem when I tried to get character codes of U+1XXXX
+  [i.e., Unicode characters outside Basic Multilingual Plane (BMP)
+  whose code points are larger than U+FFFF] in a UTF-8 locale in
+  Cygwin and MSYS2, in which sizeof(wchar_t) == 2.  For example,
+  consider the following command:
+
+  $ printf '<%x>' $'"\U1F6D1'{1..4};echo
+
+  We expect four identical hex numbers as the result because the
+  character after the double quote is always <U+1F6D1> for all the
+  four arguments.  However, the actual result becomes
+
+  [bash-4.4/cygwin]$ printf '<%x>' $'"\U1F6D1'{1..4};echo
+  <d83d><0><d83d><0>
+
+  [bash-5.1/msys2]$ printf '<%x>' $'"\U1F6D1'{1..4};echo
+  <d83d><f0><d83d><f0>
+
+  The above behaviors are caused in the following way: In systems
+  where sizeof (wchar_t) == 2, such as Cygwin and MSYS2, the character
+  codes of U+1XXXX do not fit in one wchar_t, so `mbtowc'/`mbrtowc`
+  wants to produce a surrogate pair consisting of two wchar_t.
+
+  1. For the first call of `mbtowc', a high surrogate (U+D800..DBFF)
+    is generated, and the remaining information needed to produce a
+    low surrogate (U+DC00..DFFF) is stored in mbstate_t.
+
+  2. The printf builtin tries to extract the code of the second
+    argument using `mbtowc' without clearing the internal mbstate_t.
+    This causes a decode error and results in <0> (or a fallback
+    interpretation of a remaining byte, <f0>, in bash 5.0+).
+
+  I expect the result <d83d><d83d><d83d><d83d> in Cygwin/MSYS2.
+
+Fix:
+
+  I attach a patch, r0036-avoid-internal-mbstate.patch.txt, which
+  includes the following changes:
+
+  * asciicode (builtins/printf.def): Even though `mbstate_t state' was
+    declared by `DECLARE_MBSTATE', it was not used in the original
+    code.  We can use `mbrtowc' instead of `mbtowc', where we can pass
+    `state' to the fourth argument of `mbrtowc'.
+
+  There are also other similar cases relying on an uncontrolled
+  intermediate internal mbstate_t and affecting the internal
+  mbstate_t:
+
+  * mbscasecmp (lib/sh/mbscasecmp.c), mbscmp (lib/sh/mbscmp.c): In
+    these functions, two intermediate states for two independent
+    strings are mixed.  We can declare two distinct mbstate_t
+    instances and initialize and use them.
+
+  * indirection_level_string (print_cmd.c), setifs (subst.c): These
+    functions also depended on an undefined internal mbstate_t.  We
+    can declare and initialize mbstate_t `state' by `DECLARE_MBSTATE'
+    and use it.
+
+  * string_extract_verbatim (subst.c): `MBRLEN' and `mbrtowc' should
+    be called using the current mbstate_t stored in `state'.  Not to
+    affect `state' used by `ADVANCE_CHAR', we can first copy the value
+    to another mbstate_t, `mbstmp', and pass it to `MBRLEN' and
+    `mbrtowc'.
+
+  The patch includes cleanup of a macro that becomes unused:
+
+  * include/shmbutil.h: I have removed the macro `MBLEN' in the patch
+    because it is not used in the codebase anymore and also because it
+    has the general problem and seems to be unlikely used in the
+    future.
+
+--
+Koichi

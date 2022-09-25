@@ -87,6 +87,7 @@
   - Ref https://github.com/scop/bash-completion/issues/704#issuecomment-1091631732
   - Ref https://github.com/ohmybash/oh-my-bash/issues/341#issuecomment-1168073038
 - 2022-09-02 report35: `trap INT` in `complete -F` causes missing readline signal setups
+- 2022-09-25 report36: Fix `printf %d "'X"` affected by intermediate mbstate_t
 
 ## help-bash
 
