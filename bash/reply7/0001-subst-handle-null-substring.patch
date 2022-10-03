@@ -1,0 +1,25 @@
+From a440a1443c0d5ca53e5d5373d638cc452982d9c4 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 30 Sep 2022 20:07:25 +0900
+Subject: [PATCH 1/2] subst: properly handle null substring
+
+---
+ subst.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/subst.c b/subst.c
+index 89e40688..d7136b56 100644
+--- a/subst.c
++++ b/subst.c
+@@ -10862,7 +10862,7 @@ expand_array_subscript (string, sindex, quoted, flags)
+   exp = substring (string, si+1, ni);
+   t = expand_subscript_string (exp, quoted & ~(Q_ARITH|Q_DOUBLE_QUOTES));
+   free (exp);
+-  exp = sh_backslash_quote (t, abstab, 0);
++  exp = sh_backslash_quote (t == NULL ? "" : t, abstab, 0);
+   free (t);
+ 
+   slen = STRLEN (exp);
+-- 
+2.37.2
+

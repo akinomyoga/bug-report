@@ -279,6 +279,9 @@
   * extglob の時には更にもっと複雑な事になるのではないか。これについてはまた後
     で確認する事にする。
 
+  2022-09-07 改めて見てみるとどうやら extglob の時には再帰的に通常の glob match
+  (GMATCH @ lib/glob/sm_loop.c) を呼び出して処理している様だ。
+
 2021-09-10
 
 * ./configure --with-bash-malloc=no にしたら改善するのだろうか
@@ -841,6 +844,23 @@
 -------------------------------------------------------------------------------
   Done
 -------------------------------------------------------------------------------
+
+2022-09-30
+
+* reply7: https://lists.gnu.org/archive/html/bug-bash/2022-09/msg00059.html [#D0035]
+
+  (gdb) bt
+  #0  0x00007ffff7d5b7fd in __strlen_avx2 () from /lib64/libc.so.6
+  #1  0x00000000004cff6e in sh_backslash_quote ()
+  #2  0x000000000047837c in expand_word_internal ()
+  #3  0x000000000047ddba in expand_arith_string ()
+  #4  0x000000000043fd06 in execute_command_internal ()
+  #5  0x00000000004ae8c1 in parse_and_execute ()
+  #6  0x000000000042417a in run_one_command.isra ()
+  #7  0x0000000000422bda in main ()
+  (gdb)
+
+  tag: patch.r007-subst-handle-null-substring
 
 2022-07-18
 
