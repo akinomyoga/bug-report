@@ -62,32 +62,38 @@
   - https://lists.gnu.org/archive/html/bug-bash/2021-05/msg00006.html
   - https://lists.gnu.org/archive/html/bug-bash/2021-05/msg00011.html
   - ToDo: ■Cygwin については未だ遅い儘である。
-- 2021-06-27 report26: 沢山の行を含む変数について `${v...}` が O(N^2) でスケールする事について
+- report26: 2021-06-27 沢山の行を含む変数について `${v...}` が O(N^2) でスケールする事について
   - https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00138.html
-- 2021-06-27 report27: Fix READLINE_ARGUMENT with `M-1 M-2` and with `vi-arg-digit`
+- report27: 2021-06-27 Fix READLINE_ARGUMENT with `M-1 M-2` and with `vi-arg-digit`
   - https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00139.html
-- 2021-06-27 report28: quote command and function names in `complete -p`
+- report28: 2021-06-27 quote command and function names in `complete -p`
   - https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00140.html
-- 2021-10-05 report29: devel: fix segfault by `unset 'assoc[${x[0]}]'`
+- report29: 2021-10-05 devel: fix segfault by `unset 'assoc[${x[0]}]'`
   - https://lists.gnu.org/archive/html/bug-bash/2021-10/msg00051.html
   - ■問題の segfault は修正された気がするが refactoring に関する議論は pending?
-- 2021-09-22 report30: <kbd>prior</kbd> が `history-search-backward` になった筈なのに動いていない
+- report30: 2021-09-22 <kbd>prior</kbd> が `history-search-backward` になった筈なのに動いていない
   - https://lists.gnu.org/archive/html/bug-bash/2021-09/msg00055.html
-- 2021-10-05 report31: `${var/pat/&}` の設定に関する質問。
+- report31: 2021-10-05 `${var/pat/&}` の設定に関する質問。
   - https://lists.gnu.org/archive/html/bug-bash/2021-10/msg00050.html
   - https://lists.gnu.org/archive/html/bug-bash/2022-01/msg00036.html
   - PATCH https://lists.gnu.org/archive/html/bug-bash/2022-07/msg00119.html
-- 2021-10-06 report32: 4.0..devel: fix a problem that unset ``'a[`echo 0`]'`` causes "bad array subscript" error
+- report32: 2021-10-06 4.0..devel: fix a problem that unset ``'a[`echo 0`]'`` causes "bad array subscript" error
   - https://lists.gnu.org/archive/html/bug-bash/2021-10/msg00059.html
-- 2022-03-12 report33: Fix escaping of `\034` (`^\`) in paths for `\w`, `\W`, and `\s`
+- report33: 2022-03-12 Fix escaping of `\034` (`^\`) in paths for `\w`, `\W`, and `\s`
   - https://lists.gnu.org/archive/html/bug-bash/2022-03/msg00020.html
   - https://lists.gnu.org/archive/html/bug-bash/2022-03/msg00022.html
   - 結局、更新パッチに対して返事はなかったが修正は適用されていた。最初の返信の時点で修正済みだったのかもしれない
-- 2022-04-13 report34: add-compgen-zflag
+- report34: 2022-04-13 add-compgen-zflag
   - Ref https://github.com/scop/bash-completion/issues/704#issuecomment-1091631732
   - Ref https://github.com/ohmybash/oh-my-bash/issues/341#issuecomment-1168073038
-- 2022-09-02 report35: `trap INT` in `complete -F` causes missing readline signal setups
-- 2022-09-25 report36: Fix `printf %d "'X"` affected by intermediate mbstate_t
+- report35: 2022-09-02 `trap INT` in `complete -F` causes missing readline signal setups
+- report36: 2022-09-25 Fix `printf %d "'X"` affected by intermediate mbstate_t
+
+## Replies
+
+- reply7: 2022-10-03 segfault of ((a[$b])) with unset b in bash-5.2
+  - https://lists.gnu.org/archive/html/bug-bash/2022-09/msg00059.html
+  - PATCH https://lists.gnu.org/archive/html/bug-bash/2022-09/msg00062.html
 
 ## help-bash
 
