@@ -1,3 +1,106 @@
+
+
+Thank you for taking the time to review and apply the patch.
+
+> the change to print_job appears not to be needed (at least
+> all of your test cases work without it).
+
+Maybe it has been fixed in another way, but how about the following
+test cases?  Let us consider the following two functions:
+
+  $ f1() { echo begin;for a in {0..3}; do (kill -9 $BASHPID); done;echo end; }
+  $ f2() { echo begin;for a in {0..3}; do (kill -9 $BASHPID); done;jobs;echo end; }
+
+The difference between the two functions is that `f2' calls `jobs'.
+I expect the same behavior of `f1' and `f2' as far as there are no
+background jobs.  Also, I expect the same messages of `f1' in the
+normal context and in the trap handler except that the messages are
+delayed until the end of the trap handler in the latter case.
+
+With the original patch 3, I obtain the result I expect as:
+
+  $ ./bash-r0022-fix3 --norc
+  $ f1() { echo begin;for a in {0..3}; do (kill -9 $BASHPID); done;echo end; }
+  $ f2() { echo begin;for a in {0..3}; do (kill -9 $BASHPID); done;jobs;echo end; }
+  $ f1
+  begin
+  Killed
+  Killed
+  Killed
+  Killed
+  end
+  $ trap f1 INT
+  $ ^C
+  begin
+  end
+
+  Killed
+  Killed
+  Killed
+  Killed
+  $ f2
+  begin
+  Killed
+  Killed
+  Killed
+  Killed
+  end
+  $ trap f2 INT
+  $ ^C
+  begin
+  end
+
+  Killed
+  Killed
+  Killed
+  Killed
+
+If I drop the change to `print_job' from patch 3, the behavior changes
+only for `f2' in the trap handler. I get the killed job information in
+an unexpected format.
+
+  $ ./bash-r0022-fix3-no_print_job --norc
+  $ f1
+  begin
+  Killed
+  Killed
+  Killed
+  Killed
+  end
+  $ trap f1 INT
+  $ ^C
+  begin
+  end
+
+  Killed
+  Killed
+  Killed
+  Killed
+  $ f2
+  begin
+  Killed
+  Killed
+  Killed
+  Killed
+  end
+  $ trap f2 INT
+  $ ^C
+  begin
+  [1]   Killed                  ( kill -9 $BASHPID )
+  [2]   Killed                  ( kill -9 $BASHPID )
+  [3]   Killed                  ( kill -9 $BASHPID )
+  [4]   Killed                  ( kill -9 $BASHPID )
+  end
+
+I feel the former behavior is more consistent.  I would like to hear
+what you think. Thank you.
+
+
+--
+Koichi
+
+
+-------------------------------------------------------------------------------
 From: murase
 To: bug-bash@gnu.org
 Subject: [PATCH] Fix foreground dead jobs in trap handlers treated like background ones
@@ -76,8 +179,8 @@ Repeat-By:
     [1]+  Exit 1                  ( sleep 1; exit 1 )
 
   However, when this function is executed inside the trap handler, the
-  the foreground job "%2 (exit 2)" is also reported by `jobs', which
-  is not expected:
+  foreground job "%2 (exit 2)" is also reported by `jobs', which is
+  not expected:
 
     $ trap f INT
     $ ^C          /* <-- Here type C-c */
@@ -105,7 +208,7 @@ Repeat-By:
   `jobs' in the `bind -x' binding reports the foreground dead jobs in
   the immediately preceding invokation of trap handlers:
 
-    $ trap 'for a in {0..9};do /bin/true;done' INT
+    $ trap 'for a in {0..9};do /bin/true;done' WINCH
     $ bind -x '"\C-t":jobs'
     $ /* <-- Here change the terminal size and type C-t */
     [1]   Done                    bind -x '"\C-t":jobs'
