@@ -1,0 +1,11 @@
+# gitignore
+
+/bash0
+/bash2
+/bash0-fix1
+
+/bash?.test*
+/zsh.test*
+/fnmatch
+
+/dfaglob.pdf

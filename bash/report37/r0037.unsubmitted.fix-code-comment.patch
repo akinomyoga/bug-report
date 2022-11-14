@@ -1,0 +1,37 @@
+From 883d04b32c85b2171cc4c99726cff4048bd830fa Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 14 Nov 2022 17:00:32 +0900
+Subject: [PATCH 4/4] fix(glob/sm_loop): fix code comment
+
+---
+ lib/glob/sm_loop.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/lib/glob/sm_loop.c b/lib/glob/sm_loop.c
+index 970cb559..c64e6a77 100644
+--- a/lib/glob/sm_loop.c
++++ b/lib/glob/sm_loop.c
+@@ -342,16 +342,16 @@ fprintf(stderr, "gmatch: pattern = %s; pe = %s\n", pattern, pe);
+ 	    if ((flags & FNM_PATHNAME) && sc == L('/'))
+ 	      return FNM_NOMATCH;
+ 
+-	    /* A character class cannot match a `.' if it is the first
++	    /* A bracket expression cannot match a `.' if it is the first
+ 	       character of the string or if it is the first character
+ 	       following a slash and we are matching a pathname. */
+ 	    if ((flags & FNM_PERIOD) && sc == L('.') &&
+ 		(n == string || ((flags & FNM_PATHNAME) && n[-1] == L('/'))))
+ 	      return (FNM_NOMATCH);
+ 
+-	    /* `?' cannot match `.' or `..' if it is the first character of the
+-	       string or if it is the first character following a slash and
+-	       we are matching a pathname. */
++	    /* A bracket expression cannot match `.' or `..' if it is the first
++	       character of the string or if it is the first character
++	       following a slash and we are matching a pathname. */
+ 	    if ((flags & FNM_DOTDOT) &&
+ 		((n == string && SDOT_OR_DOTDOT(n)) ||
+ 		((flags & FNM_PATHNAME) && n[-1] == L('/') && PDOT_OR_DOTDOT(n))))
+-- 
+2.37.2
+

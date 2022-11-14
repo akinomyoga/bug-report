@@ -1,0 +1,154 @@
+I implemented an extglob engine based on a naive DFA and was comparing
+the behavior and the performance of the new and current
+implementations.  [In this report hereafter, ``the current
+implementation'' always means the implementation of strmatch
+(lib/glob/{strmatch,smatch,sm_loop.c}) in the current devel 31f4d468].
+However, I noticed two strange behaviors of the current engine.
+
+Before adjusting the behavior of the new engine and submitting it for
+the review, I would like to confirm the (expected) behavior of the
+current engine in the current devel.
+
+These two behaviors finally turned out to be both related to the
+matching of bracket expression by the function `BRACKMATCH'
+(lib/glob/sm_loop.c).
+
+----------------------------------------------------------------------
+1. pattern [[=B=]][c] matches with c
+
+  $ [[ Bc == [[=B=]][c] ]]; echo $?
+  0      <-- OK. This is expected.
+  $ [[ c == [[=B=]][c] ]]; echo $?
+  0      <-- This is unexpected.
+
+  See the attached [r0037.brackmatch1.equivalence-class.patch] for the
+  fix.  The problem is caused because [[=B=]][c] is treated as a
+  single bracket expression [ « [=B=]][c » ] when the equivalence
+  class [=B=] does not match.  This is because `]' after `[[=B=]' is
+  treated as if it is the first `]' in the bracket expression (such as
+  `]' after `[' in the pattern « []aaa] »).  In the patch, when the next
+  character after a failing equivalence class [=B=] is `]', the
+  bracket expression has been changed to fail just the same as the
+  case for a failing character class [:alpha:] (lib/glob/sm_loop.c:530
+  [1]).
+
+[1] https://git.savannah.gnu.org/cgit/bash.git/tree/lib/glob/sm_loop.c?h=devel&id=31f4d468b60eb27d768ef56d0a8b4982346465d9#n530
+
+----------------------------------------------------------------------
+2. bracket expression sometimes match or unmatch the slash with
+  FNM_PATHNAME.
+
+  FNM_PATHNAME is only used in two places in the Bash codebase.  1)
+  One is for the glob matching for the filenames in the directory
+  (lib/glob/glob.c).  However, this actually does not seem to have an
+  actual effect because FNM_PATHNAME only causes difference of the
+  matching when the target string contains a slash but the filenames
+  do not contain any slashes.  2) The other is the filtering of the
+  pathname-expansion results with GLOBIGNORE (pathexp.c).  So the only
+  way to test the behavior of Bash's strmatch with FNM_PATHNAME
+  (without writing a C program to directly use the function
+  `strmatch') is to use GLOBIGNORE.
+
+  To demonstrate the behavior of the current implementation, I attach
+  a script [fnmpath.sh], which utilizes GLOBIGNORE for the Bash
+  implementation.  It compares the result with fnmatch(3).  The result
+  in my environment (x86_64-redhat-linux-gnu [Fedora Linux 36 (Server
+  Edition)]) is this:
+
+  $ bash-devel fnmpath.sh
+  #1: pat=ab/cd/efg        yes/yes
+  #2: pat=ab[/]cd/efg      yes/no
+  #3: pat=ab[/a]cd/efg     yes/no
+  #4: pat=ab[a/]cd/efg     no/no
+  #5: pat=ab[!a]cd/efg     yes/no
+  #6: pat=ab[.-0]cd/efg    yes/no
+  #7: pat=*/*/efg          yes/yes
+  #8: pat=*[/]*/efg        no/no
+  #9: pat=*[/a]*/efg       no/no
+  #10: pat=*[a/]*/efg       no/no
+  #11: pat=*[!a]*/efg       no/no
+  #12: pat=*[.-0]*/efg      no/no
+  #13: pat=ab@(/)cd/efg     yes/yes
+  #14: pat=*@(/)cd/efg      no/no
+  #15: pat=*/cd/efg         yes/yes
+
+  This tests whether each pattern matches the string "ab/cd/efg".  Two
+  results by Bash's strmatch and fnmatch(3) are connected with
+  /. "yes" means the pattern matches the string "ab/cd/efg" and "no"
+  means it does not match.  Some observations are
+
+  * In fnmatch(3), a bracket expression never matches a / with
+    FNM_PATHNAME.
+
+  * In Bash's strmatch, a bracket expression sometimes matches `/' and
+    sometimes not.  In the codebase, `/' is excluded only when it
+    explicitly appears after another character in the bracket
+    expression (lib/glob/sm_loop.c:574 [2]) even though the comment
+    mentions [/].  This is the reason that only [a/] fails with Bash's
+    implementation with cases #2..#6 in the above result.
+
+  * What is happening with Bash's implementation in cases #7..#12 is
+    related the assumption of the backtracking trick for `*': The
+    trick for `*' backtracking explained in the code comment
+    lib/glob/sm_loop.c:320 [3]---"This is a clever idea from
+    glibc"---relies on the behavior that the bracket expression never
+    matches a slash that `*' cannot match.  [ Note: The exact
+    requirements for this trick is actually slightly weaker: each
+    bracket expression needs to match a fixed number of `/', 0 or 1,
+    when FNM_PATHNAME is specified; it should never match a slash if
+    it can match other characters, and it should never match other
+    characters if it can match a slash. ] Otherwise, backtracking for
+    different number of slashes would unexpectedly fail.
+
+    It is hard to modify the current implementation so that it does
+    not use the "clever idea (lib/glob/sm_loop.c:320 [3])" which
+    requires the assumption on the bracket expressions; it would be
+    another re-implementation of the engine.  In addition, the time
+    complexity of the current implementation is linear with respect to
+    the string length O(len) as far as extglob is unused, but, if we
+    allow bracket expressions to consistently match `/', the time
+    complexity would become O(len^n) at the worst where n is the
+    number of `*' as far as the backtracking algorithm is used.
+
+    For this practical reason in addition to the compatibility with
+    fnmatch(3), I think we should just follow fnmatch(3) to reject
+    `/' for any bracket expressions with FNM_PATHNAME.
+
+  * There is a similar inconsistency caused by the same trick with the
+    extglob as observed in cases #13..#15.  For these cases, even
+    fnmatch(3) behaves in somewhat a unpredictable way, so I would not
+    try to fix this behavior in this report.
+
+  The attached patch [r0037.brackmatch2.slash.patch] fixes this.  I
+  move the check for the slash outside the loop of the bracket
+  expression.  In particular, I moved the check outside the function
+  BRACKMATCH because it is more consistent with the other similar
+  checks for `?' (lib/glob/sm_loop.c:108 [4]) and `*'
+  (lib/glob/sm_loop.c:179 [5]).
+
+[2] https://git.savannah.gnu.org/cgit/bash.git/tree/lib/glob/sm_loop.c?h=devel&id=31f4d468b60eb27d768ef56d0a8b4982346465d9#n574
+[3] https://git.savannah.gnu.org/cgit/bash.git/tree/lib/glob/sm_loop.c?h=devel&id=31f4d468b60eb27d768ef56d0a8b4982346465d9#n320
+[4] https://git.savannah.gnu.org/cgit/bash.git/tree/lib/glob/sm_loop.c?h=devel&id=31f4d468b60eb27d768ef56d0a8b4982346465d9#n108
+[5] https://git.savannah.gnu.org/cgit/bash.git/tree/lib/glob/sm_loop.c?h=devel&id=31f4d468b60eb27d768ef56d0a8b4982346465d9#n179
+
+----------------------------------------------------------------------
+
+By the way, the third patch [r0037.brackmatch3.unused-assign.patch] is
+just a cosmetic fix that removes the assignments of unused values to
+the variable `cend'.  The values are unused because it will be
+overwritten by a later line [6] without being referenced.
+
+If you would like to keep the current assignments because it is
+harmless, it also works for me, but in that case I think we should
+also assign the value to `cend' in lib/glob/sm_loop.c:546 [7] as
+`cstart = cend = ...' for consistency with the other lines
+lib/glob/sm_loop.c:442 [8] and lib/glob/sm_loop.c:554 [9].
+
+[6] https://git.savannah.gnu.org/cgit/bash.git/tree/lib/glob/sm_loop.c?h=devel&id=31f4d468b60eb27d768ef56d0a8b4982346465d9#n557
+[7] https://git.savannah.gnu.org/cgit/bash.git/tree/lib/glob/sm_loop.c?h=devel&id=31f4d468b60eb27d768ef56d0a8b4982346465d9#n546
+[8] https://git.savannah.gnu.org/cgit/bash.git/tree/lib/glob/sm_loop.c?h=devel&id=31f4d468b60eb27d768ef56d0a8b4982346465d9#n442
+[9] https://git.savannah.gnu.org/cgit/bash.git/tree/lib/glob/sm_loop.c?h=devel&id=31f4d468b60eb27d768ef56d0a8b4982346465d9#n554
+
+
+--
+Koichi

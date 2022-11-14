@@ -1,0 +1,104 @@
+
+
+Intensional behavior changes
+
+a. Now ${a//''/x} and ${a//@('')/x} behaves the same so that the
+   character `x' is inserted to every character boudary including the
+   beginnning and the end of the target string.  With the previous
+   implementation, the former matches nothing, and the latter matching
+   every boundary of the characters except for the end of the target
+   string, which seems to be inconsistent.  The new behavior matches
+   that of `sed' with the substitution s/\(\)/x/g [ Note: we cannot
+   specify an empty pattern for s/.../.../ in sed because the empty
+   pattern means the previous pattern. ]
+
+   $ bash-5.2 -O extglob -c 'a=hello; echo ${a//""/-}'
+   hello
+   $ bash-5.2 -O extglob -c 'a=hello; echo ${a//@("")/-}'
+   -h-e-l-l-o
+   $ ./bash -O extglob -c 'a=hello; echo ${a//""/-}'
+   -h-e-l-l-o-
+   $ ./bash -O extglob -c 'a=hello; echo ${a//@("")/-}'
+   -h-e-l-l-o-
+   $ sed 's/\(\)/-/g' <<< hello
+   -h-e-l-l-o-
+
+   The test case `tests/new-exp.right' has been updated for this
+   behavior change.
+
+b. Now « a=01; echo ${a//?(0)/(&)} » does not match twice with the
+   same end position.  With the previous implementation, ?(0) could
+   match an empty substring between `0' and `1' after matching the
+   substring `0'.  The new behavior matches that of `sed'.
+
+   $ bash-5.2 -O extglob -c 'a=01; echo ${a//?(0)/(&)}'
+   (0)()1
+   $ ./bash -O extglob -c 'a=01; echo ${a//?(0)/(&)}'
+   (0)1()
+   $ sed 's/0\{0,1\}/(&)/g' <<< 01
+   (0)1()
+
+   To recover the original behavior for a. and b., see #ifdef
+   SMATCH_COMPAT52_PATSUB in lib/glob/sm_loop.c.
+
+c. Now !(<subpat>) only matches substrings matching `*' even when
+   <subpat> does not match it.  In particular, when FNM_PATHNAME,
+   FNM_PERIOD, or FNM_DOTDOT is specified, `*' only matches with a
+   certain form of paths without a path separator `/' or dotfiles.  In
+   the previous implementation, the checks for these pathchars were
+   only performed for the first character of the substring unmatching
+   <subpat>.  In the new implementation, all the characters in the
+   substring unmatching <subpat> are checked for the pathchars just
+   like `*'.
+
+   For example, the behavior change can be seen in the following
+   examples, where T/F in the code comment /* */ means
+   matching/unmatching, respectively.  The first T/F before the comma
+   shows the result in the previous implementation and the second T/F
+   after the comma shows the result in the new implementation:
+
+   flags = FNM_EXTMATCH|FNM_PATHNAME|FNM_PERIOD|FNM_DOTDOT;
+   strmatch ("!(x)",   "abcd",  flags) != FNM_NOMATCH; /* T,T */
+   strmatch ("!(x)",   ".abc",  flags) != FNM_NOMATCH; /* F,F */
+   strmatch ("!(x)",   "a/.d",  flags) != FNM_NOMATCH; /* T,F */
+   strmatch ("!(x)",   "a/cd",  flags) != FNM_NOMATCH; /* T,F */
+   strmatch ("s/!(x)", "s/abc", flags) != FNM_NOMATCH; /* T,T */
+   strmatch ("s/!(x)", "s/.ab", flags) != FNM_NOMATCH; /* T,F */
+   strmatch ("s/!(x)", "s/.." , flags) != FNM_NOMATCH; /* T,F */
+
+   Even though `!(x)' does not match `.abc', `s/!(x)' matches `s/.ab',
+   which seems unnatural to me.
+
+   See `#ifdef SMATCH_COMPAT52_NEGPATH' in lib/glob/sm_loop.c for the
+   related code, though the old behavior is not really implemented.  I
+   would implement it if the old behavior is strongly requested, but I
+   currently feel there is no reason to implement the old behavior.
+
+Possible adjustments, refactoring, and optimizations
+
+a. Renaming functions and macros---Of course, the function names and
+   macro constant names may be changed if there are any requests.
+
+b. Dropping optimizations---I have implemented the optimizations for
+   1) fixed-length patterns [see #ifdef SMATCH_OPTIMIZE_FIXLEN in
+   lib/glob/sm_loop.c] and 2) * at the end of the pattern string [see
+   #ifdef SMATCH_OPTIMIZE_ENDSTAR in lib/glob/sm_loop.c].  These would
+   improve the performances when the pattern and target strings,
+   respectively, are very long.  However, I think the improvements are
+   not visible for typical lengths of strings in the shell uses.  For
+   this reason, these optimizations might be dropped to reduce the
+   binary size.
+
+c. Dropping FNM_LEANDING_DIR---Maybe the support for FNM_LEADING_DIR
+   (the extension of GNU fnmatch) could be dropped because it is not
+   used in the Bash codebase but complicates the implementation of
+   XCSNAME(dfa_match_accept).  Another possibility would be to modify
+   the pattern string to suffix ?(/<op>) when FNM_LEADING_DIR is
+   present where <op> matches any strings (that may contain `/' and
+   `.' even when FNM_PATHNAME, etc. are specified).
+
+d. rmatch---Currently, every matching is performed from the beginnings
+   of the pattern and target strings, but FNM_MODE_SUFFIX_GREEDY and
+   FNM_MODE_SUFFIX_MODEST might be implemented so that matching is
+   more efficiently attempted from the ends of the pattern and target
+   strings.

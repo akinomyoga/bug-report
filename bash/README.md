@@ -52,6 +52,8 @@
   - Ref https://github.com/akinomyoga/ble.sh/issues/78#issue-771281403
   - Ref https://github.com/petobens/trueline/pull/46#issuecomment-1179853850
   - https://lists.gnu.org/archive/html/bug-bash/2022-07/msg00117.html
+  - https://lists.gnu.org/archive/html/bug-bash/2022-09/msg00067.html
+  - https://lists.gnu.org/archive/html/bug-bash/2022-10/msg00003.html
 - report23: [reply] $(case esac) に関連する問題
   - https://lists.gnu.org/archive/html/bug-bash/2021-02/msg00097.html
   - 関連 https://lists.gnu.org/archive/html/bug-bash/2021-06/msg00097.html by Chet `parse_comsub` 再実装
@@ -88,6 +90,7 @@
   - Ref https://github.com/ohmybash/oh-my-bash/issues/341#issuecomment-1168073038
 - report35: 2022-09-02 `trap INT` in `complete -F` causes missing readline signal setups
 - report36: 2022-09-25 Fix `printf %d "'X"` affected by intermediate mbstate_t
+- report37: Re-implement extglob
 
 ## Replies
 

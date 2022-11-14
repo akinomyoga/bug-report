@@ -1,0 +1,41 @@
+From a40957b761c74462f078f970a064d116992516d1 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 14 Nov 2022 16:55:04 +0900
+Subject: [PATCH 2/4] fix(glob/sm_loop): make bracket expression unmatching "/"
+ under FNM_PATHNAME
+
+---
+ lib/glob/sm_loop.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/lib/glob/sm_loop.c b/lib/glob/sm_loop.c
+index feb06497..ddce80f5 100644
+--- a/lib/glob/sm_loop.c
++++ b/lib/glob/sm_loop.c
+@@ -336,6 +336,12 @@ fprintf(stderr, "gmatch: pattern = %s; pe = %s\n", pattern, pe);
+ 	    if (sc == L('\0') || n == se)
+ 	      return FNM_NOMATCH;
+ 
++	    /* A bracket expressions can never match `/' under FNM_PATHNAME.
++	       This also applies to the case when `/' is explicitly specified
++	       as [/], etc.  */
++	    if ((flags & FNM_PATHNAME) && sc == L('/'))
++	      return FNM_NOMATCH;
++
+ 	    /* A character class cannot match a `.' if it is the first
+ 	       character of the string or if it is the first character
+ 	       following a slash and we are matching a pathname. */
+@@ -573,10 +579,6 @@ BRACKMATCH (p, test, flags)
+       if (c == L('\0'))
+ 	return ((test == L('[')) ? savep : (CHAR *)0);
+ 
+-      if ((flags & FNM_PATHNAME) && c == L('/'))
+-	/* [/] can never match when matching a pathname.  */
+-	return (CHAR *)0;
+-
+       /* This introduces a range, unless the `-' is the last
+ 	 character of the class.  Find the end of the range
+ 	 and move past it. */
+-- 
+2.37.2
+

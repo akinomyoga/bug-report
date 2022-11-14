@@ -1,0 +1,25 @@
+From d9ea2c38776f1624406ec3f707b886771b431543 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Wed, 9 Nov 2022 18:41:09 +0900
+Subject: [PATCH 1/4] fix(glob/sm_loop): fix [=c=] in BRACKMATCH
+
+---
+ lib/glob/sm_loop.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/lib/glob/sm_loop.c b/lib/glob/sm_loop.c
+index 592a78db..feb06497 100644
+--- a/lib/glob/sm_loop.c
++++ b/lib/glob/sm_loop.c
+@@ -463,6 +463,8 @@ BRACKMATCH (p, test, flags)
+ 	      c = *p++;
+ 	      if (c == L('\0'))
+ 		return ((test == L('[')) ? savep : (CHAR *)0); /*]*/
++	      else if (c == L(']'))
++		break;
+ 	      c = FOLD (c);
+ 	      continue;
+ 	    }
+-- 
+2.37.2
+
