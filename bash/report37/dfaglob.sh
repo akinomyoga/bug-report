@@ -2,8 +2,12 @@
 
 if [[ ${ZSH_VERSION-} ]]; then
   # There seems to be no way to get the path of the current zsh binary
+
   setopt extendedglob
   shell=zsh
+
+  # setopt kshglob
+  # shell=zshk
 else
   shopt -s extglob
   shell=${BASH##*/}
@@ -16,18 +20,17 @@ function test1 {
 
   local target=$(printf "%*s" "$len" b | sed 's/ /x/g')
   local pattern=x i=
-  if [[ ${ZSH_VERSION-} ]]; then
+  if [[ $shell == zsh ]]; then
     for ((i=0;i<nest;i++)); do
       pattern='('$pattern')#'
     done
-    ble-measure -q "[[ \$target == $pattern ]]"
   else
     for ((i=0;i<nest;i++)); do
       pattern='*('$pattern')'
     done
-    ble-measure -q '[[ $target == $pattern ]]'
   fi
-  echo "$len" "$nest" "$nsec"
+  ble-measure -q "[[ \$target == $pattern ]]"
+  echo "$len" "$nsec" "$nest"
 }
 
 function run-test1 {
@@ -55,7 +58,7 @@ function test1rex {
     pattern=$pattern'*'
   done
   ble-measure -q '[[ $target =~ ^$pattern$ ]]'
-  echo "$len" "$nest" "$nsec"
+  echo "$len" "$nsec" "$nest"
 }
 function run-test1rex {
   local outfile=$shell.test1rex
@@ -76,7 +79,7 @@ run-test1rex
 function test2 {
   local len=$1 type=$2
   local target=$(printf "%*s" "$len" '' | sed 's/ /x/g')
-  if [[ ${ZSH_VERSION-} ]]; then
+  if [[ $shell == zsh ]]; then
     case $type in
     (1) ble-measure -q 'ret=${target%%( )##}' ;;
     (2) ble-measure -q 'ret=${target##( )##}' ;;
@@ -87,7 +90,7 @@ function test2 {
     (2) ble-measure -q 'ret=${target##+( )}' ;;
     esac
   fi
-  echo "$len" "$type" "$nsec"
+  echo "$len" "$nsec" "$type"
 }
 
 function run-test2 {
@@ -111,7 +114,7 @@ run-test2
 function test3 {
   local nline=$1 type=$2
   local target=$(yes | head -n "$nline") ret
-  if [[ ${ZSH_VERSION-} ]]; then
+  if [[ $shell == zsh ]]; then
     case $type in
     (1) ble-measure -q "ret=\${target//( )#\$'\n'( )#/\$'\n'}" ;;
     (2) ble-measure -q "ret=\${target//([\$' \t\n'])##/ }" ;;
@@ -145,7 +148,7 @@ run-test3
 function test4 {
   local len=$1
   local target=$(printf '%0*d' "$len" 0)
-  if [[ ${ZSH_VERSION-} ]]; then
+  if [[ $shell == zsh ]]; then
     ble-measure -q '[[ $target == (0)## ]]'
   else
     ble-measure -q '[[ $target == +(0) ]]'
@@ -170,7 +173,7 @@ run-test4
 function test5 {
   local nline=$1
   local target=$(yes 3.14 | head -n "$nline") ret
-  if [[ ${ZSH_VERSION-} ]]; then
+  if [[ $shell == zsh ]]; then
     ble-measure -q 'ret=${target//([0-9])##.}'
   else
     ble-measure -q 'ret=${target//+([0-9]).}'
@@ -196,7 +199,7 @@ run-test5
 function test6 {
   local len=$1 type=$2
   local target=$(printf '%0*d' "$len" 0)
-  if [[ ${ZSH_VERSION-} ]]; then
+  if [[ $shell == zsh ]]; then
     case $type in
     (1) ble-measure -q '[[ $target == (^x)##y ]]' ;;
     (2) ble-measure -q '[[ $target == (*)#1 ]]' ;;
@@ -284,7 +287,7 @@ run-test7
 function test8 {
   local len=$1 type=$2
   local target=$(printf '%*s' "$len" '') ret
-  if [[ ${ZSH_VERSION-} ]]; then
+  if [[ $shell == zsh ]]; then
     case $type in
     (1) ble-measure -q 'ret=${target//" "}' ;;
     (2) ble-measure -q 'ret=${target//" "(x|)}' ;;

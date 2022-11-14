@@ -6,6 +6,7 @@
 
 /bash?.test*
 /zsh.test*
+/zshk.test*
 /fnmatch
 
 /dfaglob.pdf
