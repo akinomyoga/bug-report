@@ -34,7 +34,7 @@ function test1 {
 }
 
 function run-test1 {
-  local outfile=$shell.test1
+  local outfile=out/$shell.test1
   [[ -s $outfile ]] && return 0
 
   local nest len nsec
@@ -61,7 +61,7 @@ function test1rex {
   echo "$len" "$nsec" "$nest"
 }
 function run-test1rex {
-  local outfile=$shell.test1rex
+  local outfile=out/$shell.test1rex
   [[ -s $outfile ]] && return 0
 
   local nest len nsec
@@ -94,7 +94,7 @@ function test2 {
 }
 
 function run-test2 {
-  local outfile=$shell.test2
+  local outfile=out/$shell.test2
   [[ -s $outfile ]] && return 0
 
   local len type
@@ -129,7 +129,7 @@ function test3 {
 }
 
 function run-test3 {
-  local outfile=$shell.test3
+  local outfile=out/$shell.test3
   [[ -s $outfile ]] && return 0
 
   local type nline nsec
@@ -157,7 +157,7 @@ function test4 {
 }
 
 function run-test4 {
-  local outfile=$shell.test4
+  local outfile=out/$shell.test4
   [[ -s $outfile ]] && return 0
 
   local len nsec
@@ -182,7 +182,7 @@ function test5 {
 }
 
 function run-test5 {
-  local outfile=$shell.test5
+  local outfile=out/$shell.test5
   [[ -s $outfile ]] && return 0
 
   local len nsec
@@ -213,7 +213,7 @@ function test6 {
   echo "$len" "$nsec" "$type"
 }
 function run-test6 {
-  local outfile=$shell.test6
+  local outfile=out/$shell.test6
   [[ -s $outfile ]] && return 0
 
   local type len nsec
@@ -238,7 +238,7 @@ function test6rex {
   echo "$len" "$nsec" "$type"
 }
 function run-test6rex {
-  local outfile=$shell.test6rex
+  local outfile=out/$shell.test6rex
   [[ -s $outfile ]] && return 0
 
   local type len nsec
@@ -269,7 +269,7 @@ function test7 {
   echo "$len" "$nsec" "$type"
 }
 function run-test7 {
-  local outfile=$shell.test7
+  local outfile=out/$shell.test7
   [[ -s $outfile ]] && return 0
 
   local type len nsec
@@ -301,7 +301,7 @@ function test8 {
   echo "$len" "$nsec" "$type"
 }
 function run-test8 {
-  local outfile=$shell.test8
+  local outfile=out/$shell.test8
   [[ -s $outfile ]] && return 0
 
   local len type nsec

@@ -4,9 +4,7 @@
 /bash2
 /bash0-fix1
 
-/bash?.test*
-/zsh.test*
-/zshk.test*
+/out
 /fnmatch
 
 /dfaglob.pdf
