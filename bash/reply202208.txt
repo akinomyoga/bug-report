@@ -1,0 +1,192 @@
+
+Can we also change the behavior of TERM in a similar way with option
+4?  Currently, a temporal change of TERM clears keybindings of some
+keys (home, end, right, left, etc.) even when the temporal change does
+not survive across multiple calls of readline:
+
+$ bash-dev --norc
+$ echo "$TERM"
+screen.xterm-256color
+$ bind '"\e[1~": bell'
+$ bind -q beginning-of-line
+beginning-of-line can be invoked via "\C-a", "\eOH", "\e[H".
+$ TERM=dumb infocmp >dumb.ti
+$ bind -q beginning-of-line
+beginning-of-line can be invoked via "\C-a", "\eOH", "\e[1~", "\e[H".
+
+There are only a few places where TERM can be changed in my
+configuration (unlike LANG/LC_* which are changed in many places), so
+I can work around them by saving and restoring the keybindings, yet I
+think it is more reasonable that automatic rebinding on TERM changes
+only happens when the change survives to the next call of readline (as
+option 4 for the locale variables).
+
+------------------------------------------------------------------------------
+
+https://lists.gnu.org/archive/html/bug-bash/2022-08/threads.html#00036
+
+2022年8月10日(水) 23:21 Chet Ramey <chet.ramey@case.edu>:
+> > Does it mean custom values of these readline variables will be lost
+> > every time LANG or LC_{CTYPE,ALL} is changed even if a user or program
+> > intentionally sets them up?
+>
+> It means those settings will now mirror the locale.
+>
+> > We often temporarily change LANG or LC_* to perform some binary
+> > operations [such as counting the number of bytes of data and safely
+> > removing trailing x from the result of $(command;printf x)].
+>
+> Do you often do this in interactive shells?
+
+Yes, but I don't mean I directly type the above kinds of commands in
+the command line and run them, but I use them in the functions called
+through `bind -x'.  Also, the above cases (counting bytes and removing
+trailing x) are just examples; I set locale variables for various
+purposes in the actual codes.  For example, I often type and run
+commands of the form
+
+  LANG=C some-commands-or-functions
+
+to get the default error messages that are not locale-specific (though
+I could use LC_MESSAGES=C instead, yet LANG=C is easier to type for
+me).  I normally use the locale LANG=ja_JP.UTF-8 by default, so the
+commands output error messages in Japanese by default.  This is not
+useful when I would like to search for the solution in the internet
+because there are almost no information on the Japanese error message.
+
+> Often enough to make a difference?
+
+My `bind -x' functions use `LC_ALL=' and `LC_CTYPE=C' for every
+keystroke, for example, in combination with `builtin read'.  They also
+use `LC_ALL=' for other purposes for mostly every keystroke.  Some vi
+binding also uses `LC_CTYPE=C'.  My completion functions also changes
+`LC_ALL` and `LC_CTYPE`.  For example, `LC_CTYPE=C' is used in
+calculating a PJW hash code of a given string.  I haven't carefully
+checked, but there are probably other cases of changing `LC_CTYPE'.
+Also, `LC_ALL=' is used everywhere.
+
+> Across multiple calls to readline?
+
+I think I am missing the point.  What does ``multiple calls to
+readline'' mean?  Is the situation different from a single call to
+readline?
+
+Hmm, I think I first need to make it clear that the behavior of my
+code, which is supposed to be sourced in an interactive settion by
+users, is unaffected by these readline settings.  I just do not want
+to break or change the existing user settings inside the functions
+that I provide.  The behavior of my functions is unaffected (except
+for « bind -x '"\M-x":....'  » which is affected by `convert-meta',
+for which I already implemented a workaround) because it doesn't try
+to communicate with readline inside a single call of `bind -x'.  The
+problem is that, with the new automatic adjustment of these readline
+variables, the settings by users can be lost after using `LC_ALL=' or
+`LC_CTYPE=C' inside my functions.
+
+I believe this is a general problem for writers of Bash
+configurations. `bash_completion' also uses `LC_CTYPE=C' and
+`LC_ALL=C'.  The behavior of such configurations itself will be
+unaffected by the change of readline settings, but they need to
+implement special treatment to preserve the user settings if the user
+settings will be lost by changing locales.
+
+> And, if the change is intended to be temporary, why would you not
+> want the relevant readline variables to reflect the locale when you
+> were finished?
+
+Because I would not like to break the users' settings.  In general, a
+third-party Bash configuration should not overwrite the users'
+settings as far as the configuration does not need the setting.
+
+> > Also, if these readline variables would be cleared every time, it
+> > seems to me that these readline variables would be effectively
+> > unconfigurable and would lose the point of their existence, or we
+> > could not touch LANG or LC_* at all after the initial setup.
+>
+> It seems to me that the scenario Alan describes is much more common.
+
+I agree with this point, becase I have also faced with this problem
+for « bind -x '"\M-x":...' » vs « convert-meta » before.  For this
+problem, I have added a partial workaround at my side [1] where I
+decided to save and restore `convert-meta' before and after running
+`bind -x'.  Actually, the patch [2] I posted in this list before has
+been a part of the workaround of this problem.
+
+[1] https://github.com/akinomyoga/ble.sh/commit/f32808070796d3978787f4491f812d06a629ab3f
+[2] https://lists.gnu.org/archive/html/bug-bash/2019-02/msg00036.html
+
+I agree that we should somehow change the current behavior that the
+default values of *-meta settings are determined by the locale on the
+startup of Bash, but the proposed change will break the opposite
+scenario while it solves the Alan's scenario.
+
+The combination (UTF-8 & 7bit-mode) doesn't make much sense, so we
+might force (UTF-8 & 8bit-mode) for UTF-8 or similar for multibyte
+character encodings with 8-bit bytes.  [ Note: Here, 7bit/8bit-mode
+means « convert-meta on/off » and « {input,output}-meta off/on »,
+respectively. ] However, in the opposite side for the single-byte
+character encoding (e.g. for C), I think combinations (C & 7bit-mode)
+and (C & 8bit-mode) are both possible, so users can still set «
+convert-meta off » or « {output-meta,input-meta,meta-flag} on ».
+
+----------------------------------------
+
+> I'm not going to make this much of a change at this point in the release
+> process. I was willing to make the change I did because the changed
+> behavior is a superset of the previous behavior.
+>
+> So, assuming we say that the scenario Alan outlined is reasonable (it is),
+> it looks like there are four alternatives:
+>
+> 1. Do nothing; maintain the bash-5.1 behavior and force the change to the
+>    user.
+>
+> 2. Leave the new function in place; automatically adjust to locale
+>    changes.
+>
+> 3. Push it off to the application: introduce a new readline API that
+>    applications can call when locale variables change. This is very cheap.
+>
+> 4. Push it onto readline: instead of checking the locale and making the
+>    eight-bit variables mirror it on each call, make readline check for
+>    locale changes (well, LC_CTYPE) and reset the eight-bit variables only
+>    if the current value doesn't match the value from the last call.
+>
+> The last option is about as much of a change as I'm willing to make at
+> this point.
+
+2022年8月11日(木) 3:27 Chet Ramey <chet.ramey@case.edu>:
+> There is a fifth option:
+>
+> 5. Make the locale-aware behavior dependent on a new readline option, which
+>    would be enabled by default.
+
+Maybe a large change should be considered for bash-5.3, but I still
+think three states is one possible implementation that is a real
+superset:
+
+6. Add a third state `auto' of `convert-meta', `input-meta'
+  (`meta-flag'), and `output-meta' in addition to `on' and `off' and
+  change the default values of these variables to `auto'.  When `auto'
+  is set, the behavior always matches with the locale.  When `on' or
+  `off' is set by a user or an application, the behavior is not
+  affected by the current locale.
+
+If these readline variables should always be uniquly determined by the
+current locale and the users actually should never set them to the
+different side, I think another option might be just to remove these
+readline variables (though I'm not sure if this really makes sense):
+
+7. Remove readline variables `convert-meta', `input-meta'
+  (`meta-flag'), and `output-meta'.
+
+Or we can leave the readline variables but make it readonly:
+
+8. Make `convert-meta', `input-meta' (`meta-flag'), and `output-meta'
+  readonly and do not allow users to change these settings through
+  inputrc or « bind 'set ...' ».  The users instead need to set
+  LC_CTYPE up.
+
+Then, the Bash-configuration writer do not have to be bothered with
+saving and restoring the custom user settings when touching LC_ALL and
+LC_CTYPE.

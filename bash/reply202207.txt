@@ -1,0 +1,93 @@
+
+https://lists.gnu.org/archive/html/help-bash/2022-07/msg00034.html
+
+# You cannot use the following because it removes/changes the binding
+# for the sequence `T + A + B'.
+#bind -r TAB
+#bind '"TAB": "hello"'
+
+==============================================================================
+https://lists.gnu.org/archive/html/bug-bash/2022-07/msg00134.html
+
+> Description:
+>   `bash' does not let `unset' fully undeclare local variables. (so that
+>   they can be used later as `local' variables without needing to
+>   redeclare them I assume.)
+> 
+>       [...]
+> 
+>   However, other functions are allowed to delete those variables:
+
+This is a documented behavior:
+
+From Bash Reference Manul - 3.3 Shell Functions
+https://www.gnu.org/savannah-checkouts/gnu/bash/manual/bash.html#Shell-Functions
+> The unset builtin also acts using the same dynamic scope: if a
+> variable is local to the current scope, unset will unset it;
+> otherwise the unset will refer to the variable found in any calling
+> scope as described above. If a variable at the current local scope
+> is unset, it will remain so until it is reset in that scope or until
+> the function returns. Once the function returns, any instance of the
+> variable at a previous scope will become visible. If the unset acts
+> on a variable at a previous scope, any instance of a variable with
+> that name that had been shadowed will become visible.
+
+There has been also a long discussion before.
+
+https://lists.gnu.org/archive/html/bug-bash/2018-02/threads.html#00065
+https://lists.gnu.org/archive/html/bug-bash/2018-03/threads.html#00000
+
+Also, I would like to repeat myself in that thread.  The dynamic
+unsetting have existing applications.  See the following my reply:
+
+https://lists.gnu.org/archive/html/bug-bash/2018-03/msg00020.html
+
+----
+
+> This enables defininng a "really_unset" function like so:
+>
+>     really_unset () { unset "$@" ;}
+>
+> Which may be useful I guess.
+
+This is a well-known idiom and is already used in some places as
+`unlocal'.
+
+https://github.com/scop/bash-completion/blob/36ceb272ddf7ef70b7fa79c5c3686080b1510054/bash_completion#L248-L263
+https://github.com/akinomyoga/ble.sh/blob/0b95d5d900b79a63e7f0834da5aa7276b8332a44/src/util.sh#L388-L404
+
+This is also used for Freddy Vulto's upvars trick as Greg has cited.
+
+----
+
+> But I think allowing functions to unset local variables from other
+> functions defeats the whole purpose of having that `unset'
+> behaviour. This enables `local' variable to unexpectedly become
+> global after a function is called.
+
+I think these two cases will never be mixed.  Because when a user does
+not intend to remove the variable placeholder of the previous scopes,
+the user unsets a variable that is declared within the same function.
+When a user intend to remove that of the previous scopes, the
+`local-variable name' can become global, but it is just what the user
+expects.
+
+----
+
+> Fix:
+>   I think calling `unset -v x' (where `x' is a local variable not in the
+>   current scope) should behave as if it was called in the scope of `x',
+>   so `x' should remain declared in that scope with no attributes and no
+>   value.
+
+This is what `shopt -s localvar_unset' does.
+
+> It may be nice to also add a "force" option for `unset' that makes it
+> actually unset the variable if it is `local'. Since this could be
+> useful in some cases and it won't be possible after the behaviour is
+> changed.
+
+You can always use `unlocal' referenced above for this purpose.
+
+--
+Koichi
