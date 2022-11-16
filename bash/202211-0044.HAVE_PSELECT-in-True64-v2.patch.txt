@@ -1,0 +1,76 @@
+From 863f054d126e0e6481e94a3f193e6e982d2b70f3 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Tue, 15 Nov 2022 11:32:01 +0900
+Subject: [PATCH] fix for HAVE_PSELECT in Tru64
+
+https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00044.html
+---
+ lib/readline/input.c |  4 ++--
+ lib/sh/input_avail.c | 10 +++-------
+ 2 files changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/lib/readline/input.c b/lib/readline/input.c
+index da4da455..6d0200e3 100644
+--- a/lib/readline/input.c
++++ b/lib/readline/input.c
+@@ -250,7 +250,7 @@ rl_gather_tyi (void)
+   register int tem, result;
+   int chars_avail, k;
+   char input;
+-#if defined(HAVE_SELECT)
++#if defined (HAVE_PSELECT) || defined(HAVE_SELECT)
+   fd_set readfds, exceptfds;
+   struct timeval timeout;
+ #endif
+@@ -807,7 +807,7 @@ rl_getc (FILE *stream)
+   int result;
+   unsigned char c;
+   int fd;
+-#if defined (HAVE_PSELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+   sigset_t empty_set;
+   fd_set readfds;
+ #endif
+diff --git a/lib/sh/input_avail.c b/lib/sh/input_avail.c
+index 2ac44616..c3eaf514 100644
+--- a/lib/sh/input_avail.c
++++ b/lib/sh/input_avail.c
+@@ -33,7 +33,7 @@
+ #  include <sys/file.h>
+ #endif /* HAVE_SYS_FILE_H */
+ 
+-#if defined (HAVE_PSELECT)
++#if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
+ #  include <signal.h>
+ #endif
+ 
+@@ -107,10 +107,8 @@ nchars_avail (fd, nchars)
+      int nchars;
+ {
+   int result, chars_avail;
+-#if defined(HAVE_SELECT)
+-  fd_set readfds, exceptfds;
+-#endif
+ #if defined (HAVE_PSELECT) || defined (HAVE_SELECT)
++  fd_set readfds, exceptfds;
+   sigset_t set, oset;
+ #endif
+ 
+@@ -121,13 +119,11 @@ nchars_avail (fd, nchars)
+ 
+   chars_avail = 0;
+ 
+-#if defined (HAVE_SELECT)
++#if defined (HAVE_SELECT) || defined (HAVE_PSELECT)
+   FD_ZERO (&readfds);
+   FD_ZERO (&exceptfds);
+   FD_SET (fd, &readfds);
+   FD_SET (fd, &exceptfds);
+-#endif
+-#if defined (HAVE_SELECT) || defined (HAVE_PSELECT)
+   sigprocmask (SIG_BLOCK, (sigset_t *)NULL, &set);
+ #  ifdef SIGCHLD
+   sigaddset (&set, SIGCHLD);
+-- 
+2.37.2
+
