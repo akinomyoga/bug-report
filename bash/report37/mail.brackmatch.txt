@@ -149,3 +149,86 @@ lib/glob/sm_loop.c:442 and lib/glob/sm_loop.c:554.
 
 --
 Koichi
+
+=======================================================================================================================
+
+> fnmatch with FNM_PATHNAME only has to avoid matching the slash with a
+> bracket expression. The shell has an additional constraint: a slash that
+> appears in a bracket expression renders the bracket expression void and
+> requires the `[' to be matched explicitly. That's why there have to be
+> tests for slash in BRACKMATCH. There are two bugs: the off-by-one error
+> you note and matching the open bracket explicitly.
+
+Thank you for the explanation.  I did not know the special rule for
+the slash in the bracket expression.  I assumed that that part of the
+code in BRACKMATCH is related to the behavior of the bracket
+expression never matching a slash so just removed it, which was wrong.
+
+> I attached the patch I applied. I didn't include your fix to issue 1 above.
+
+Thank you for the patch.  I applied it locally and tried it.  I attach
+a test script that I used: [bracket-slash.sh].  Now I switched to a
+loadable builtin that directly calls strmatch instead of hacking
+GLOBIGNORE.  Here are the results:
+
+  ---Tests for a slash in bracket expressions---
+  #1: pat=ab[/]ef          str=ab[/]ef          yes/yes
+  #2: pat=ab[/]ef          str=ab/ef            no/no
+  #3: pat=ab[c/d]ef        str=ab[c/d]ef        yes/yes
+  #4: pat=ab[c/d]ef        str=abcef            yes/no
+  #5: pat=ab[.-/]ef        str=ab[.-/]ef        no/yes
+  #6: pat=ab[.-/]ef        str=ab.ef            yes/no
+  #7: pat=ab[[=/=]]ef      str=ab[[=/=]]ef      yes/yes
+  #8: pat=ab[[=/=]]ef      str=ab/ef            no/no
+  #9: pat=ab[[=c=]/]ef     str=ab[=/]ef         yes/yes
+  #10: pat=ab[[=c=]/]ef     str=abcef            yes/no
+  #11: pat=ab[[:alpha:]/]ef str=ab[:/]ef         yes/yes
+  #12: pat=ab[[:alpha:]/]ef str=abxef            yes/no
+  #13: pat=ab[/[abc]]ef     str=ab[/c]ef         yes/yes
+  #14: pat=ab[/[abc]]ef     str=abc]ef           no/no
+  #15: pat=ab[c[=/=]]ef     str=ab[c[=/=]]ef     yes/yes
+  #16: pat=ab[c[=/=]]ef     str=abc[=/=]ef       no/no
+  #17: pat=ab[c[=/=]]ef     str=abcef            yes/no
+  ---Tests for incomplete bracket expressions---
+  #18: pat=ab[c             str=ab[c             yes/yes
+  #19: pat=ab[c             str=abc              no/no
+  #20: pat=ab[c[=d=         str=ab[c[=d=         yes/yes
+  #21: pat=ab[c[=d=         str=abc              no/no
+  #22: pat=ab[c[.d          str=ab[c[.d          yes/yes
+  #23: pat=ab[c[.d          str=abc              no/no
+  #24: pat=ab[c[:alpha:     str=ab[c[:alpha:     yes/yes
+  #25: pat=ab[c[:alpha:     str=abc              no/no
+  #26: pat=ab[c-            str=ab[c-            no/yes
+  #27: pat=ab[c-            str=abc              no/no
+  #28: pat=ab[c\            str=ab[c\            no/yes
+  #29: pat=ab[c\            str=abc              no/no
+  #30: pat=ab[[\            str=ab[[\            no/yes
+  #31: pat=ab[[\            str=ab[              no/no
+
+"yes" and "no" on the left of / in the fourth column are the results
+after applying the patch you provided. "yes" and "no" on the right of
+/ are the results that *I* expect (see below paragraphs).
+
+The new treatment seems to only handle a slash that directly appears
+as an independent character in bracket expressions (cases
+#1,#2,#13,#14), but if I literally read the standard you quoted, I
+feel we should also handle other slashes (#3..#6,#9..#12,#15..#17).
+Cases #7 and #8 seem to be already processed in the current devel.  I
+think we can understand the rule of the standard by a mental
+processing model to first split the pattern with `/' and then to match
+each segment with the corresponding segment of the target string.
+Thinking in that way, we can actually just replace the NUL test for
+the string end with a similar test for NUL or a slash.  I attach a
+possible patch for the additional fix
+[r0037.brackmatch4.slash-terminated.patch.txt], which applies after
+your patch [bracket-slash.patch].
+
+Also, I have a suggestion of changes for more consistent handling of
+incomplete bracket expressions.  Currently, incomplete bracket
+expressions sometimes fails unconditionally (#26..#31) and sometimes
+fallbacks to a literal `[' plus remaining pattern (#18..#25).  I
+attach another patch for this:
+[r0037.brackmatch5.incomplete-bracket.patch.txt].
+
+--
+Koichi
