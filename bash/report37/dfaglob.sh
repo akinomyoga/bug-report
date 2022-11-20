@@ -2,16 +2,20 @@
 
 if [[ ${ZSH_VERSION-} ]]; then
   # There seems to be no way to get the path of the current zsh binary
-
-  setopt extendedglob
-  shell=zsh
-
-  # setopt kshglob
-  # shell=zshk
+  case $1 in
+  (zshk)
+    setopt kshglob
+    shell=zshk ;;
+  (*)
+    setopt extendedglob
+    shell=zsh ;;
+  esac
 else
   shopt -s extglob
-  shell=${BASH##*/}
+  shell=${1:-${BASH##*/}}
 fi
+
+mkdir -p out
 
 source ~/.mwg/src/ble.sh/src/benchmark.sh
 
@@ -20,16 +24,22 @@ function test1 {
 
   local target=$(printf "%*s" "$len" b | sed 's/ /x/g')
   local pattern=x i=
-  if [[ $shell == zsh ]]; then
+  if [[ $shell == regex ]]; then
+    for ((i=0;i<nest;i++)); do
+      pattern=$pattern'*'
+    done
+    ble-measure -q '[[ $target =~ ^$pattern$ ]]'
+  elif [[ $shell == zsh ]]; then
     for ((i=0;i<nest;i++)); do
       pattern='('$pattern')#'
     done
+    ble-measure -q "[[ \$target == $pattern ]]"
   else
     for ((i=0;i<nest;i++)); do
       pattern='*('$pattern')'
     done
+    ble-measure -q "[[ \$target == $pattern ]]"
   fi
-  ble-measure -q "[[ \$target == $pattern ]]"
   echo "$len" "$nsec" "$nest"
 }
 
@@ -49,37 +59,12 @@ function run-test1 {
 
 run-test1
 
-function test1rex {
-  local len=$1 nest=$2
-
-  local target=$(printf "%*s" "$len" b | sed 's/ /x/g')
-  local pattern=x i
-  for ((i=0;i<nest;i++)); do
-    pattern=$pattern'*'
-  done
-  ble-measure -q '[[ $target =~ ^$pattern$ ]]'
-  echo "$len" "$nsec" "$nest"
-}
-function run-test1rex {
-  local outfile=out/$shell.test1rex
-  [[ -s $outfile ]] && return 0
-
-  local nest len nsec
-  for nest in 1 2 3 4 6 8 10; do
-    for len in {1..30} 50 {1,2,5}00 {1,2,5}000 {1,2,5}0000 {1,2,5}00000 {1,2,5}000000 {1,2,5}0000000; do
-      test1rex "$len" "$nest"
-      ((nsec>=5*1000**3)) && break
-    done
-    echo
-  done > "$outfile"
-}
-
-run-test1rex
-
 function test2 {
   local len=$1 type=$2
   local target=$(printf "%*s" "$len" '' | sed 's/ /x/g')
-  if [[ $shell == zsh ]]; then
+  if [[ $shell == regex ]]; then
+    nsec=-1
+  elif [[ $shell == zsh ]]; then
     case $type in
     (1) ble-measure -q 'ret=${target%%( )##}' ;;
     (2) ble-measure -q 'ret=${target##( )##}' ;;
@@ -114,7 +99,9 @@ run-test2
 function test3 {
   local nline=$1 type=$2
   local target=$(yes | head -n "$nline") ret
-  if [[ $shell == zsh ]]; then
+  if [[ $shell == regex ]]; then
+    nsec=-1
+  elif [[ $shell == zsh ]]; then
     case $type in
     (1) ble-measure -q "ret=\${target//( )#\$'\n'( )#/\$'\n'}" ;;
     (2) ble-measure -q "ret=\${target//([\$' \t\n'])##/ }" ;;
@@ -148,7 +135,9 @@ run-test3
 function test4 {
   local len=$1
   local target=$(printf '%0*d' "$len" 0)
-  if [[ $shell == zsh ]]; then
+  if [[ $shell == regex ]]; then
+    ble-measure -q '[[ $target =~ ^0+$ ]]'
+  elif [[ $shell == zsh ]]; then
     ble-measure -q '[[ $target == (0)## ]]'
   else
     ble-measure -q '[[ $target == +(0) ]]'
@@ -173,7 +162,9 @@ run-test4
 function test5 {
   local nline=$1
   local target=$(yes 3.14 | head -n "$nline") ret
-  if [[ $shell == zsh ]]; then
+  if [[ $shell == regex ]]; then
+    nsec=-1
+  elif [[ $shell == zsh ]]; then
     ble-measure -q 'ret=${target//([0-9])##.}'
   else
     ble-measure -q 'ret=${target//+([0-9]).}'
@@ -199,7 +190,12 @@ run-test5
 function test6 {
   local len=$1 type=$2
   local target=$(printf '%0*d' "$len" 0)
-  if [[ $shell == zsh ]]; then
+  if [[ $shell == regex ]]; then
+    case $type in
+    (1) ble-measure -q '[[ $target =~ ^(|[^x]|...*)+y$ ]]' ;;
+    (2) ble-measure -q '[[ $target =~ ^.**1$ ]]' ;;
+    esac
+  elif [[ $shell == zsh ]]; then
     case $type in
     (1) ble-measure -q '[[ $target == (^x)##y ]]' ;;
     (2) ble-measure -q '[[ $target == (*)#1 ]]' ;;
@@ -227,45 +223,24 @@ function run-test6 {
 }
 run-test6
 
-function test6rex {
-  local len=$1 type=$2
-  local target=$(printf '%0*d' "$len" 0)
-  case $type in
-  (0) ble-measure -q '[[ $target =~ ^0+$ ]]' ;;
-  (1) ble-measure -q '[[ $target =~ ^(|[^x]|...*)+y$ ]]' ;;
-  (2) ble-measure -q '[[ $target =~ ^.**1$ ]]' ;;
-  esac
-  echo "$len" "$nsec" "$type"
-}
-function run-test6rex {
-  local outfile=out/$shell.test6rex
-  [[ -s $outfile ]] && return 0
-
-  local type len nsec
-  for type in 0 1 2; do
-    for len in $(printf '%s\n' {1..10} {12..30..2} 50 {1,2,5}{00,000,0000,00000,000000,0000000} | sort -n); do
-      test6rex "$len" "$type"
-      ((nsec>=5*1000**3)) && break
-    done
-    echo
-  done > "$outfile"
-}
-
-run-test6rex
-
 #------------------------------------------------------------------------------
 
 function test7 {
   local len=$1 type=$2
   local target=$(printf '%0*d' "$len" 1)
-  case $type in
-  (1)    ble-measure -q '[[ $target == hello ]]' ;;
-  (1rex) ble-measure -q '[[ $target =~ ^hello$ ]]' ;;
-  (2)    ble-measure -q '[[ $target == *a*b*c* ]]' ;;
-  (2rex) ble-measure -q '[[ $target =~ ^.*a.*b.*c.*$ ]]' ;;
-  (3)    ble-measure -q '[[ $target == 0*0*0*0*0 ]]' ;;
-  (3rex) ble-measure -q '[[ $target =~ ^0.*0.*0.*0.*0$ ]]' ;;
-  esac
+  if [[ $shell == regex ]]; then
+    case $type in
+    (1) ble-measure -q '[[ $target =~ ^hello$ ]]' ;;
+    (2) ble-measure -q '[[ $target =~ ^.*a.*b.*c.*$ ]]' ;;
+    (3) ble-measure -q '[[ $target =~ ^0.*0.*0.*0.*0$ ]]' ;;
+    esac
+  else
+    case $type in
+    (1) ble-measure -q '[[ $target == hello ]]' ;;
+    (2) ble-measure -q '[[ $target == *a*b*c* ]]' ;;
+    (3) ble-measure -q '[[ $target == 0*0*0*0*0 ]]' ;;
+    esac
+  fi
   echo "$len" "$nsec" "$type"
 }
 function run-test7 {
@@ -273,7 +248,7 @@ function run-test7 {
   [[ -s $outfile ]] && return 0
 
   local type len nsec
-  for type in {1..3}{,rex}; do
+  for type in 1 2 3; do
     for len in $(printf '%s\n' {1..10} {12..30..2} 50 {1,2,5}{00,000,0000,00000,000000,0000000} | sort -n); do
       test7 "$len" "$type"
       ((nsec>=5*1000**3)) && break
@@ -287,7 +262,9 @@ run-test7
 function test8 {
   local len=$1 type=$2
   local target=$(printf '%*s' "$len" '') ret
-  if [[ $shell == zsh ]]; then
+  if [[ $shell == regex ]]; then
+    nsec=-1
+  elif [[ $shell == zsh ]]; then
     case $type in
     (1) ble-measure -q 'ret=${target//" "}' ;;
     (2) ble-measure -q 'ret=${target//" "(x|)}' ;;

@@ -19,7 +19,7 @@ label_regex = '<regex.h>'
 
 # filename prefixes
 zsh = 'zsh'
-impl = 'bash2'
+impl = 'bash2v8'
 
 #set format y '%.1t×10^{%T}'
 set log y
@@ -34,10 +34,10 @@ plot \
   NaN @lineN lc rgb '#000000' t label_newglob, \
   NaN @lineR lc rgb '#000000' t label_regex, \
   NaN @lineZ lc rgb '#000000' t 'Zsh 5.8', \
-  getdata1(impl.'.test1rex', '1') @using1 @lineR lc rgb '#0000FF' notitle, \
-  getdata1(impl.'.test1rex', '2') @using1 @lineR lc rgb '#00aa00' notitle, \
-  getdata1(impl.'.test1rex', '4') @using1 @lineR lc rgb '#888800' notitle, \
-  getdata1(impl.'.test1rex', '8') @using1 @lineR lc rgb '#FF0000' notitle, \
+  getdata1('regex.test1', '1') @using1 @lineR lc rgb '#0000FF' notitle, \
+  getdata1('regex.test1', '2') @using1 @lineR lc rgb '#00aa00' notitle, \
+  getdata1('regex.test1', '4') @using1 @lineR lc rgb '#888800' notitle, \
+  getdata1('regex.test1', '8') @using1 @lineR lc rgb '#FF0000' notitle, \
   getdata1(zsh.'.test1', '1')  @using2 @lineZ lc rgb '#0000FF' notitle, \
   getdata1(zsh.'.test1', '2')  @using2 @lineZ lc rgb '#00aa00' notitle, \
   getdata1(zsh.'.test1', '4')  @using2 @lineZ lc rgb '#888800' notitle, \
@@ -80,10 +80,10 @@ plot \
 set title 'd. Benchmark: a=$(printf '."'".'%0*d'."'".' 100000 0); [[ $a == +(0) ]]'
 set xlabel 'Length of target string "000...0"'
 plot \
-  "out/bash0.test4"               @using1 w p    lc rgb '#000000' t 'Bash 5.2', \
-  "out/bash2.test4"               @using1 @lineN lc rgb '#0000FF' t label_newglob, \
-  getdata1(impl.'.test6rex', '0') @using1 @lineR lc rgb '#0000FF' t label_regex, \
-  "out/".zsh.".test4"             @using2 w p lc rgb '#000088' lw 0.5 pt 2 t 'Zsh 5.8'
+  "out/bash0.test4"   @using1 w p    lc rgb '#000000' t 'Bash 5.2', \
+  "out/bash2.test4"   @using1 @lineN lc rgb '#0000FF' t label_newglob, \
+  "out/regex.test4"   @using1 @lineR lc rgb '#0000FF' t label_regex, \
+  "out/".zsh.".test4" @using2 w p lc rgb '#000088' lw 0.5 pt 2 t 'Zsh 5.8'
 
 set title 'e. Benchmark: a=$(yes 3.14 | head -n 100); a=$\{a//+([0-9]).\}'
 set xlabel 'Number of lines in the target string "3.14\n...\n3.14"'
@@ -99,14 +99,14 @@ plot \
   NaN @lineN lc rgb '#000000' t label_newglob, \
   NaN @lineR lc rgb '#000000' t label_regex, \
   NaN @lineZ lc rgb '#000000' t 'Zsh 5.8', \
-  getdata1(impl.'.test6rex', '1') @using1 @lineR lc rgb '#FF0000' notitle, \
-  getdata1(impl.'.test6rex', '2') @using1 @lineR lc rgb '#0000FF' notitle, \
-  getdata1('zsh.test6', '1')      @using1 @lineZ lc rgb '#FF0000' notitle, \
-  getdata1(zsh.'.test6', '2')     @using1 @lineZ lc rgb '#0000FF' notitle, \
-  getdata1('bash0.test6', '1')    @using1 @lineB lc rgb '#FF0000' notitle, \
-  getdata1(impl.'.test6', '1')    @using1 @lineN lc rgb '#FF0000' t '[[ $a == +(!(x))y ]]', \
-  getdata1('bash0.test6', '2')    @using1 @lineB lc rgb '#0000FF' notitle, \
-  getdata1(impl.'.test6', '2')    @using1 @lineN lc rgb '#0000FF' t '[[ $a == *(*)1 ]]'
+  getdata1('regex.test6', '1') @using1 @lineR lc rgb '#FF0000' notitle, \
+  getdata1('regex.test6', '2') @using1 @lineR lc rgb '#0000FF' notitle, \
+  getdata1('zsh.test6', '1')   @using1 @lineZ lc rgb '#FF0000' notitle, \
+  getdata1(zsh.'.test6', '2')  @using1 @lineZ lc rgb '#0000FF' notitle, \
+  getdata1('bash0.test6', '1') @using1 @lineB lc rgb '#FF0000' notitle, \
+  getdata1(impl.'.test6', '1') @using1 @lineN lc rgb '#FF0000' t '[[ $a == +(!(x))y ]]', \
+  getdata1('bash0.test6', '2') @using1 @lineB lc rgb '#0000FF' notitle, \
+  getdata1(impl.'.test6', '2') @using1 @lineN lc rgb '#0000FF' t '[[ $a == *(*)1 ]]'
 
 # /(|[\^x]|...*)+y/
 # /.**1/
@@ -118,14 +118,14 @@ plot \
   NaN @lineN lc rgb '#000000' t label_newglob, \
   NaN @lineR lc rgb '#000000' t label_regex, \
   NaN @lineZ lc rgb '#000000' t 'Zsh 5.8', \
-  getdata1(impl.'.test7', '1rex') @using1 @lineR lc rgb '#FF0000' notitle, \
-  getdata1(impl.'.test7', '2rex') @using1 @lineR lc rgb '#0000FF' notitle, \
-  getdata1(zsh.'.test7', '1')     @using1 @lineZ lc rgb '#FF0000' notitle, \
-  getdata1(zsh.'.test7', '2')     @using1 @lineZ lc rgb '#0000FF' notitle, \
-  getdata1('bash0.test7', '1')    @using1 @lineB lc rgb '#FF0000' notitle, \
-  getdata1(impl.'.test7', '1')    @using1 @lineN lc rgb '#FF0000' t '[[ $a == hello ]]', \
-  getdata1('bash0.test7', '2')    @using1 @lineB lc rgb '#0000FF' notitle, \
-  getdata1(impl.'.test7', '2')    @using1 @lineN lc rgb '#0000FF' t '[[ $a == *a*b*c* ]]'
+  getdata1('regex.test7', '1') @using1 @lineR lc rgb '#FF0000' notitle, \
+  getdata1('regex.test7', '2') @using1 @lineR lc rgb '#0000FF' notitle, \
+  getdata1(zsh.'.test7', '1')  @using1 @lineZ lc rgb '#FF0000' notitle, \
+  getdata1(zsh.'.test7', '2')  @using1 @lineZ lc rgb '#0000FF' notitle, \
+  getdata1('bash0.test7', '1') @using1 @lineB lc rgb '#FF0000' notitle, \
+  getdata1(impl.'.test7', '1') @using1 @lineN lc rgb '#FF0000' t '[[ $a == hello ]]', \
+  getdata1('bash0.test7', '2') @using1 @lineB lc rgb '#0000FF' notitle, \
+  getdata1(impl.'.test7', '2') @using1 @lineN lc rgb '#0000FF' t '[[ $a == *a*b*c* ]]'
 
 set title 'h. Benchmark: a=$(printf '."'".'%*s'."'".' 100000 ""); a=$\{a//" "\}'
 set xlabel 'Length of target string "␣␣␣...␣"'
