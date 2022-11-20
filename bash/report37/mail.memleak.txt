@@ -1,0 +1,25 @@
+https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00082.html
+
+> Description:
+>         [Detailed description of the problem, suggestion, or
+>         complaint.]
+>         I want to read an associative array. Like so: y="${aa[$i]}"
+>         If aa contains the element queried, then everything works as
+>         expected
+>         If aa does not contain such an element, the result is the
+>         empty string, which is expected, but the query permanently
+>         increases the memory consumption of the executing bash,
+>         which is not expected. The program below demonstrates this
+>         behaviour. When run, the bash process increases its memory
+>         indefinitely.
+
+I also noticed a memory leak early this month in testing my new
+extglob implementation and was planning to submit a patch later. I now
+checked this report and confirmed that this is actually caused by the
+same part of the code. Here, I attach my patch
+[r0037.parameter_brace_expand_word.memleak.patch], though I haven't
+yet carefully tested it because I originally planned to submit it
+sometime later.
+
+--
+Koichi
