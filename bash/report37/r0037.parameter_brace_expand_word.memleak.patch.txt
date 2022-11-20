@@ -1,0 +1,36 @@
+From 4183e204ea0f954de42dea6ba2ec0f47a061f7f3 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Thu, 3 Nov 2022 14:01:41 +0900
+Subject: [PATCH 1/2] fix memleak in parameter_brace_expand_word
+
+---
+ subst.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/subst.c b/subst.c
+index 7ec8f8e9..a018b1b1 100644
+--- a/subst.c
++++ b/subst.c
+@@ -7507,8 +7507,6 @@ expand_arrayref:
+ 		    ? quote_string (temp)
+ 		    : quote_escapes (temp);
+ 	  rflags |= W_ARRAYIND;
+-	  if (estatep)
+-	    *estatep = es;	/* structure copy */
+ 	}
+       /* Note that array[*] and array[@] expanded to a quoted null string by
+ 	 returning the W_HASQUOTEDNULL flag to the caller in addition to TEMP. */
+@@ -7517,7 +7515,9 @@ expand_arrayref:
+       else if (es.subtype == 2 && temp && QUOTED_NULL (temp) && (quoted & (Q_DOUBLE_QUOTES|Q_HERE_DOCUMENT)))
+ 	rflags |= W_HASQUOTEDNULL;
+ 
+-      if (estatep == 0)
++      if (etastep)
++	*estatep = es;	/* structure copy */
++      else
+ 	flush_eltstate (&es);
+     }
+ #endif
+-- 
+2.37.2
+
