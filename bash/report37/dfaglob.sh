@@ -1,20 +1,5 @@
 #!/bin/bash
 
-if [[ ${ZSH_VERSION-} ]]; then
-  # There seems to be no way to get the path of the current zsh binary
-  case $1 in
-  (zshk)
-    setopt kshglob
-    shell=zshk ;;
-  (*)
-    setopt extendedglob
-    shell=zsh ;;
-  esac
-else
-  shopt -s extglob
-  shell=${1:-${BASH##*/}}
-fi
-
 mkdir -p out
 
 source ~/.mwg/src/ble.sh/src/benchmark.sh
@@ -57,8 +42,6 @@ function run-test1 {
   done > "$outfile"
 }
 
-run-test1
-
 function test2 {
   local len=$1 type=$2
   local target=$(printf "%*s" "$len" '' | sed 's/ /x/g')
@@ -91,8 +74,6 @@ function run-test2 {
     echo
   done > "$outfile"
 }
-
-run-test2
 
 # https://lists.gnu.org/archive/html/bug-bash/2022-10/msg00132.html
 # https://lists.gnu.org/archive/html/bug-bash/2022-09/msg00008.html
@@ -129,8 +110,6 @@ function run-test3 {
   done > "$outfile"
 }
 
-run-test3
-
 # https://lists.gnu.org/archive/html/bug-bash/2022-10/msg00048.html
 function test4 {
   local len=$1
@@ -156,8 +135,6 @@ function run-test4 {
   done > "$outfile"
 }
 
-run-test4
-
 # https://stackoverflow.com/q/47080621
 function test5 {
   local nline=$1
@@ -182,8 +159,6 @@ function run-test5 {
     ((nsec>=5*1000**3)) && break
   done > "$outfile"
 }
-
-run-test5
 
 # https://lists.gnu.org/archive/html/bug-bash/2021-07/msg00065.html
 # https://stackoverflow.com/q/57481631/4908404
@@ -221,7 +196,6 @@ function run-test6 {
     echo
   done > "$outfile"
 }
-run-test6
 
 #------------------------------------------------------------------------------
 
@@ -257,8 +231,6 @@ function run-test7 {
   done > "$outfile"
 }
 
-run-test7
-
 function test8 {
   local len=$1 type=$2
   local target=$(printf '%*s' "$len" '') ret
@@ -290,4 +262,45 @@ function run-test8 {
     echo
   done > "$outfile"
 }
-run-test8
+
+function measure-shell {
+  local shell
+  if [[ ${ZSH_VERSION-} ]]; then
+    # There seems to be no way to get the path of the current zsh binary
+    case $1 in
+    (zshk)
+      setopt kshglob
+      shell=zshk ;;
+    (*)
+      setopt extendedglob
+      shell=zsh ;;
+    esac
+  else
+    shopt -s extglob
+    shell=${1:-${BASH##*/}}
+  fi
+
+  run-test1
+  run-test2
+  run-test3
+  run-test4
+  run-test5
+  run-test6
+  run-test7
+  run-test8
+}
+
+function main {
+  if [[ $1 == all ]]; then
+    zsh       "$BASH_SOURCE" zsh
+    #zsh      "$BASH_SOURCE" zshk
+    ./bash0   "$BASH_SOURCE" bash0
+    ./bash2v8 "$BASH_SOURCE" bash2v8
+    ./bash2v8 "$BASH_SOURCE" regex
+    gnuplot dfaglob.gp
+  else
+    measure-shell "$@"
+  fi
+}
+
+main "$@"
