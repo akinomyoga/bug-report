@@ -1,0 +1,51 @@
+From 610d10fc663fd172ae69f8eac8e18a0b426103fe Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sun, 20 Nov 2022 18:46:42 +0900
+Subject: [PATCH] fix(GMATCH): option (c) for inconsistent unescaped backslash
+
+---
+ lib/glob/sm_loop.c | 3 ---
+ tests/glob2.sub    | 6 +++---
+ 2 files changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/lib/glob/sm_loop.c b/lib/glob/sm_loop.c
+index fa350daa..e058b0e8 100644
+--- a/lib/glob/sm_loop.c
++++ b/lib/glob/sm_loop.c
+@@ -126,9 +126,6 @@ fprintf(stderr, "gmatch: pattern = %s; pe = %s\n", pattern, pe);
+ 	  break;
+ 
+ 	case L('\\'):		/* backslash escape removes special meaning */
+-	  if (p == pe && sc == '\\' && (n+1 == se))
+-	    break;
+-
+ 	  if (p == pe)
+ 	    return FNM_NOMATCH;
+ 
+diff --git a/tests/glob2.sub b/tests/glob2.sub
+index 09cb6d51..0569bcc8 100644
+--- a/tests/glob2.sub
++++ b/tests/glob2.sub
+@@ -29,8 +29,8 @@ ab\\)	echo ok 1;;
+ esac
+ 
+ case $var in
+-$var)	echo ok 2;;
+-*)	echo bad 2;;
++$var)	echo bad 2;;
++*)	echo ok 2;;
+ esac
+ 
+ case $var in
+@@ -38,7 +38,7 @@ case $var in
+ *)	echo bad 3;;
+ esac
+ 
+-[[ $var = $var ]] && echo ok 4
++[[ $var = $var ]] || echo ok 4
+ [[ $var = $'ab\134' ]] && echo ok 5
+ 
+ LC_ALL=zh_HK.big5hkscs
+-- 
+2.37.2
+

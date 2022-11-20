@@ -1,0 +1,35 @@
+From 69b70f4581bae1ec5a74ca2f38fc95b7a29d1e2c Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sun, 20 Nov 2022 18:55:54 +0900
+Subject: [PATCH 2/2] fix(BRACKMATCH): option (b) for inconsistent unescaped
+ backslash
+
+---
+ lib/glob/sm_loop.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/lib/glob/sm_loop.c b/lib/glob/sm_loop.c
+index 151d10bd..c46f8231 100644
+--- a/lib/glob/sm_loop.c
++++ b/lib/glob/sm_loop.c
+@@ -569,7 +569,7 @@ BRACKMATCH (p, test, flags)
+       if (!(flags & FNM_NOESCAPE) && c == L('\\'))
+ 	{
+ 	  if (*p == '\0')
+-	    return (CHAR *)0;
++	    return ((test == L('[')) ? savep : (CHAR *)0);
+ 	  else if (*p == L('/') && (flags & FNM_PATHNAME))
+ 	    return ((test == L('[')) ? savep : (CHAR *)0);
+ 	  cstart = cend = *p++;
+@@ -701,7 +701,7 @@ matched:
+       else if (!(flags & FNM_NOESCAPE) && c == L('\\'))
+ 	{
+ 	  if (*p == '\0')
+-	    return (CHAR *)0;
++	    return ((test == L('[')) ? savep : (CHAR *)0);
+ 	  /* We don't allow backslash to quote slash if we're matching pathnames */
+ 	  else if (*p == L('/') && (flags & FNM_PATHNAME))
+ 	    return ((test == L('[')) ? savep : (CHAR *)0);
+-- 
+2.37.2
+
