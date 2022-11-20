@@ -85,11 +85,6 @@ function check {
   printf '#%d: pat=%-16s str=%-16s %s/%s\n' "$((check_count++))" "$1" "$2" "$strmatch" "$expect"
 }
 
-check 'a[b\/c]'          'a[b/c]'      "$yes"
-check 'a[b\/c]'          'ab'          "$no"
-check 'a[b\/c]'          'ac'          "$no"
-check 'a\'               'a\'          '???'
-
 echo '---Tests for negation and dots---'
 check '!(x)'             'abcd'
 check '!(x)'             '.abc'         "$no"

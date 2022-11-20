@@ -152,6 +152,7 @@ Koichi
 
 =======================================================================================================================
 
+2022年11月17日(木) 6:47 Chet Ramey <chet.ramey@case.edu>:
 > fnmatch with FNM_PATHNAME only has to avoid matching the slash with a
 > bracket expression. The shell has an additional constraint: a slash that
 > appears in a bracket expression renders the bracket expression void and
@@ -225,8 +226,8 @@ your patch [bracket-slash.patch].
 
 Also, I have a suggestion of changes for more consistent handling of
 incomplete bracket expressions.  Currently, incomplete bracket
-expressions sometimes fails unconditionally (#26..#31) and sometimes
-fallbacks to a literal `[' plus remaining pattern (#18..#25).  I
+expressions sometimes fail unconditionally (#26..#31) and sometimes
+fall back to a literal `[' plus remaining pattern (#18..#25).  I
 attach another patch for this:
 [r0037.brackmatch5.incomplete-bracket.patch.txt].
 
@@ -293,7 +294,7 @@ Koichi
 There seem to be still remaining issues.  It is fine for me if Bash
 chooses the former, ``the pattern does not match anything'' with a
 backslash followed by NUL, but the following cases (see the attached
-[reduced3.sh]) with a backslash followed by a slash should still be
+[test3.sh]) with a backslash followed by a slash should still be
 fixed:
 
   #1: pat=a[b\/c]          str=a[b/c]           no/yes
@@ -303,8 +304,8 @@ fixed:
 
 Where the fourth column <xxx/yyy> shows the result of the current
 devel 407d9afc with FNM_PATHNAME (xxx) and the result I expect
-(yyy). "yes" means the pattern matches to the string, and "no" means
-the pattern does not match.
+(yyy). "yes" means the pattern matches the string, and "no" means the
+pattern does not match.
 
 * I expect "yes" for #1 because the bracket expression contains a
   slash before its closing right bracket `]' and thus the beginning
@@ -321,14 +322,14 @@ the pattern does not match.
   only checked after a matching character is found
   (lib/glob/sm_loop.c:703).  The same check should be applied also
   before a matching character is found (lib/glob/sm_loop.c:573).  I
-  attach a patch for this [].
+  attach a patch for this [r0037.brackmatch6.remaining-slash.patch].
 
 ----------------------------------------------------------------------
 
 There is another related inconsistency.  I just modified my new
-extglob engine to follow the Bash's choice described above, but then
-the behavior became different from that of the actual implementation
-of Bash of the current devel.
+extglob engine to follow Bash's choice described above, but then the
+behavior became different from that of the actual implementation of
+Bash of the current devel.
 
 > "If a pattern ends with an unescaped <backslash>, it is unspecified whether
 > the pattern does not match anything or the pattern is treated as invalid."
@@ -341,7 +342,7 @@ that in the bracket expression, so I applied this to the new extglob
 engine.  However, ``the former interpretation'' that Bash adopts
 turned out to be only applied to the unescaped backslashes *inside a
 bracket expression*.  This is the remaining part of the output of the
-attached [reduced3.sh] with the current devel 407d9afc:
+attached [example3.sh] with the current devel 407d9afc:
 
   [...]
   #4: pat=a\               str=a\               yes/???
@@ -352,28 +353,32 @@ backslash.
 
 a. Is this difference between outside and inside of the bracket
   expressions intensional? I.e., the former interpretation "the
-  pattern does not match anything" seems to only applies to the inside
+  pattern does not match anything" seems to only apply to the inside
   of bracket expressions.
 
 b. If this is the behavior for the unescaped backslashes outside the
   bracket expressions, which is intensionally different from those in
   the bracket expressions, would it be possible to change the
-  treatment of the unescaped backslashses inside the bracket
+  treatment of the unescaped backslashes inside the bracket
   expression the same as that of outside so the bracket `[' matches
   literally (as expected in cases #28..#31 of my previous reply [1])?
-  The attached [] is the corresponding patch.
+  The attached [r0037.brackmatch7.unescaped-backslash-option-b.patch]
+  is the corresponding patch.
 
   [1] https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00070.html
 
 c. If the behavior of the unescaped backslash of the outside should
   also be modified to follow the former interpretation "the pattern
-  does not match anything", another patch is [].  However, the current
-  behavior outside the bracket expression seems to be explicitly
-  required by the tests on tests/glob2.sub:32 and tests/glob2.sub:41.
+  does not match anything", another patch is
+  [r0037.brackmatch7.unescaped-backslash-option-c.patch].  However,
+  the current behavior outside the bracket expression seems to be
+  explicitly required by the tests on tests/glob2.sub:32 and
+  tests/glob2.sub:41.
 
 I prefer option b, which keeps the behavior required by
 tests/glob2.sub and also consistent between the inside and the outside
 of bracket expressions.  It is also consistent with the behavior for
 the string end inside bracket expressions.
 
-----------------------------------------------------------------------
+--
+Koichi
