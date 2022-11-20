@@ -235,6 +235,51 @@ Koichi
 
 ===============================================================================
 
+> The cleverness is due to Russ Cox, a really smart guy who figured this
+> stuff out first:
+>
+> https://research.swtch.com/glob
+>
+> (https://swtch.com/~rsc/regexp/ is a collection of his writing on regular
+> expressions. It's well worth reading.)
+
+Thank you for the references to interesting readings!  Ah, so he is
+the developer of re2.  I think this is the first time for me to read
+articles written by the developer of re2.  I have looked inside the
+codes there.  The idea of my new implementation [1] is closer to the
+implementation "bounded-memory DFA" [2] linked from the regexp page
+[3] (though I allocate a sufficient memory block calculated by the
+length of the pattern string instead of using a fixed size of static
+storage).  These do not require the full ``compilation'' of the DFA so
+it requires a minimal preprocessing time, but instead, these are not
+as fast as compiled DFAs (when we focus on the proportional
+coefficients of the linear time complexity).  The new implementation
+is still work-in-progress, so I later write the reasoning for the
+choice of the implementation strategy when I submit the version ready
+for review.
+
+[1] https://gitlab.com/akinomyoga/bash/-/merge_requests/1; If some of
+  you want to try it, you can clone it by
+
+  $ git clone https://gitlab.com/akinomyoga/bash.git -b extglob
+
+  but be careful that this is now a moving target occasionally squashed
+  and force-pushed.
+[2] https://swtch.com/~rsc/regexp/dfa1.c.txt
+[3] https://swtch.com/~rsc/regexp/
+
+I attach some benchmarks of the current state [dfaglob.pdf], where
+"strmatch_ex" shown by solid lines is the new implementation.  Now
+everything is linear with respect to the input string length, but I
+would like to add some optimizations for simple patterns after
+settling bracket-expression matters.  Also, I think I'd later add the
+cases used in https://research.swtch.com/glob to the benchmarks.
+
+--
+Koichi
+
+===============================================================================
+
 2022年11月18日(金) 2:11 Chet Ramey <chet.ramey@case.edu>:
 > "If a pattern ends with an unescaped <backslash>, it is unspecified whether
 > the pattern does not match anything or the pattern is treated as invalid."
