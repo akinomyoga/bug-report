@@ -1,0 +1,33 @@
+> There is a free Alpha emulator here:
+> http://www.migrationspecialties.com/FreeAXP.html .  I haven't used
+> it extensively since I have real hardware but it seems to work
+> reasonably well.
+
+
+FreeAXP に Tru64 をインストールするの事
+
+
+FreeAXP はただのエミュレータで OS は別にインストールする必要がある。
+
+- FreeAXP
+- Tru64 5.1b https://winworldpc.com/product/tru64/51b からダウンロードした
+- 参考資料1 https://supratim-sanyal.blogspot.com/2018/03/tru64-unix-bringing-legendary-digital.html
+- 参考資料2 http://www.openvmshobbyist.com/forum/viewthread.php?forum_id=163&thread_id=3105
+
+インストールディスクをディスクに設定して起動する。ディスクとして何があるか確認する。
+
+```
+>>>sh dev
+```
+
+次にディスクから起動する
+
+```
+>>>boot dka0
+```
+
+然し firmware revision が 7.0 であるというエラーになって起動しない。
+と思って参考資料1を見たが、firmware revision が 7.0 であるというメッセージは何れにしても出る様だ。
+然しその次の行で Error: という表示が出る事だけが異なっている。
+つまり firmware revision は関係ないという事なのだろうか。
+
