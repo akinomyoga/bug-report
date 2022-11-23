@@ -4,6 +4,13 @@ mkdir -p out
 
 source ~/.mwg/src/ble.sh/src/benchmark.sh
 
+function fnmatch/measure {
+  local pattern=$1 target=$2
+  # fnmatch はどうやらクラッシュする様なのでサブシェルの中で実行する
+  nsec=$(nsec=-1; ble-measure -q 'fnmatch "$pattern" "$target"'; echo "$nsec")
+  [[ $nsec ]] || nsec=-2
+}
+
 function test1 {
   local len=$1 nest=$2
 
@@ -23,7 +30,11 @@ function test1 {
     for ((i=0;i<nest;i++)); do
       pattern='*('$pattern')'
     done
-    ble-measure -q "[[ \$target == $pattern ]]"
+    if [[ $shell == fnmatch ]]; then
+      fnmatch/measure "$pattern" "$target"
+    else
+      ble-measure -q "[[ \$target == $pattern ]]"
+    fi
   fi
   echo "$len" "$nsec" "$nest"
 }
@@ -36,7 +47,7 @@ function run-test1 {
   for nest in 1 2 3 4 6 8 10; do
     for len in {1..30} 50 {1,2,5}00 {1,2,5}000 {1,2,5}0000 {1,2,5}00000 {1,2,5}000000 {1,2,5}0000000; do
       test1 "$len" "$nest"
-      ((nsec>=5*1000**3)) && break
+      ((nsec<0||nsec>=5*1000**3)) && break
     done
     echo
   done > "$outfile"
@@ -45,7 +56,7 @@ function run-test1 {
 function test2 {
   local len=$1 type=$2
   local target=$(printf "%*s" "$len" '' | sed 's/ /x/g')
-  if [[ $shell == regex ]]; then
+  if [[ $shell == @(regex|fnmatch) ]]; then
     nsec=-1
   elif [[ $shell == zsh ]]; then
     case $type in
@@ -58,7 +69,8 @@ function test2 {
     (2) ble-measure -q 'ret=${target##+( )}' ;;
     esac
   fi
-  echo "$len" "$nsec" "$type"
+  ((nsec >= 0)) &&
+    echo "$len" "$nsec" "$type"
 }
 
 function run-test2 {
@@ -69,7 +81,7 @@ function run-test2 {
   for type in 1 2; do
     for len in $(printf '%s\n' {1,2,5}{,0,00,000,0000,00000,000000,0000000} | sort -n); do
       test2 "$len" "$type"
-      ((nsec>=5*1000**3)) && break
+      ((nsec<0||nsec>=5*1000**3)) && break
     done
     echo
   done > "$outfile"
@@ -80,7 +92,7 @@ function run-test2 {
 function test3 {
   local nline=$1 type=$2
   local target=$(yes | head -n "$nline") ret
-  if [[ $shell == regex ]]; then
+  if [[ $shell == @(regex|fnmatch) ]]; then
     nsec=-1
   elif [[ $shell == zsh ]]; then
     case $type in
@@ -93,7 +105,8 @@ function test3 {
     (2) ble-measure -q "ret=\${target//+([\$' \t\n'])/ }" ;;
     esac
   fi
-  echo "$nline" "$nsec" "$type"
+  ((nsec >= 0)) &&
+    echo "$nline" "$nsec" "$type"
 }
 
 function run-test3 {
@@ -104,7 +117,7 @@ function run-test3 {
   for type in 1 2; do
     for nline in $(printf '%s\n' {1,2,5}{,0,00,000,0000,00000,000000,0000000} | sort -n); do
       test3 "$nline" "$type"
-      ((nsec>=5*1000**3)) && break
+      ((nsec<0||nsec>=5*1000**3)) && break
     done
     echo
   done > "$outfile"
@@ -116,12 +129,15 @@ function test4 {
   local target=$(printf '%0*d' "$len" 0)
   if [[ $shell == regex ]]; then
     ble-measure -q '[[ $target =~ ^0+$ ]]'
+  elif [[ $shell == fnmatch ]]; then
+    fnmatch/measure "+(0)" "$target"
   elif [[ $shell == zsh ]]; then
     ble-measure -q '[[ $target == (0)## ]]'
   else
     ble-measure -q '[[ $target == +(0) ]]'
   fi
-  echo "$len" "$nsec"
+  ((nsec >= 0)) &&
+    echo "$len" "$nsec"
 }
 
 function run-test4 {
@@ -131,7 +147,7 @@ function run-test4 {
   local len nsec
   for len in $(printf '%s\n' {1,2,5}{,0,00,000,0000,00000,000000,0000000} | sort -n); do
     test4 "$len"
-    ((nsec>=5*1000**3)) && break
+    ((nsec<0||nsec>=5*1000**3)) && break
   done > "$outfile"
 }
 
@@ -139,14 +155,15 @@ function run-test4 {
 function test5 {
   local nline=$1
   local target=$(yes 3.14 | head -n "$nline") ret
-  if [[ $shell == regex ]]; then
+  if [[ $shell == @(regex|fnmatch) ]]; then
     nsec=-1
   elif [[ $shell == zsh ]]; then
     ble-measure -q 'ret=${target//([0-9])##.}'
   else
     ble-measure -q 'ret=${target//+([0-9]).}'
   fi
-  echo "$nline" "$nsec"
+  ((nsec >= 0)) &&
+    echo "$nline" "$nsec"
 }
 
 function run-test5 {
@@ -156,7 +173,7 @@ function run-test5 {
   local len nsec
   for len in $(printf '%s\n' {1,2,5}{,0,00,000,0000,00000,000000,0000000} | sort -n); do
     test5 "$len"
-    ((nsec>=5*1000**3)) && break
+    ((nsec<0||nsec>=5*1000**3)) && break
   done > "$outfile"
 }
 
@@ -175,13 +192,19 @@ function test6 {
     (1) ble-measure -q '[[ $target == (^x)##y ]]' ;;
     (2) ble-measure -q '[[ $target == (*)#1 ]]' ;;
     esac
+  elif [[ $shell == fnmatch ]]; then
+    case $type in
+    (1) fnmatch/measure "+(!(x))y" "$target" ;;
+    (2) fnmatch/measure "*(*)1"    "$target" ;;
+    esac
   else
     case $type in
     (1) ble-measure -q '[[ $target == +(!(x))y ]]' ;;
     (2) ble-measure -q '[[ $target == *(*)1 ]]' ;;
     esac
   fi
-  echo "$len" "$nsec" "$type"
+  ((nsec >= 0)) &&
+    echo "$len" "$nsec" "$type"
 }
 function run-test6 {
   local outfile=out/$shell.test6
@@ -191,7 +214,7 @@ function run-test6 {
   for type in 1 2; do
     for len in $(printf '%s\n' {1..10} {12..30..2} 50 {1,2,5}{00,000,0000,00000,000000,0000000} | sort -n); do
       test6 "$len" "$type"
-      ((nsec>=5*1000**3)) && break
+      ((nsec<0||nsec>=5*1000**3)) && break
     done
     echo
   done > "$outfile"
@@ -208,6 +231,12 @@ function test7 {
     (2) ble-measure -q '[[ $target =~ ^.*a.*b.*c.*$ ]]' ;;
     (3) ble-measure -q '[[ $target =~ ^0.*0.*0.*0.*0$ ]]' ;;
     esac
+  elif [[ $shell == fnmatch ]]; then
+    case $type in
+    (1) fnmatch/measure "hello"     "$target" ;;
+    (2) fnmatch/measure "*a*b*c*"   "$target" ;;
+    (3) fnmatch/measure "0*0*0*0*0" "$target" ;;
+    esac
   else
     case $type in
     (1) ble-measure -q '[[ $target == hello ]]' ;;
@@ -215,7 +244,8 @@ function test7 {
     (3) ble-measure -q '[[ $target == 0*0*0*0*0 ]]' ;;
     esac
   fi
-  echo "$len" "$nsec" "$type"
+  ((nsec >= 0)) &&
+    echo "$len" "$nsec" "$type"
 }
 function run-test7 {
   local outfile=out/$shell.test7
@@ -225,7 +255,7 @@ function run-test7 {
   for type in 1 2 3; do
     for len in $(printf '%s\n' {1..10} {12..30..2} 50 {1,2,5}{00,000,0000,00000,000000,0000000} | sort -n); do
       test7 "$len" "$type"
-      ((nsec>=5*1000**3)) && break
+      ((nsec<0||nsec>=5*1000**3)) && break
     done
     echo
   done > "$outfile"
@@ -234,7 +264,7 @@ function run-test7 {
 function test8 {
   local len=$1 type=$2
   local target=$(printf '%*s' "$len" '') ret
-  if [[ $shell == regex ]]; then
+  if [[ $shell == @(regex|fnmatch) ]]; then
     nsec=-1
   elif [[ $shell == zsh ]]; then
     case $type in
@@ -247,7 +277,8 @@ function test8 {
     (2) ble-measure -q 'ret=${target//" "?(x)}' ;;
     esac
   fi
-  echo "$len" "$nsec" "$type"
+  ((nsec >= 0)) &&
+    echo "$len" "$nsec" "$type"
 }
 function run-test8 {
   local outfile=out/$shell.test8
@@ -257,7 +288,7 @@ function run-test8 {
   for type in 1 2; do
     for len in $(printf '%s\n' {1,2,5}{,0,00,000,0000,00000,000000,0000000} | sort -n); do
       test8 "$len" "$type"
-      ((nsec>=5*1000**3)) && break
+      ((nsec<0||nsec>=5*1000**3)) && break
     done
     echo
   done > "$outfile"
@@ -278,6 +309,12 @@ function measure-shell {
   else
     shopt -s extglob
     shell=${1:-${BASH##*/}}
+
+    if [[ $shell == fnmatch ]]; then
+      [[ fnmatch.so -nt fnmatch_builtin.c ]] ||
+        gcc -O2 -fPIC -shared -o fnmatch.so fnmatch_builtin.c
+      enable -f ./fnmatch.so fnmatch
+    fi
   fi
 
   run-test1

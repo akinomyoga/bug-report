@@ -91,6 +91,10 @@
 - report35: 2022-09-02 `trap INT` in `complete -F` causes missing readline signal setups
 - report36: 2022-09-25 Fix `printf %d "'X"` affected by intermediate mbstate_t
 - report37: Re-implement extglob
+  - [PATCH] https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00045.html
+  - [PATCH] https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00070.html
+  - [PATCH] https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00081.html
+  - [PATCH] https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00083.html
 
 ## Replies
 
