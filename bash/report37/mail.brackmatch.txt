@@ -473,10 +473,10 @@ Koichi
 >     associative array elements; last set of changes to globbing
 >     bracket expressions; fix for timing subshell commands
 
-Thank you for the discussion and applying the changes.  Besides, I am
-sorry that I still have a discussion on the behavior of BRACKMATCH, so
-it was not the last set of changes.  After the above fix, I moved to
-check the behavior related to PATSCAN, where I found an inconsistent
+Thank you for the discussion and for applying the changes.  Besides, I
+am sorry that I still have a discussion on the behavior of BRACKMATCH,
+so it was not the last set of changes.  After the above fix, I moved
+to check the behavior related to PATSCAN, where I found inconsistent
 results related to the difference between BRACKMATCH and PATSCAN in
 parsing the bracket expressions.  I checked also other parts of the
 codebase and found additional inconsistencies.
@@ -487,7 +487,7 @@ Description
 
 First, let me introduce the symbols (A)..(D) to later reference the
 implementations of the bracket expression in the codebase.  There are
-four independent codes that implement rules of extracting the bracket
+four independent codes that implement rules for extracting the bracket
 expression in the current codebase:
 
 - (A) The main loop of BRACKMATCH: This handles sub-expressions of a
@@ -504,9 +504,9 @@ expression in the current codebase:
   expressions to count the number of characters that a fixed-length
   pattern can match.
 
-Actually, each of the four currently implements a distinct rule which
-does not match any of the rest three.  These implementations need to
-be adjusted to support an identical and consistent rule.
+Actually, each of the four implements a distinct rule, which does not
+match any of the other three.  These implementations need to be
+adjusted to support an identical and consistent rule.
 
 
 Repeat-By
@@ -610,8 +610,8 @@ The differences between (A)..(D) cause various strange behaviors.
 
   These special POSIX bracket expressions ([:cclass:], [=a=], and
   [.ch.]) are implemented separately in BRACKMATCH (A).  On the other
-  hand, the these special POSIX bracket expressions ([:cclass:],
-  [=a=], and [.ch.]) are handled together in the other parts (B)..(D).
+  hand, these special POSIX bracket expressions ([:cclass:], [=a=],
+  and [.ch.]) are handled together in the other parts (B)..(D).
 
   The variations in the behaviors of [:cclass:], [=a=], and [.ch.]  in
   (A) does not actually violate the standard because the behavior is
@@ -681,7 +681,7 @@ rule for [.].] in POSIX XCU 9.3.5.1).  In the patch, I upgraded the
 existing function PARSE_COLLSYM to PARSE_SUBBRACKET.  I initially
 tried to add an independent function PARSE_SUBBRACKET and modify
 PARSE_COLLSYM to use PARSE_SUBBRACKET internally, but the resulting
-PARSE_COLLSYM became trivial so decided to remove the function.
+PARSE_COLLSYM became trivial, so I decided to remove the function.
 Eventually, the patch became to have the current shape.
 
 The fix for PATSCAN (C) is included in the second patch
@@ -701,9 +701,9 @@ after applying the second patch.
 The adjustments of MATCHLEN (D) are not included here because I
 intended to remove (or re-implement) MATCHLEN in the new DFA engine,
 and the current code would be discarded when the new DFA engine would
-be accepted.  I would submit another patch in case that the new DFA
-engine would be rejected.  (To make it clear, PATSCAN and BRACKMATCH
-are still used in the new DFA engine, which is a reason I recently
+be accepted.  I would submit another patch in case the new DFA engine
+would be rejected.  (To make it clear, PATSCAN and BRACKMATCH are
+still used in the new DFA engine, which is the reason I recently
 submit changes to these functions).
 
 --
