@@ -1,0 +1,85 @@
+From fc763769c24e79033ebcf72b766f3ad4132375b8 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Wed, 9 Nov 2022 10:11:22 +0900
+Subject: [PATCH 3/3] fix(readline/display): work around segfault (tentative
+ fix)
+
+---
+ lib/readline/display.c | 61 +++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 60 insertions(+), 1 deletion(-)
+
+diff --git a/lib/readline/display.c b/lib/readline/display.c
+index d77cc683..56f600bf 100644
+--- a/lib/readline/display.c
++++ b/lib/readline/display.c
+@@ -2772,7 +2772,66 @@ _rl_move_cursor_relative (int new, const char *data, const char *dataf)
+   int in_invisline;
+   int mb_cur_max = MB_CUR_MAX;
+ 
+-  woff = WRAP_OFFSET (_rl_last_v_pos, wrap_offset);
++/*
++
++==1235525== Memcheck, a memory error detector
++==1235525== Copyright (C) 2002-2022, and GNU GPL'd, by Julian Seward et al.
++==1235525== Using Valgrind-3.19.0 and LibVEX; rerun with -h for copyright info
++==1235525== Command: ./bash tests/read7.sub
++==1235525== Parent PID: 1089700
++==1235525==
++==1235525== Invalid read of size 4
++==1235525==    at 0x4E569B: _rl_move_cursor_relative (display.c:2770)
++==1235525==    by 0x4EA39B: rl_redisplay (display.c:1494)
++==1235525==    by 0x4CFDC7: readline_internal_setup (in /home/murase/prog/ext/bash-dev2/bash)
++==1235525==    by 0x4D1449: readline (in /home/murase/prog/ext/bash-dev2/bash)
++==1235525==    by 0x4B0654: read_builtin (in /home/murase/prog/ext/bash-dev2/bash)
++==1235525==    by 0x439FDB: execute_builtin (execute_cmd.c:4993)
++==1235525==    by 0x43F900: execute_builtin_or_function (execute_cmd.c:5507)
++==1235525==    by 0x43F900: execute_simple_command (execute_cmd.c:4759)
++==1235525==    by 0x43F900: execute_command_internal (execute_cmd.c:872)
++==1235525==    by 0x43FED1: execute_command (execute_cmd.c:416)
++==1235525==    by 0x424A2B: reader_loop (eval.c:171)
++==1235525==    by 0x423457: main (shell.c:833)
++==1235525==  Address 0x0 is not stack'd, malloc'd or (recently) free'd
++==1235525==
++==1235525==
++==1235525== Process terminating with default action of signal 11 (SIGSEGV): dumping core
++==1235525==    at 0x48DDCAB: kill (syscall-template.S:120)
++==1235525==    by 0x483F89: kill_shell (sig.c:646)
++==1235525==    by 0x484127: termsig_handler.part.0 (sig.c:627)
++==1235525==    by 0x48430C: termsig_handler (sig.c:583)
++==1235525==    by 0x48430C: termsig_sighandler (sig.c:560)
++==1235525==    by 0x48DDA6F: ??? (in /usr/lib64/libc.so.6)
++==1235525==    by 0x4E569A: _rl_move_cursor_relative (display.c:2770)
++==1235525==    by 0x4EA39B: rl_redisplay (display.c:1494)
++==1235525==    by 0x4CFDC7: readline_internal_setup (in /home/murase/prog/ext/bash-dev2/bash)
++==1235525==    by 0x4D1449: readline (in /home/murase/prog/ext/bash-dev2/bash)
++==1235525==    by 0x4B0654: read_builtin (in /home/murase/prog/ext/bash-dev2/bash)
++==1235525==    by 0x439FDB: execute_builtin (execute_cmd.c:4993)
++==1235525==    by 0x43F900: execute_builtin_or_function (execute_cmd.c:5507)
++==1235525==    by 0x43F900: execute_simple_command (execute_cmd.c:4759)
++==1235525==    by 0x43F900: execute_command_internal (execute_cmd.c:872)
++==1235525==
++==1235525== HEAP SUMMARY:
++==1235525==     in use at exit: 324,969 bytes in 1,794 blocks
++==1235525==   total heap usage: 6,011 allocs, 4,217 frees, 444,169 bytes allocated
++==1235525==
++==1235525== LEAK SUMMARY:
++==1235525==    definitely lost: 0 bytes in 0 blocks
++==1235525==    indirectly lost: 0 bytes in 0 blocks
++==1235525==      possibly lost: 0 bytes in 0 blocks
++==1235525==    still reachable: 324,969 bytes in 1,794 blocks
++==1235525==         suppressed: 0 bytes in 0 blocks
++==1235525== Reachable blocks (those to which a pointer was found) are not shown.
++==1235525== To see them, rerun with: --leak-check=full --show-leak-kinds=all
++==1235525==
++==1235525== For lists of detected and suppressed errors, rerun with: -s
++==1235525== ERROR SUMMARY: 2 errors from 1 contexts (suppressed: 0 from 0)
++
++*/
++//DPF("lpic=%p plsc=%td rllvp=%zu wo=%zu", local_prompt_invis_chars, (size_t)prompt_last_screen_line, (size_t)_rl_last_v_pos, (size_t)wrap_offset);
++  woff = local_prompt_invis_chars ? WRAP_OFFSET (_rl_last_v_pos, wrap_offset) : 0;
+   cpos = _rl_last_c_pos;
+ 
+   if (cpos == 0 && cpos == new)
+-- 
+2.37.2
+
