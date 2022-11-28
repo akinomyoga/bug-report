@@ -1,0 +1,86 @@
+From ddc72aeb2cd6962e85bdc0819419db3d8cb6576d Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Mon, 28 Nov 2022 21:42:14 +0900
+Subject: [PATCH 1/2] fix(lib/glob/glob): update uses of glob_patscan
+
+---
+ lib/glob/glob.c  | 12 ++++++------
+ lib/glob/gmisc.c |  4 ++--
+ 2 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/lib/glob/glob.c b/lib/glob/glob.c
+index b66af85c..686d0f6b 100644
+--- a/lib/glob/glob.c
++++ b/lib/glob/glob.c
+@@ -127,8 +127,8 @@ static int glob_testdir PARAMS((char *, int));
+ static char **glob_dir_to_array PARAMS((char *, char **, int));
+ 
+ /* Make sure these names continue to agree with what's in smatch.c */
+-extern char *glob_patscan PARAMS((char *, char *, int));
+-extern wchar_t *glob_patscan_wc PARAMS((wchar_t *, wchar_t *, int));
++extern char *glob_patscan PARAMS((char *, char *, int, int));
++extern wchar_t *glob_patscan_wc PARAMS((wchar_t *, wchar_t *, wint_t, int));
+ 
+ /* And this from gmisc.c/gm_loop.c */
+ extern int wextglob_pattern_p PARAMS((wchar_t *));
+@@ -207,7 +207,7 @@ extglob_skipname (pat, dname, flags)
+   wild = *pat == '*' || *pat == '?';
+   pp = pat + 2;
+   se = pp + strlen (pp);		/* end of pattern string */
+-  pe = glob_patscan (pp, se, 0);	/* end of extglob pattern */
++  pe = glob_patscan (pp, se, 0, 0);	/* end of extglob pattern */
+ 
+   /* if pe == 0, this is an invalid extglob pattern */
+   if (pe == 0)
+@@ -234,7 +234,7 @@ extglob_skipname (pat, dname, flags)
+   nullpat = pe >= (pat + 2) && pe[-2] == '(' && pe[-1] == ')';
+ 
+   /* check every subpattern */
+-  while (t = glob_patscan (pp, pe, '|'))
++  while (t = glob_patscan (pp, pe, '|', 0))
+     {
+       /* If T == PE and *T == 0 (&& PE[-1] == RPAREN), we have hit the end
+ 	 of a pattern with no trailing characters. */
+@@ -358,7 +358,7 @@ wextglob_skipname (pat, dname, flags)
+   wild = *pat == L'*' || *pat == L'?';
+   pp = pat + 2;
+   se = pp + wcslen (pp);
+-  pe = glob_patscan_wc (pp, se, 0);
++  pe = glob_patscan_wc (pp, se, 0, 0);
+ 
+   /* if pe == 0, this is an invalid extglob pattern */
+   if (pe == 0)
+@@ -382,7 +382,7 @@ wextglob_skipname (pat, dname, flags)
+   nullpat = pe >= (pat + 2) && pe[-2] == L'(' && pe[-1] == L')';
+ 
+   /* check every subpattern */
+-  while (t = glob_patscan_wc (pp, pe, '|'))
++  while (t = glob_patscan_wc (pp, pe, '|', 0))
+     {
+       n = t[-1];	/* ( */
+       if (wextglob_pattern_p (pp) && n == L')')		/* nested extglob? */
+diff --git a/lib/glob/gmisc.c b/lib/glob/gmisc.c
+index f3d74cea..24fdf746 100644
+--- a/lib/glob/gmisc.c
++++ b/lib/glob/gmisc.c
+@@ -38,7 +38,7 @@
+ #include "glob.h"
+ 
+ /* Make sure these names continue to agree with what's in smatch.c */
+-extern char *glob_patscan PARAMS((char *, char *, int));
++extern char *glob_patscan PARAMS((char *, char *, int, int));
+ 
+ /* Compile `gm_loop.c' for single-byte characters. */
+ #define CHAR	char
+@@ -92,7 +92,7 @@ glob_dirscan (pat, dirsep)
+ 	{
+ 	  if (se == 0)
+ 	    se = p + strlen (p) - 1;
+-	  pe = glob_patscan (p + 2, se, 0);
++	  pe = glob_patscan (p + 2, se, 0, 0);
+ 	  if (pe == 0)
+ 	    continue;
+ 	  else if (*pe == 0)
+-- 
+2.37.2
+
