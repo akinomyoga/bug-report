@@ -1,0 +1,305 @@
+From ece2c094335ded56143c06d87c8e42b9c97a9fba Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 25 Nov 2022 04:31:36 +0900
+Subject: [PATCH 1/4] fix(BRACKMATCH): normalize behavior on failure of special
+ POSIX bracket expressions
+
+---
+ lib/glob/sm_loop.c | 165 +++++++++++++++++----------------------------
+ lib/glob/smatch.c  |   4 +-
+ 2 files changed, 63 insertions(+), 106 deletions(-)
+
+diff --git a/lib/glob/sm_loop.c b/lib/glob/sm_loop.c
+index 5d62e60b..d1024495 100644
+--- a/lib/glob/sm_loop.c
++++ b/lib/glob/sm_loop.c
+@@ -27,7 +27,7 @@ struct STRUCT
+ int FCT PARAMS((CHAR *, CHAR *, int));
+ 
+ static int GMATCH PARAMS((CHAR *, CHAR *, CHAR *, CHAR *, struct STRUCT *, int));
+-static CHAR *PARSE_COLLSYM PARAMS((CHAR *, INT *));
++static CHAR *PARSE_SUBBRACKET PARAMS((CHAR *, int));
+ static CHAR *BRACKMATCH PARAMS((CHAR *, U_CHAR, int));
+ static int EXTMATCH PARAMS((INT, CHAR *, CHAR *, CHAR *, CHAR *, int));
+ 
+@@ -380,36 +380,31 @@ fprintf(stderr, "gmatch: pattern = %s; pe = %s\n", pattern, pe);
+   return (FNM_NOMATCH);
+ }
+ 
+-/* Parse a bracket expression collating symbol ([.sym.]) starting at P, find
+-   the value of the symbol, and move P past the collating symbol expression.
+-   The value is returned in *VP, if VP is not null. */
++#define SLASH_PATHNAME(c)	(c == L('/') && (flags & FNM_PATHNAME))
++
++/* Parse special POSIX bracket expressions ([.sym.], [=ch=], and [:cclass:])
++   starting at P and return the position of the ending `.]', `=]', or `:]'.
++   The argument P specifies the position after the opening bracket `['.  */
+ static CHAR *
+-PARSE_COLLSYM (p, vp)
++PARSE_SUBBRACKET (p, flags)
+      CHAR *p;
+-     INT *vp;
++     int flags;
+ {
+-  register int pc;
+-  INT val;
+-
+-  p++;				/* move past the `.' */
+-	  
+-  for (pc = 0; p[pc]; pc++)
+-    if (p[pc] == L('.') && p[pc+1] == L(']'))
+-      break;
+-   if (p[pc] == 0)
+-    {
+-      if (vp)
+-	*vp = INVALID;
+-      return (p + pc);
+-    }
+-   val = COLLSYM (p, pc);
+-   if (vp)
+-     *vp = val;
+-   return (p + pc + 2);
++  CHAR type = *p;	/* `.', `=', or `:' (The second character after the
++			   opening `[') */
++
++  /* POSIX XCU 9.3.5.1 says `The <right-square-bracket> ( ']' ) shall
++     [...].  Otherwise, it shall terminate the bracket expression,
++     unless it appears in a collating symbol (such as "[.].]" ) or is
++     the ending <right-square-bracket> for a collating symbol,
++     equivalence class, or character class.', so we check `]' when
++     TYPE is not `.'. */
++  while (*++p != L('\0') && SLASH_PATHNAME(*p) == 0 && !(type != L('.') && *p == L(']')))
++    if (*p == type && p[1] == L(']'))
++      return p;
++  return NULL;
+ }
+ 
+-#define SLASH_PATHNAME(c)	(c == L('/') && (flags & FNM_PATHNAME))
+-
+ /* Use prototype definition here because of type promotion. */
+ static CHAR *
+ #if defined (PROTOTYPES)
+@@ -423,10 +418,10 @@ BRACKMATCH (p, test, flags)
+ {
+   register CHAR cstart, cend, c;
+   register int not;    /* Nonzero if the sense of the character class is inverted.  */
+-  int brcnt, forcecoll, isrange;
++  int forcecoll, isrange;
+   INT pc;
+   CHAR *savep;
+-  CHAR *brchrp;
++  CHAR *close;
+   U_CHAR orig_test;
+ 
+   orig_test = test;
+@@ -451,18 +446,13 @@ BRACKMATCH (p, test, flags)
+ 
+       /* POSIX.2 equivalence class:  [=c=].  See POSIX.2 2.8.3.2.  Find
+ 	 the end of the equivalence class, move the pattern pointer past
+-	 it, and check for equivalence.  XXX - this handles only
+-	 single-character equivalence classes, which is wrong, or at
+-	 least incomplete. */
+-      if (c == L('[') && *p == L('=') && p[2] == L('=') && p[3] == L(']'))
++	 it, and check for equivalence. */
++      if (c == L('[') && *p == L('=') && (close = PARSE_SUBBRACKET (p, flags)) != NULL)
+ 	{
+-	  pc = FOLD (p[1]);
+-	  p += 4;
+-
+-	  /* Finding a slash in a bracket expression means you have to
+-	     match the bracket as an ordinary character (see below). */
+-	  if (pc == L('/') && (flags & FNM_PATHNAME))
+-	    return ((test == L('[')) ? savep : (CHAR *)0); /*]*/
++	  p++;
++	  pc = COLLSYM (p, close - p);
++	  pc = FOLD (pc);
++	  p = close + 2;
+ 
+ 	  if (COLLEQUIV (test, pc))
+ 	    {
+@@ -486,30 +476,21 @@ BRACKMATCH (p, test, flags)
+ 	}
+ 
+       /* POSIX.2 character class expression.  See POSIX.2 2.8.3.2. */
+-      if (c == L('[') && *p == L(':'))
++      if (c == L('[') && *p == L(':') && (close = PARSE_SUBBRACKET (p, flags)) != NULL)
+ 	{
+-	  CHAR *close, *ccname;
++	  CHAR *ccname;
+ 
+ 	  pc = 0;	/* make sure invalid char classes don't match. */
+-	  /* Find end of character class name */
+-	  for (close = p + 1; *close != '\0' && SLASH_PATHNAME(*close) == 0; close++)
+-	    if (*close == L(':') && *(close+1) == L(']'))
+-	      break;
+ 
+-	  if (*close != L('\0') && SLASH_PATHNAME(*close) == 0)
++	  ccname = (CHAR *)malloc ((close - p) * sizeof (CHAR));
++	  if (ccname)
+ 	    {
+-	      ccname = (CHAR *)malloc ((close - p) * sizeof (CHAR));
+-	      if (ccname == 0)
+-		pc = 0;
+-	      else
+-		{
+-		  bcopy (p + 1, ccname, (close - p - 1) * sizeof (CHAR));
+-		  *(ccname + (close - p - 1)) = L('\0');
+-		  /* As a result of a POSIX discussion, char class names are
+-		     allowed to be quoted (?) */
+-		  DEQUOTE_PATHNAME (ccname);
+-		  pc = IS_CCLASS (orig_test, (XCHAR *)ccname);
+-		}
++	      bcopy (p + 1, ccname, (close - p - 1) * sizeof (CHAR));
++	      *(ccname + (close - p - 1)) = L('\0');
++	      /* As a result of a POSIX discussion, char class names are
++		 allowed to be quoted (?) */
++	      DEQUOTE_PATHNAME (ccname);
++	      pc = IS_CCLASS (orig_test, (XCHAR *)ccname);
+ 	      if (pc == -1)
+ 		{
+ 		  /* CCNAME is not a valid character class in the current
+@@ -521,14 +502,12 @@ BRACKMATCH (p, test, flags)
+ 		     string. If we don't want to do that, take out the update
+ 		     of P. */
+ 		  pc = 0;
+-		  p = close + 2;
+ 		}
+-	      else
+-		p = close + 2;		/* move past the closing `]' */
+-
+-	      free (ccname);
+ 	    }
+-	    
++	  free (ccname);
++
++	  p = close + 2;
++
+ 	  if (pc)
+ 	    {
+ /*[*/	      /* Move past the closing `]', since the first thing we do at
+@@ -556,13 +535,11 @@ BRACKMATCH (p, test, flags)
+ 	 the symbol name, make sure it is terminated by `.]', translate
+ 	 the name to a character using the external table, and do the
+ 	 comparison. */
+-      if (c == L('[') && *p == L('.'))
++      if (c == L('[') && *p == L('.') && (close = PARSE_SUBBRACKET (p, flags)) != NULL)
+ 	{
+-	  p = PARSE_COLLSYM (p, &pc);
+-	  /* An invalid collating symbol cannot be the first point of a
+-	     range.  If it is, we set cstart to one greater than `test',
+-	     so any comparisons later will fail. */
+-	  cstart = (pc == INVALID) ? test + 1 : pc;
++	  p++;
++	  cstart = COLLSYM (p, close - p);
++	  p = close + 2;
+ 	  forcecoll = 1;
+ 	}
+ 
+@@ -616,13 +593,11 @@ BRACKMATCH (p, test, flags)
+ 	    return ((test == L('[')) ? savep : (CHAR *)0);
+ 	  else if (cend == L('/') && (flags & FNM_PATHNAME))
+ 	    return ((test == L('[')) ? savep : (CHAR *)0);
+-	  if (cend == L('[') && *p == L('.'))
++	  if (cend == L('[') && *p == L('.') && (close = PARSE_SUBBRACKET (p, flags)) != NULL)
+ 	    {
+-	      p = PARSE_COLLSYM (p, &pc);
+-	      /* An invalid collating symbol cannot be the second part of a
+-		 range expression.  If we get one, we set cend to one fewer
+-		 than the test character to make sure the range test fails. */
+-	      cend = (pc == INVALID) ? test - 1 : pc;
++	      p++;
++	      cend = COLLSYM (p, close - p);
++	      p = close + 2;
+ 	      forcecoll = 1;
+ 	    }
+ 	  cend = FOLD (cend);
+@@ -658,46 +633,28 @@ BRACKMATCH (p, test, flags)
+ matched:
+   /* Skip the rest of the [...] that already matched.  */
+   c = *--p;
+-  brcnt = 1;
+-  brchrp = 0;
+-  while (brcnt > 0)
++  while (1)
+     {
+-      int oc;
+-
+       /* A `[' without a matching `]' is just another character to match. */
+       if (c == L('\0'))
+ 	return ((test == L('[')) ? savep : (CHAR *)0);
+       else if (c == L('/') && (flags & FNM_PATHNAME))
+ 	return ((test == L('[')) ? savep : (CHAR *)0);
+ 
+-      oc = c;
+       c = *p++;
+       if (c == L('[') && (*p == L('=') || *p == L(':') || *p == L('.')))
+ 	{
+-	  brcnt++;
+-	  brchrp = p++;		/* skip over the char after the left bracket */
+-	  c = *p;
+-	  if (c == L('\0'))
+-	    return ((test == L('[')) ? savep : (CHAR *)0);
+-	  else if (c == L('/') && (flags & FNM_PATHNAME))
+-	    return ((test == L('[')) ? savep : (CHAR *)0);
+-	  /* If *brchrp == ':' we should check that the rest of the characters
+-	     form a valid character class name. We don't do that yet, but we
+-	     keep BRCHRP in case we want to. */
+-	}
+-      /* We only want to check brchrp if we set it above. */
+-      else if (c == L(']') && brcnt > 1 && brchrp != 0 && oc == *brchrp)
+-	{
+-	  brcnt--;
+-	  brchrp = 0;		/* just in case */
++	  if ((close = PARSE_SUBBRACKET (p, flags)) != NULL)
++	    p = close + 2;
+ 	}
+       /* Left bracket loses its special meaning inside a bracket expression.
+          It is only valid when followed by a `.', `=', or `:', which we check
+-         for above. Technically the right bracket can appear in a collating
+-         symbol, so we check for that here. Otherwise, it terminates the
+-         bracket expression. */
+-      else if (c == L(']') && (brchrp == 0 || *brchrp != L('.')) && brcnt >= 1)
+-	brcnt = 0;
++         for above.  The right brackets terminating collating symbols,
++         equivalence classes, or character classes are processed by
++         PARSE_SUBBRACKET.  The other right brackets terminate the bracket
++         expression. */
++      else if (c == L(']'))
++	break;
+       else if (!(flags & FNM_NOESCAPE) && c == L('\\'))
+ 	{
+ 	  if (*p == '\0')
+@@ -1001,7 +958,7 @@ fprintf(stderr, "extmatch: flags = %d\n", flags);
+ #undef FCT
+ #undef GMATCH
+ #undef COLLSYM
+-#undef PARSE_COLLSYM
++#undef PARSE_SUBBRACKET
+ #undef PATSCAN
+ #undef STRCOMPARE
+ #undef EXTMATCH
+diff --git a/lib/glob/smatch.c b/lib/glob/smatch.c
+index a40b9e5e..5cae874d 100644
+--- a/lib/glob/smatch.c
++++ b/lib/glob/smatch.c
+@@ -322,7 +322,7 @@ is_cclass (c, name)
+ #define FCT			internal_strmatch
+ #define GMATCH			gmatch
+ #define COLLSYM			collsym
+-#define PARSE_COLLSYM		parse_collsym
++#define PARSE_SUBBRACKET		parse_subbracket
+ #define BRACKMATCH		brackmatch
+ #define PATSCAN			glob_patscan
+ #define STRCOMPARE		strcompare
+@@ -578,7 +578,7 @@ posix_cclass_only (pattern)
+ #define FCT			internal_wstrmatch
+ #define GMATCH			gmatch_wc
+ #define COLLSYM			collwcsym
+-#define PARSE_COLLSYM		parse_collwcsym
++#define PARSE_SUBBRACKET		parse_wcsubbracket
+ #define BRACKMATCH		brackmatch_wc
+ #define PATSCAN			glob_patscan_wc
+ #define STRCOMPARE		wscompare
+-- 
+2.37.2
+

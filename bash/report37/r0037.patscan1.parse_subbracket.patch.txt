@@ -1,0 +1,124 @@
+From d79ad47938a3dc8a39822aed90fc42506b4827ab Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Fri, 25 Nov 2022 17:14:06 +0900
+Subject: [PATCH 2/4] fix(PATSCAN): match the behavior with BRACKMATCH for
+ bracket expressions
+
+---
+ lib/glob/sm_loop.c | 31 ++++++++++++++++---------------
+ 1 file changed, 16 insertions(+), 15 deletions(-)
+
+diff --git a/lib/glob/sm_loop.c b/lib/glob/sm_loop.c
+index d1024495..113aac83 100644
+--- a/lib/glob/sm_loop.c
++++ b/lib/glob/sm_loop.c
+@@ -33,7 +33,7 @@ static int EXTMATCH PARAMS((INT, CHAR *, CHAR *, CHAR *, CHAR *, int));
+ 
+ extern void DEQUOTE_PATHNAME PARAMS((CHAR *));
+ 
+-/*static*/ CHAR *PATSCAN PARAMS((CHAR *, CHAR *, INT));
++/*static*/ CHAR *PATSCAN PARAMS((CHAR *, CHAR *, INT, int));
+ 
+ int
+ FCT (pattern, string, flags)
+@@ -192,7 +192,7 @@ fprintf(stderr, "gmatch: pattern = %s; pe = %s\n", pattern, pe);
+ 		     that's OK, since we can match 0 or 1 occurrences.
+ 		     We need to skip the glob pattern and see if we
+ 		     match the rest of the string. */
+-		  newn = PATSCAN (p + 1, pe, 0);
++		  newn = PATSCAN (p + 1, pe, 0, flags);
+ 		  /* If NEWN is 0, we have an ill-formed pattern. */
+ 		  p = newn ? newn : pe;
+ 		}
+@@ -225,7 +225,7 @@ fprintf(stderr, "gmatch: pattern = %s; pe = %s\n", pattern, pe);
+ 		     that's OK, since we can match 0 or more occurrences.
+ 		     We need to skip the glob pattern and see if we
+ 		     match the rest of the string. */
+-		  newn = PATSCAN (p + 1, pe, 0);
++		  newn = PATSCAN (p + 1, pe, 0, flags);
+ 		  /* If NEWN is 0, we have an ill-formed pattern. */
+ 		  p = newn ? newn : pe;
+ 		}
+@@ -691,16 +691,15 @@ matched:
+    first character after the matching DELIM or NULL if the pattern is
+    empty or invalid. */
+ /*static*/ CHAR *
+-PATSCAN (string, end, delim)
++PATSCAN (string, end, delim, flags)
+      CHAR *string, *end;
+      INT delim;
++     int flags;
+ {
+   int pnest, bnest, skip;
+-  INT cchar;
+-  CHAR *s, c, *bfirst;
++  CHAR *s, c, *bfirst, *t;
+ 
+   pnest = bnest = skip = 0;
+-  cchar = 0;
+   bfirst = NULL;
+ 
+   if (string == end)
+@@ -736,7 +735,11 @@ PATSCAN (string, end, delim)
+ 	      bnest++;
+ 	    }
+ 	  else if (s[1] == L(':') || s[1] == L('.') || s[1] == L('='))
+-	    cchar = s[1];
++	    {
++	      t = PARSE_SUBBRACKET (s + 1, flags);
++	      if (t)
++		s = t + 2 - 1;	/* -1 to cancel s++ in `for (;; s++)' */
++	    }
+ 	  break;
+ 
+ 	/* `]' is not special if it's the first char (after a leading `!'
+@@ -745,9 +748,7 @@ PATSCAN (string, end, delim)
+ 	case L(']'):
+ 	  if (bnest)
+ 	    {
+-	      if (cchar && s[-1] == cchar)
+-		cchar = 0;
+-	      else if (s != bfirst)
++	      if (s != bfirst)
+ 		{
+ 		  bnest--;
+ 		  bfirst = 0;
+@@ -836,7 +837,7 @@ fprintf(stderr, "extmatch: p = %s; pe = %s\n", p, pe);
+ fprintf(stderr, "extmatch: flags = %d\n", flags);
+ #endif
+ 
+-  prest = PATSCAN (p + (*p == L('(')), pe, 0); /* ) */
++  prest = PATSCAN (p + (*p == L('(')), pe, 0, flags); /* ) */
+   if (prest == 0)
+     /* If PREST is 0, we failed to scan a valid pattern.  In this
+        case, we just want to compare the two as strings. */
+@@ -859,7 +860,7 @@ fprintf(stderr, "extmatch: flags = %d\n", flags);
+ 	 string. */
+       for (psub = p + 1; ; psub = pnext)
+ 	{
+-	  pnext = PATSCAN (psub, pe, L('|'));
++	  pnext = PATSCAN (psub, pe, L('|'), flags);
+ 	  for (srest = s; srest <= se; srest++)
+ 	    {
+ 	      /* Match this substring (S -> SREST) against this
+@@ -896,7 +897,7 @@ fprintf(stderr, "extmatch: flags = %d\n", flags);
+ 	 rest of the string. */
+       for (psub = p + 1; ; psub = pnext)
+ 	{
+-	  pnext = PATSCAN (psub, pe, L('|'));
++	  pnext = PATSCAN (psub, pe, L('|'), flags);
+ 	  srest = (prest == pe) ? se : s;
+ 	  for ( ; srest <= se; srest++)
+ 	    {
+@@ -917,7 +918,7 @@ fprintf(stderr, "extmatch: flags = %d\n", flags);
+ 	  m1 = 0;
+ 	  for (psub = p + 1; ; psub = pnext)
+ 	    {
+-	      pnext = PATSCAN (psub, pe, L('|'));
++	      pnext = PATSCAN (psub, pe, L('|'), flags);
+ 	      /* If one of the patterns matches, just bail immediately. */
+ 	      if (m1 = (GMATCH (s, srest, psub, pnext - 1, NULL, flags) == 0))
+ 		break;
+-- 
+2.37.2
+

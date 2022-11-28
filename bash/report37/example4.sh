@@ -59,37 +59,84 @@ gcc -O2 -shared -xc -o ./strmatch.so - <<-EOF
 	struct builtin strmatch_struct = { "strmatch", strmatch_builtin, BUILTIN_ENABLED, strmatch_doc, "strmatch string pattern", 0, };
 EOF
 
-enable -f ./strmatch.so strmatch
-
 check_count=1
-yes=$'\e[32myes\e[m'
-no=$'\e[31mno\e[m'
+yes=$(printf '\033[32myes\033[m')
+no=$(printf '\033[31mno\033[m')
 
-function check {
-  # bash impl
-  if strmatch "$2" "$1"; then
-    local strmatch=$yes
-  else
-    local strmatch=$no
-  fi
+if [[ ${BASH_VERSION-} ]]; then
+  enable -f ./strmatch.so strmatch
 
-  # fnmatch
-  local expect=${3-}
-  if [[ ! $expect ]]; then
-    if ./fnmatch "$2" "$1"; then
-      expect=$yes
+  function check {
+    # bash impl
+    if strmatch "$2" "$1"; then
+      local strmatch=$yes
     else
-      expect=$no
+      local strmatch=$no
     fi
-  fi
-  printf '#%d: pat=%-16s str=%-16s %s/%s\n' "$((check_count++))" "$1" "$2" "$strmatch" "$expect"
-}
 
-echo '---Tests for negation and dots---'
-check '!(x)'             'abcd'
-check '!(x)'             '.abc'         "$no"
-check '!(x)'             'a/.d'
-check '!(x)'             'a/cd'
-check 's/!(x)'           's/abc'
-check 's/!(x)'           's/.ab'        "$no"
-check 's/!(x)'           's/..'         "$no"
+    # fnmatch
+    local expect=${3-}
+    if [[ ! $expect ]]; then
+      if ./fnmatch "$2" "$1"; then
+        expect=$yes
+      else
+        expect=$no
+      fi
+    fi
+    printf '#%d: pat=%-20s str=%-16s %s/%s\n' "$((check_count++))" "$1" "$2" "$strmatch" "$expect"
+  }
+else
+  [[ ${ZSH_VERSION-} ]] && setopt kshglob
+
+  function check {
+    # bash impl
+    if eval "[[ '$2' == $1 ]]"; then
+      result=$yes
+    else
+      result=$no
+    fi
+    printf '#%d: pat=%-20s str=%-16s %s\n' "$((check_count++))" "$1" "$2" "$result"
+  }
+fi
+
+if [[ ${BASH_VERSION-} ]]; then
+  echo '--- PATSCAN vs BRACKMATCH ---'
+  check '@([[.].])A])' ']'        "$yes"
+  check '@([[.].])A])' '==]A])'   "$no"
+  check '@([[.].])A])' 'AA])'     "$no"
+  check '@([[=]=])A])' ']'        "$no"
+  check '@([[=]=])A])' '==]A])'   "$yes"
+  check '@([[=]=])A])' 'AA])'     "$no"
+
+  echo '--- BRACKMATCH: after match vs before match ---'
+  check '[[=]=]ab]'    'a'     "$no"
+  check '[[.[=.]ab]'   'a'     "$yes"
+  check '[[.[==].]ab]' 'a'     "$yes"
+  echo
+  check '[a[=]=]b]'    'a'     "$no"
+  check '[a[.[=.]b]'   'a'     "$yes"
+  check '[a[.[==].]b]' 'a'     "$yes"
+  echo
+  check '[a[=]=]b]'    'b'     "$no"
+  check '[a[=]=]b]'    'a=]b]' "$yes"
+  check '[a[.[=.]b]'   'b'     "$yes"
+  check '[a[.[=.]b]'   'ab]'   "$no"
+  check '[a[.[==].]b]' 'b'     "$yes"
+  check '[a[.[==].]b]' 'ab]'   "$no"
+fi
+
+echo '--- incomplete POSIX brackets ---'
+check 'x[a[:y]' 'x['   '???'
+check 'x[a[:y]' 'x:'   '???'
+check 'x[a[:y]' 'xy'   '???'
+check 'x[a[:y]' 'x[ay' '???'
+echo                   
+check 'x[a[.y]' 'x['   '???'
+check 'x[a[.y]' 'x.'   '???'
+check 'x[a[.y]' 'xy'   '???'
+check 'x[a[.y]' 'x[ay' '???'
+echo                   
+check 'x[a[=y]' 'x['   '???'
+check 'x[a[=y]' 'x='   '???'
+check 'x[a[=y]' 'xy'   '???'
+check 'x[a[=y]' 'x[ay' '???'
