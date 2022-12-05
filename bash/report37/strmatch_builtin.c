@@ -122,6 +122,12 @@ static int strmatch_builtin(struct word_list* list) {
       return EX_USAGE;
     }
 
+  if (list && list->word && list->word->word)
+    {
+      builtin_usage ();
+      return EX_USAGE;
+    }
+
   return strmatch (pat, str, flags | mode);
 }
 static const char* strmatch_doc[] = { "This is a builtin to test the behavior of strmatch", 0 };

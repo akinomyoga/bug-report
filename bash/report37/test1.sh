@@ -394,4 +394,17 @@ ble/test/start-section 'strmatch (gmatch)' 183
   ble/test "! strmatch -m '*2*[0-2]*' '0123456789'"
 )
 
+ble/test/start-section 'negation' 8
+
+(
+  ble/test "  strmatch    '!(*.ext)' 'a.txt'"
+  ble/test "! strmatch    '!(*.ext)' 'a.ext'"
+  ble/test "  strmatch -P '!(*.ext)' 'a.txt'"
+  ble/test "  strmatch -P '!(*.ext)' 'a.ext'"
+  ble/test "  strmatch -S '!(*.ext)' 'a.txt'"
+  ble/test "  strmatch -S '!(*.ext)' 'a.ext'"
+  ble/test "  strmatch -m '!(*.ext)' 'a.txt'"
+  ble/test "  strmatch -m '!(*.ext)' 'a.ext'"
+)
+
 ble/test/end-section
