@@ -36,7 +36,8 @@
   - https://lists.gnu.org/archive/html/bug-bash/2020-04/msg00089.html
   - https://www.mail-archive.com/austin-group-l@opengroup.org/msg06011.html
   - https://lists.gnu.org/archive/html/bug-bash/2022-08/threads.html#00009
-  - ■結局この問題は pending である
+  - https://austingroupbugs.net/view.php?id=1602
+  - https://lists.gnu.org/archive/html/bug-bash/2023-02/msg00040.html
 - report16: Implement rehashing for associative arrays (Re: speeding up hash_search?)
   - https://lists.gnu.org/archive/html/bug-bash/2020-04/msg00121.html
 - report17: How to use PROMPT_COMMAND(S) without breaking other scripts
@@ -88,13 +89,17 @@
 - report34: 2022-04-13 add-compgen-zflag
   - Ref https://github.com/scop/bash-completion/issues/704#issuecomment-1091631732
   - Ref https://github.com/ohmybash/oh-my-bash/issues/341#issuecomment-1168073038
+  - ■PATCH は未提出
 - report35: 2022-09-02 `trap INT` in `complete -F` causes missing readline signal setups
+  - [PATCH] https://lists.gnu.org/archive/html/bug-bash/2022-09/msg00005.html
 - report36: 2022-09-25 Fix `printf %d "'X"` affected by intermediate mbstate_t
+  - [PATCH] https://lists.gnu.org/archive/html/bug-bash/2022-09/msg00055.html
 - report37: Re-implement extglob
   - [PATCH] https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00045.html
   - [PATCH] https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00070.html
   - [PATCH] https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00081.html
-  - [PATCH] https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00083.html
+  - [PATCH] https://lists.gnu.org/archive/html/bug-bash/2022-11/msg00083.html memleak
+- report38: rl 初期化前の LS_COLORS しか反映されない問題
 
 ## Replies
 
