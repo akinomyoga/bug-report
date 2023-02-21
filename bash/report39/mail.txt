@@ -1,0 +1,52 @@
+The behavioral change in the trap handlers and `bind -x' seems to have
+been introduced in the following commit.
+
+https://git.savannah.gnu.org/cgit/bash.git/commit/?h=devel&id=b6a567e7f13406952cbb1d1adb2f00b2260a871e
+
+This is the related report.
+
+https://lists.gnu.org/archive/html/bug-bash/2022-03/msg00018.html
+
+This is the related change.
+
+> diff --git a/CWRU/CWRU.chlog b/CWRU/CWRU.chlog
+> index ef39921f..f86f0cbe 100644
+> --- a/CWRU/CWRU.chlog
+> +++ b/CWRU/CWRU.chlog
+> @@ -3341,3 +3341,13 @@ parse.y
+>     `make visible' flag or through sh_strvis if we're not running the
+>     prompt string through word expansions. Fixes issue reported by
+>     Josh Harcome <joshharc@gmail.com> back in mid-January
+> +
+> +          3/11
+> +          ----
+> +jobs.c
+> + - wait_for: don't call get_tty_state() if readline is dispatching
+> +   (RL_STATE_DISPATCHING) with the terminal settings changed
+> +   (RL_STATE_TERMPREPPED), the same way we don't if we are running a
+> +   command for programmable completion. Fixes bug with SIGINT reverting
+> +   to the saved readline terminal settings reported by
+> +   Markus Napierkowski <markus.napierkowski@cyberus-technology.de>
+> diff --git a/jobs.c b/jobs.c
+> index 25289f4a..77d9dc35 100644
+> --- a/jobs.c
+> +++ b/jobs.c
+> @@ -3117,7 +3117,7 @@ if (job == NO_JOB)
+>     else
+>  #if defined (READLINE)
+>       /* We don't want to do this if we are running a process during
+> -        programmable completion. */
+> -     if (RL_ISSTATE (RL_STATE_COMPLETING) == 0)
+> +        programmable completion or a command bound to `bind -x'. */
+> +     if (RL_ISSTATE (RL_STATE_COMPLETING|RL_STATE_DISPATCHING|RL_STATE_TERMPREPPED) == 0)
+>  #endif
+>       get_tty_state ();
+
+`checkwinsize' had been processed in `get_tty_state ()' in bash-5.1
+and before.  As explained in the change log, we do not want to call
+`get_tty_state ()' in this context, but we can instead directly call
+`get_new_window_size ()' to only process `checkwinsize'.  I attach a
+possible patch [r39.checkwinsizeA.patch.txt] for this.
+
+--
+Koichi

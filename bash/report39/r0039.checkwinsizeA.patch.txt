@@ -1,0 +1,36 @@
+From be2cfd1b30b1a78b6a55a6b283b6f9c57250314e Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Tue, 21 Feb 2023 21:21:13 +0900
+Subject: [PATCH 1/2] process checkwinsize in trap handlers and "bind -x"
+
+---
+ jobs.c | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/jobs.c b/jobs.c
+index d6552a3e..0526c189 100644
+--- a/jobs.c
++++ b/jobs.c
+@@ -3058,8 +3058,17 @@ if (job == NO_JOB)
+ 	  else
+ #if defined (READLINE)
+ 	    /* We don't want to do this if we are running a process during
+-	       programmable completion or a command bound to `bind -x'. */
+-	    if (RL_ISSTATE (RL_STATE_COMPLETING|RL_STATE_DISPATCHING|RL_STATE_TERMPREPPED) == 0)
++	       programmable completion. */
++	    if (RL_ISSTATE (RL_STATE_COMPLETING) == 0)
++	      if (RL_ISSTATE (RL_STATE_DISPATCHING|RL_STATE_TERMPREPPED) != 0)
++		{
++		  /* If we are running a process during a trap handler or a
++		     command bound to `bind -x', we do not call `get_tty_state'
++		     but only update the window size. */
++		  if (check_window_size)
++		    get_new_window_size (0, (int *)0, (int *)0);
++		}
++	      else
+ #endif
+ 	    get_tty_state ();
+ 
+-- 
+2.39.0
+

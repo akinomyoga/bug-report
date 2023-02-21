@@ -1,0 +1,46 @@
+From e17a482c75df53dc4b6b7208404d75324e92cab0 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Tue, 21 Feb 2023 21:21:13 +0900
+Subject: [PATCH 1/2] process checkwinsize in trap handlers and "bind -x"
+ (option B)
+
+---
+ jobs.c | 22 ++++++++++++++++++++--
+ 1 file changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/jobs.c b/jobs.c
+index d6552a3e..e77ee065 100644
+--- a/jobs.c
++++ b/jobs.c
+@@ -3058,8 +3058,26 @@ if (job == NO_JOB)
+ 	  else
+ #if defined (READLINE)
+ 	    /* We don't want to do this if we are running a process during
+-	       programmable completion or a command bound to `bind -x'. */
+-	    if (RL_ISSTATE (RL_STATE_COMPLETING|RL_STATE_DISPATCHING|RL_STATE_TERMPREPPED) == 0)
++	       programmable completion. */
++	    if (RL_ISSTATE (RL_STATE_COMPLETING) == 0)
++	      if (RL_ISSTATE (RL_STATE_DISPATCHING|RL_STATE_TERMPREPPED) != 0)
++		{
++		  /* If we are running a process during a trap handler or a
++		     command bound to `bind -x', we do not call `get_tty_state'
++		     but only update the window size. */
++# if defined (TIOCGWINSZ)
++		  if (check_window_size)
++		    {
++		      struct winsize win;
++		      int tty;
++		      tty = input_tty ();
++		      if (tty >= 0 && (ioctl (tty, TIOCGWINSZ, &win) == 0) &&
++			win.ws_row > 0 && win.ws_col > 0)
++			sh_set_lines_and_columns (win.ws_row, win.ws_col);
++		    }
++# endif
++		}
++	      else
+ #endif
+ 	    get_tty_state ();
+ 
+-- 
+2.39.0
+
