@@ -1,0 +1,63 @@
+From a2ad202fa90d89ed5ceabdedf8b75a912c1dae2d Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Wed, 13 Apr 2022 17:23:08 +0900
+Subject: [PATCH 1/2] builtins/complete (compgen): update description of the
+ `-DEI' options
+
+---
+ builtins/complete.def        | 7 ++++---
+ doc/bash.1                   | 4 ++--
+ lib/readline/doc/rluser.texi | 4 ++--
+ 3 files changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/builtins/complete.def b/builtins/complete.def
+index 881c4711..3a00df7f 100644
+--- a/builtins/complete.def
++++ b/builtins/complete.def
+@@ -177,9 +177,10 @@ find_compopt (char *name)
+ /* Build the actions and compspec options from the options specified in LIST.
+    ACTP is a pointer to an unsigned long in which to place the bitmap of
+    actions.  OPTP is a pointer to an unsigned long in which to place the
+-   bitmap of compspec options (arguments to `-o').  PP, if non-null, gets 1
+-   if -p is supplied; RP, if non-null, gets 1 if -r is supplied.
+-   If either is null, the corresponding option generates an error.
++   bitmap of compspec options (arguments to `-o').  FLAGP, if non-null, gets
++   `PFLAG->Xflag = 1' if `-X' is supplied where `X' is one of `prDEI'.  If
++   FLAGP is null and at least one of the options `-prDEI' is specified, the
++   corresponding option generates an error.
+    This also sets variables corresponding to options that take arguments as
+    a side effect; the caller should ensure that those variables are set to
+    NULL before calling build_actions.  Return value:
+diff --git a/doc/bash.1 b/doc/bash.1
+index 0d42fcf5..292d68d8 100644
+--- a/doc/bash.1
++++ b/doc/bash.1
+@@ -8077,8 +8077,8 @@ builtin is the exit status of
+ Generate possible completion matches for \fIword\fP according to
+ the \fIoption\fPs, which may be any option accepted by the
+ .B complete
+-builtin with the exception of \fB\-p\fP and \fB\-r\fP, and write
+-the matches to the standard output.
++builtin with the exception of \fB\-p\fP, \fB\-r\fP, \fB-D\fP, \fB\-E\fP, and
++\fB\-I\fP, and write the matches to the standard output.
+ When using the \fB\-F\fP or \fB\-C\fP options, the various shell variables
+ set by the programmable completion facilities, while available, will not
+ have useful values.
+diff --git a/lib/readline/doc/rluser.texi b/lib/readline/doc/rluser.texi
+index bb1a24f5..9b140d70 100644
+--- a/lib/readline/doc/rluser.texi
++++ b/lib/readline/doc/rluser.texi
+@@ -2112,8 +2112,8 @@ be completed, and two to modify the completion as it is happening.
+ Generate possible completion matches for @var{word} according to
+ the @var{option}s, which may be any option accepted by the
+ @code{complete}
+-builtin with the exception of @option{-p} and @option{-r}, and write
+-the matches to the standard output.
++builtin with the exception of @option{-p}, @option{-r}, @option{-D},
++@option{-E}, and @option{-I}, and write the matches to the standard output.
+ When using the @option{-F} or @option{-C} options, the various shell variables
+ set by the programmable completion facilities, while available, will not
+ have useful values.
+-- 
+2.39.0
+
