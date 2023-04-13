@@ -1,4 +1,4 @@
-From c7d2d6bb3af98996f580e7533713ebc4bc3893bc Mon Sep 17 00:00:00 2001
+From ec85690633923b79012f728ea96a3e979e3d9679 Mon Sep 17 00:00:00 2001
 From: Koichi Murase <myoga.murase@gmail.com>
 Date: Wed, 13 Apr 2022 18:09:17 +0900
 Subject: [PATCH] builtins/complete (compgen): support the `-z' option
@@ -10,7 +10,7 @@ Subject: [PATCH] builtins/complete (compgen): support the `-z' option
  3 files changed, 51 insertions(+), 11 deletions(-)
 
 diff --git a/builtins/complete.def b/builtins/complete.def
-index 3a00df7f..dc9c0fb2 100644
+index 3a00df7f..f50ae43c 100644
 --- a/builtins/complete.def
 +++ b/builtins/complete.def
 @@ -76,7 +76,7 @@ $END
@@ -61,7 +61,7 @@ index 3a00df7f..dc9c0fb2 100644
  
  static int
 -build_actions (WORD_LIST *list, struct _optflags *flagp, unsigned long *actp, unsigned long *optp)
-+build_actions (WORD_LIST *list, struct compgen_flagp *flagp, struct compgen_optflags *compgen_flagp, unsigned long *actp, unsigned long *optp)
++build_actions (WORD_LIST *list, struct complete_optflags *flagp, struct compgen_optflags *compgen_flagp, unsigned long *actp, unsigned long *optp)
  {
    int opt, ind, opt_given;
    unsigned long acts, copts;
