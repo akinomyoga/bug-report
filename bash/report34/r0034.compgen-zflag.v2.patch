@@ -1,16 +1,16 @@
-From ec85690633923b79012f728ea96a3e979e3d9679 Mon Sep 17 00:00:00 2001
+From 2f481b01ab318e9b3b6633274b492e76ad6f3ece Mon Sep 17 00:00:00 2001
 From: Koichi Murase <myoga.murase@gmail.com>
 Date: Wed, 13 Apr 2022 18:09:17 +0900
 Subject: [PATCH] builtins/complete (compgen): support the `-z' option
 
 ---
- builtins/complete.def        | 53 ++++++++++++++++++++++++++++++------
+ builtins/complete.def        | 55 +++++++++++++++++++++++++++++-------
  doc/bash.1                   |  4 ++-
  lib/readline/doc/rluser.texi |  5 +++-
- 3 files changed, 51 insertions(+), 11 deletions(-)
+ 3 files changed, 52 insertions(+), 12 deletions(-)
 
 diff --git a/builtins/complete.def b/builtins/complete.def
-index 3a00df7f..f50ae43c 100644
+index 3a00df7f..4e6ba8ec 100644
 --- a/builtins/complete.def
 +++ b/builtins/complete.def
 @@ -76,7 +76,7 @@ $END
@@ -65,6 +65,15 @@ index 3a00df7f..f50ae43c 100644
  {
    int opt, ind, opt_given;
    unsigned long acts, copts;
+@@ -200,7 +206,7 @@ build_actions (WORD_LIST *list, struct _optflags *flagp, unsigned long *actp, un
+   opt_given = 0;
+ 
+   reset_internal_getopt ();
+-  while ((opt = internal_getopt (list, "abcdefgjko:prsuvA:G:W:P:S:X:F:C:DEI")) != -1)
++  while ((opt = internal_getopt (list, "abcdefgjko:prsuvA:G:W:P:S:X:F:C:DEIz")) != -1)
+     {
+       opt_given = 1;
+       switch (opt)
 @@ -276,6 +282,18 @@ build_actions (WORD_LIST *list, struct _optflags *flagp, unsigned long *actp, un
  	    }
  	  copts |= compopts[ind].optflag;
