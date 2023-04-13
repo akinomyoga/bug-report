@@ -7,7 +7,7 @@ This is the related report.
 
 https://lists.gnu.org/archive/html/bug-bash/2022-03/msg00018.html
 
-This is the related change.
+This is the related change at that time:
 
 > diff --git a/CWRU/CWRU.chlog b/CWRU/CWRU.chlog
 > index ef39921f..f86f0cbe 100644
@@ -46,7 +46,12 @@ This is the related change.
 and before.  As explained in the change log, we do not want to call
 `get_tty_state ()' in this context, but we can instead directly call
 `get_new_window_size ()' to only process `checkwinsize'.  I attach a
-possible patch [r39.checkwinsizeA.patch.txt] for this.
+possible patch [r0039.checkwinsizeA.patch.txt] for this.  Or another
+option might be to directly call `ioctl (fd, TIOCGWINSZ, &ws)' there
+[r0039.checkwinsizeB.patch.txt].
+
+Note: The patch just tries to fix the regression in 5.2 but does not
+change the behavior within subshells.
 
 --
 Koichi
