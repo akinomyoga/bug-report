@@ -1,0 +1,208 @@
+From c7d2d6bb3af98996f580e7533713ebc4bc3893bc Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Wed, 13 Apr 2022 18:09:17 +0900
+Subject: [PATCH] builtins/complete (compgen): support the `-z' option
+
+---
+ builtins/complete.def        | 53 ++++++++++++++++++++++++++++++------
+ doc/bash.1                   |  4 ++-
+ lib/readline/doc/rluser.texi |  5 +++-
+ 3 files changed, 51 insertions(+), 11 deletions(-)
+
+diff --git a/builtins/complete.def b/builtins/complete.def
+index 3a00df7f..dc9c0fb2 100644
+--- a/builtins/complete.def
++++ b/builtins/complete.def
+@@ -76,7 +76,7 @@ $END
+ 
+ /* Structure containing all the non-action (binary) options; filled in by
+    build_actions(). */
+-struct _optflags {
++struct complete_optflags {
+   int pflag;
+   int rflag;
+   int Dflag;
+@@ -84,10 +84,14 @@ struct _optflags {
+   int Iflag;
+ };
+ 
++struct compgen_optflags {
++  int zflag;
++};
++
+ static int find_compact (char *);
+ static int find_compopt (char *);
+ 
+-static int build_actions (WORD_LIST *, struct _optflags *, unsigned long *, unsigned long *);
++static int build_actions (WORD_LIST *, struct complete_optflags *, struct compgen_optflags *, unsigned long *, unsigned long *);
+ 
+ static int remove_cmd_completions (WORD_LIST *);
+ 
+@@ -101,6 +105,7 @@ static void print_compoptions (unsigned long, int);
+ static void print_compactions (unsigned long);
+ static void print_arg (const char *, const char *, int);
+ static void print_cmd_name (const char *);
++static int print_completion_nul (char *);
+ 
+ static char *Garg, *Warg, *Parg, *Sarg, *Xarg, *Farg, *Carg;
+ 
+@@ -180,7 +185,8 @@ find_compopt (char *name)
+    bitmap of compspec options (arguments to `-o').  FLAGP, if non-null, gets
+    `PFLAG->Xflag = 1' if `-X' is supplied where `X' is one of `prDEI'.  If
+    FLAGP is null and at least one of the options `-prDEI' is specified, the
+-   corresponding option generates an error.
++   corresponding option generates an error.  Likewise, COMPGEN_FLAGP, if
++   non-null, gets `COPMGEN_PFLAG->zflag = 1' if `-z' is supplied.
+    This also sets variables corresponding to options that take arguments as
+    a side effect; the caller should ensure that those variables are set to
+    NULL before calling build_actions.  Return value:
+@@ -190,7 +196,7 @@ find_compopt (char *name)
+ */
+ 
+ static int
+-build_actions (WORD_LIST *list, struct _optflags *flagp, unsigned long *actp, unsigned long *optp)
++build_actions (WORD_LIST *list, struct compgen_flagp *flagp, struct compgen_optflags *compgen_flagp, unsigned long *actp, unsigned long *optp)
+ {
+   int opt, ind, opt_given;
+   unsigned long acts, copts;
+@@ -276,6 +282,18 @@ build_actions (WORD_LIST *list, struct _optflags *flagp, unsigned long *actp, un
+ 	    }
+ 	  copts |= compopts[ind].optflag;
+ 	  break;
++	case 'z':
++	  if (compgen_flagp)
++	    {
++	      compgen_flagp->zflag = 1;
++	      break;
++	    }
++	  else
++	    {
++	      sh_invalidopt ("-z");
++	      builtin_usage ();
++	      return (EX_USAGE);
++	    }
+ 	case 'A':
+ 	  ind = find_compact (list_optarg);
+ 	  if (ind < 0)
+@@ -368,7 +386,7 @@ complete_builtin (WORD_LIST *list)
+   int opt_given, rval;
+   unsigned long acts, copts;
+   COMPSPEC *cs;
+-  struct _optflags oflags;
++  struct complete_optflags oflags;
+   WORD_LIST *l, *wl;
+ 
+   if (list == 0)
+@@ -386,7 +404,7 @@ complete_builtin (WORD_LIST *list)
+ 
+   /* Build the actions from the arguments.  Also sets the [A-Z]arg variables
+      as a side effect if they are supplied as options. */
+-  rval = build_actions (list, &oflags, &acts, &copts);
++  rval = build_actions (list, &oflags, (struct compgen_optflags *)NULL, &acts, &copts);
+   if (rval == EX_USAGE)
+     return (rval);
+   opt_given = rval != EXECUTION_FAILURE;
+@@ -631,13 +649,18 @@ print_cmd_completions (WORD_LIST *list)
+ $BUILTIN compgen
+ $DEPENDS_ON PROGRAMMABLE_COMPLETION
+ $FUNCTION compgen_builtin
+-$SHORT_DOC compgen [-abcdefgjksuv] [-o option] [-A action] [-G globpat] [-W wordlist] [-F function] [-C command] [-X filterpat] [-P prefix] [-S suffix] [word]
++$SHORT_DOC compgen [-abcdefgjksuvz] [-o option] [-A action] [-G globpat] [-W wordlist] [-F function] [-C command] [-X filterpat] [-P prefix] [-S suffix] [word]
+ Display possible completions depending on the options.
+ 
+ Intended to be used from within a shell function generating possible
+ completions.  If the optional WORD argument is supplied, matches against
+ WORD are generated.
+ 
++Options:
++  -z	print completions each suffixed by NUL (\0) instead of newline (\n) so
++		that the output can be loaded by `mapfile -d ""' or
++		`read -d ""'.
++
+ Exit Status:
+ Returns success unless an invalid option is supplied or an error occurs.
+ $END
+@@ -648,6 +671,7 @@ compgen_builtin (WORD_LIST *list)
+   int rval;
+   unsigned long acts, copts;
+   COMPSPEC *cs;
++  struct compgen_optflags oflags;
+   STRINGLIST *sl;
+   char *word, **matches;
+   char *old_line;
+@@ -662,7 +686,7 @@ compgen_builtin (WORD_LIST *list)
+ 
+   /* Build the actions from the arguments.  Also sets the [A-Z]arg variables
+      as a side effect if they are supplied as options. */
+-  rval = build_actions (list, (struct _optflags *)NULL, &acts, &copts);
++  rval = build_actions (list, (struct complete_optflags *)NULL, &oflags, &acts, &copts);
+   if (rval == EX_USAGE)
+     return (rval);
+   if (rval == EXECUTION_FAILURE)
+@@ -734,7 +758,10 @@ compgen_builtin (WORD_LIST *list)
+       if (sl->list && sl->list_len)
+ 	{
+ 	  rval = EXECUTION_SUCCESS;
+-	  strlist_print (sl, (char *)NULL);
++	  if (oflags.zflag)
++	    strlist_walk (sl, print_completion_nul);
++	  else
++	    strlist_print (sl, (char *)NULL);
+ 	}
+       strlist_dispose (sl);
+     }
+@@ -743,6 +770,14 @@ compgen_builtin (WORD_LIST *list)
+   return (rval);
+ }
+ 
++static int
++print_completion_nul (s)
++     char *s;
++{
++  printf ("%s%c", s, 0);
++  return 0;
++}
++
+ $BUILTIN compopt
+ $DEPENDS_ON PROGRAMMABLE_COMPLETION
+ $FUNCTION compopt_builtin
+diff --git a/doc/bash.1 b/doc/bash.1
+index 292d68d8..58795037 100644
+--- a/doc/bash.1
++++ b/doc/bash.1
+@@ -8075,10 +8075,12 @@ builtin is the exit status of
+ .TP
+ \fBcompgen\fP [\fIoption\fP] [\fIword\fP]
+ Generate possible completion matches for \fIword\fP according to
+-the \fIoption\fPs, which may be any option accepted by the
++the \fIoption\fPs, which may be \fB\-z\fP or any option accepted by the
+ .B complete
+ builtin with the exception of \fB\-p\fP, \fB\-r\fP, \fB-D\fP, \fB\-E\fP, and
+ \fB\-I\fP, and write the matches to the standard output.
++If the \fB\-z\fP option is specified, each completion is suffixed by a NUL
++character instead of a newline.
+ When using the \fB\-F\fP or \fB\-C\fP options, the various shell variables
+ set by the programmable completion facilities, while available, will not
+ have useful values.
+diff --git a/lib/readline/doc/rluser.texi b/lib/readline/doc/rluser.texi
+index 9b140d70..b77b5c36 100644
+--- a/lib/readline/doc/rluser.texi
++++ b/lib/readline/doc/rluser.texi
+@@ -2110,10 +2110,13 @@ be completed, and two to modify the completion as it is happening.
+ @end example
+ 
+ Generate possible completion matches for @var{word} according to
+-the @var{option}s, which may be any option accepted by the
++the @var{option}s, which may be the @option{-z} option or any option accepted
++by the
+ @code{complete}
+ builtin with the exception of @option{-p}, @option{-r}, @option{-D},
+ @option{-E}, and @option{-I}, and write the matches to the standard output.
++If the @option{-z} option is specified, each completion is suffixed by a NUL
++character instead of a newline.
+ When using the @option{-F} or @option{-C} options, the various shell variables
+ set by the programmable completion facilities, while available, will not
+ have useful values.
+-- 
+2.39.0
+
