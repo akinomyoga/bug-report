@@ -1,0 +1,198 @@
+
+===============================================================================
+2023-05-23 https://lists.gnu.org/archive/html/bug-bash/2023-05/msg00107.html
+
+I really appreciate that the feature ${ command; } is finally
+implemented.  I have a function that mimics the behavior of the nofork
+command substitution in my project.  I changed the function to switch
+to use the new nofork command substitutions in new Bash versions [1]
+and tested it in the devel branch of Bash.  The initial push of the
+nofork command substitution (commit e44e3d50) did not work at all
+because of the same error as reported by Oguz [2].  Now with the
+latest push (commit 782af562), it seems to work perfectly so far.
+
+[1] https://github.com/akinomyoga/ble.sh/blob/0906fd959e6c3f08a63ca1eab815ed6acb9244d3/src/util.sh#L2203-L2205
+[2] https://lists.gnu.org/archive/html/bug-bash/2023-05/msg00045.html
+
+----
+
+1. Question about the grammar
+
+>    If the first character following the open brace is a '(', COMMAND
+> is executed in a subshell, and COMMAND must be terminated by a ')'.
+
+I guess this is just a minor wording issue, but if I literally read
+the above description, the nofork command substitution starting with
+`${(' needs to have the form « ${(COMMAND);} ».  However, as far as I
+test it, « ${(COMMAND)} » is also allowed.  Also, «
+${(COMMAND);COMMAND;} », which does not end with `)', seems to be also
+allowed as far as I test it.  I guess `${(' is actually not really
+different from the other `${<space>', `${<tab>', and `${<newline>',
+but is just a version where the COMMAND starts with a subshell (...).
+
+The description reads like there are three [ i.e., ${, ${(, and ${| ]
+or five [ i.e., ${<space>, ${<tab>, ${<newline>, ${(, and ${| ]
+distinct types of nofork command substitutions.  However, in my
+understanding after testing it, there are actually only two conceptual
+variants of the command substitutions: one starts with '${|' and the
+others.
+
+Then, can I understand the grammar in the following way?  First, there
+are two types of nofork command substitutions:
+
+  ${ compound_list }
+  ${| compound_list }
+
+where `compound_list' is what is defined by EBNF in POSIX XCU 2.10.2.
+The lookup for the ending `}' is performed in a similar way as the
+brace grouping
+
+  { compound_list }
+
+or as specified in POSIX XCU 2.4 so that, e.g., a semicolon is needed
+for a simple command such as ${ echo; }.  Of course, the semicolon is
+not mandatory when it is not mandatory in the case of the brace
+grouping, e.g., ${ if true; then echo true; fi } is a well-formed
+nofork command substitution.  The current implementation seems to be
+consistent with this understanding.
+
+If we understand it in this way, it is natural to include <tab> as an
+introducer to the nofork command substitutions in addition to <space>
+and <newline> because it is the case in the brace grouping.  The
+opening paren `(' is also the same.  There seems to be a suggestion to
+exclude <tab>, but I think it is strange and inconsistent to exclude
+<tab>.  By the way, if we would be more strictly consistent with the
+grammar in the brace grouping, the delimiters `<' and `>' should also
+introduce nofork command substitutions, such as `${< file.txt;}'
+(which would be a synonym of `$(< file.txt)', I guess) or `${<
+file.txt sed s/a/b/g;}'.
+
+----
+
+2. About the ending brace
+
+There seems to be a suggestion to allow « } » in an arbitrary position
+to terminate the nofork command substitution, but I'm actually opposed
+to the suggestion even if it is different from the undocumented
+behaviors of ksh and mksh.
+
+In my thinking, the nofork command substitution can be mentally
+understood as we first have a brace grouping `{ compound_list }' and
+then turn it into a substitution by prefixing `$', though it might not
+be the strict explanation of the grammar.  This relation is just the
+same as the case for subshell `( compound_list )' and the command
+substitution `$( compound_list )'.  Then, I expect that any commands
+that are grammatically valid in the brace grouping are allowed in the
+nofork command substitution.
+
+If we allow `}' of « ${ echo } ... » to end the nofork command
+substitution, it means that the syntax inside the nofork command
+substitutions ${ ... } is slightly different from that in any other
+context, i.e., we invent a variant of the shell language only valid in
+the nofork command substitution.  For example, we cannot put a valid
+POSIX command « echo } » inside the nofork command substitutions
+without modifications such as « echo '}' ».
+
+I prefer the current implementation for the lookup of the ending `}',
+which I feel is much more consistent with the shell language.
+
+----
+
+3. ${(...)} vs $(...)
+
+There seems to be a doubt in introducing `${( compound_list )}' as a
+construct distinct from the normal command substitution `$(
+compound_list )', but I do need `${( compound_list )}' because the
+normal command substitution doesn't create a process group while the
+subshell (...) in the nofork command substitution creates it.  We
+might still be able to do `$( (subshell) )' with the normal command
+substitution, but it requires an extra fork.  I already use this
+behavior in my project [3] with the polyfill function [1].
+
+[3] https://github.com/akinomyoga/ble.sh/blob/0906fd959e6c3f08a63ca1eab815ed6acb9244d3/lib/util.bgproc.sh#L288-L294
+
+----
+
+4. Use cases of ${| ... }
+
+There also seem to be some doubts about ${| ... }, but I find it very
+useful.  I assume the usage of this construct is to combine it with a
+shell function that returns results through variables.
+
+There have been very limited ways for functions to return arbitrary
+data.  The exit status only accepts an integer 0..255.  The command
+substitution $(...) could be used to receive a single string, but
+there is a fork cost, and also the function cannot modify the original
+environment because it is executed in a subshell.  For these reasons,
+it has been a common practice to use variables to return data from
+shell functions when the performance is important.
+
+One of the frustrating parts in using these functions has been the
+choice of the variable name.  One strategy is to use a fixed variable
+name to return values.  This strategy is used in my project with the
+variable name `ret'.  It is also partially applied in the
+bash-completion project.  However, a problem is that the result cannot
+be used inline.  Also, if one wants to call a function multiple times,
+one needs to save the results to other variables and later use the
+saved variables:
+
+  func arg1
+  local save1=$REPLY
+  func arg2
+  local save2=$REPLY
+  func arg3
+  result=$save1,$save2,$REPLY
+
+The nofork command substitution of the form ${| ... } solves all the
+problems of the choice of the variable name and the saving.  The above
+example can be simply written as
+
+  result=${| func arg1; },${| func arg2; },${| func arg3; }
+
+without caring about the `local' declaration of temporary variable
+REPLY and saving the value to other local variables.
+
+Now we might not need to rely on such a return-via-variable strategy
+in designing the function interface since we have nofork command
+substitutions through stdout `${ compound_list }', but many shell
+functions are already designed in that way in existing projects.  It
+is easier to switch the variable name than completly rewrite the
+function to use stdout (e.g., it is non-trivial when the existing
+function already uses both stdout and variables).
+
+Having a substitution through a variable `${| compound_list }' along
+with the one through stdout `${ compound_list }' is very reasonable
+from my perspective as a user of Bash as a scripting language.  In
+addition, as Chet pointed out, return-via-variable can be done without
+calling any syscalls and is much more efficient than constructing a
+pipe, writing data, reading data, and tearing down the pipe.
+
+----
+
+To summarize, I prefer the current implementation to any existing
+suggestions.  I'm personally opposed to removing support for <tab>,
+prohibiting ${(...)}, allowing the ending `}' in arbitrary position,
+etc.  Though, I think the documentation needs elaboration as it seems
+to be confusing people in this list.
+
+If I would suggest anything, I'd think it could be more consistent
+with the brace grouping `{ ... }' to support also delimiters `${<' and
+`${>' for the introducer of the nofork command substitutions such as
+`${< file;}'.  But this is optional.  It is purely for consistency,
+and I'm not sure if there is a practical use case.  If Bash 5.2
+wouldn't have started to run $(< file) in the parent shell, we might
+differentiate the behavior of the assumed ${< file;} from $(< file) by
+allowing only the former to leave side effects.  For example, with
+pre-5.2 behavior of $(< file), it could have been
+
+  i=0
+  : $(< "$((i++)).txt")
+  echo $i   # i is not incremented
+  : ${< "$((i++)).txt";}
+  echo $i   # i is incremented
+
+but the actual implementation of bash-5.2 already leaves the side
+effects for $(< file).
+
+--
+Koichi
