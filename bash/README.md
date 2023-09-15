@@ -102,6 +102,8 @@
 - report38: rl 初期化前の LS_COLORS しか反映されない問題
 - report39: `checkwinsize` in trap handlers and `bind -x`
   - https://lists.gnu.org/archive/html/bug-bash/2023-02/msg00143.html
+- report40: job error caused by funsub + bind + loadable builtin
+  - https://github.com/akinomyoga/ble.sh/issues/361
 
 ## Replies
 

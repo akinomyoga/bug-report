@@ -1,0 +1,47 @@
+From: murase
+To: chet.ramey@case.edu
+Subject: 5.3: job error caused by funsub + bind + loadable builtin
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -march=native -O3
+uname output: Linux chatoyancy 6.4.10-100.fc37.x86_64 #1 SMP
+PREEMPT_DYNAMIC Fri Aug 11 15:18:39 UTC 2023 x86_64 x86_64 x86_64
+GNU/Linux
+Machine Type: x86_64-pc-linux-gnu
+
+Bash Version: 5.3
+Patch Level: 0
+Release Status: devel
+
+Description:
+
+  DEBUG warnings are produced for inconsistent numbers of dead jobs
+  when a function substitution is used with the loadable builtin
+  `sleep' inside `bind -x'.  I guess this is related to the
+  implementation of function substitutions newly introduced in 5.3,
+  but I have not tried to pin down the problem in the codebase.
+
+  Note: It does not seem to be reflected in the above auto-generated
+  "Configuration Information", but I specify `--with-bash-malloc=no'
+  as a configure option.
+
+Repeat-By:
+
+  $ PS1='\$ ' LANG=C bash-dev --norc
+  $ enable -f /path/to/lib/bash/sleep sleep
+  $ function f1 { for a in 1; do builtin sleep 0.1; done }
+  $ builtin bind -x '"\C-t": v=${ f1 & }'
+  $ <--- press <C-t> several times
+  bash-dev: DEBUG warning: mark_dead_jobs_as_notified: ndead (0) != js.j_ndead (1)
+  bash-dev: DEBUG warning: mark_dead_jobs_as_notified: ndead (0) != js.j_ndead (2)
+  bash-dev: DEBUG warning: mark_dead_jobs_as_notified: ndead (0) != js.j_ndead (3)
+  bash-dev: DEBUG warning: mark_dead_jobs_as_notified: ndead (0) != js.j_ndead (4)
+  bash-dev: DEBUG warning: mark_dead_jobs_as_notified: ndead (0) != js.j_ndead (5)
+
+  The value of `js.j_ndead' increases unlimitedly as typing C-t.
+
+--
+Koichi
