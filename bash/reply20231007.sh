@@ -4,6 +4,15 @@
 #
 # An example to serialize the current status of keybindings. This is based on
 # https://github.com/akinomyoga/ble.sh/blob/master/src/decode.sh#L2846-L2968
+#
+# Example:
+#
+#  saved=$(ble/decode/bind/serialize)
+#
+#  [... do something with temporary bindings ...]
+#
+#  ble/decode/bind/serialize/restore "$saved"
+#
 
 function ble/decode/bind/serialize {
   ble/decode/bind/serialize/.impl 3>/dev/null
