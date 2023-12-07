@@ -92,10 +92,10 @@ static int strmatch_builtin(struct word_list* list) {
 
         case GETOPT_HELP:
           builtin_help ();
-          return (EX_USAGE);
+          return EX_USAGE;
         default:
           builtin_usage ();
-          return (EX_USAGE);
+          return EX_USAGE;
         }
     }
   list = loptend;

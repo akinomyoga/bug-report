@@ -1,4 +1,16 @@
+2023-12-07
 
+* unquoted_glob_pattern_p という判定関数について (motivated by Grisha)
+
+  Grisha が最近これの実装について考えているそうだ。そもそもこの関数はどの文脈で
+  使われている関数だろうか。pathname expansion を実行するかどうかを判定する関数
+  だろうか。これによって \ が除去されるかされないかが左右されるのである。
+
+  例えば a='@(@()' という内容がある時に echo $a として勝手におかしな一致の仕方
+  をして変数の中身が変化してしまうのは避けたい。* や ? や [...] がある時に
+  pathname expansions が起こるのは未だ予期するべきだが、a='@(foo|bar)' 等に対し
+  て pathname expansion が起こる可能性まで考えると果たして pathname expansion
+  が実際に起こすべきかどうかは微妙になって来るのではないかという気がしてくる。
 
 2022-11-13
 
@@ -76,6 +88,95 @@
 -------------------------------------------------------------------------------
   Done
 -------------------------------------------------------------------------------
+
+2023-12-07
+
+* rebase extglob
+
+  何故か GitLab から通知が来た。Grisha が star をつけているから何かと思ったが現
+  在の結論としては関係ないという気がする。
+
+  取り敢えず rebase は行って置く事にする。
+
+  現在の状況はどういう状況か。
+
+  * 使わない関数の削除: これはメインのブランチには含まれていない。使わない関数
+    の削除は extglob-extra ブランチに保存してある。この extglob-extra について
+    ちゃんと変更を確認して (もし振る舞いに変更があれば) 振る舞いを一致させる必
+    要がある。スタイルの変更に関しても適用する必要がある。
+
+    - PARSE_COLLSYM が消滅して代わりに PARSE_SUBBRACKET という関数に変わってい
+      る。と思ったがこれは自分が提出した patch だった。
+
+    - PATSCAN も変化していると思ったがこれも自分が提出した patch だった。
+
+    - うーん。新しい実装の pat_subst で常に flags = FNMATCH_EXTFLAG |
+      FNMATCH_IGNCASE; を設定しているが良いのか? match_ignore_case を参照して振
+      る舞いを変更するべきではないのか?
+
+    - 以下の n > string check の挿入に関しては asan fix として導入されている。
+      これは以前から自分でも気になっていた物であった様な気がする。そして新しい
+      実装ではこういう変なミスはしていない筈なので気にしない事にする。
+
+      | --- sm_loop-old.txt 2023-12-07 10:36:05.169126211 +0900
+      | +++ sm_loop-new.txt 2023-12-07 10:34:29.232989892 +0900
+      | @@ -83,7 +76,7 @@
+      |        we are matching a pathname. */
+      |     if ((flags & FNM_DOTDOT) &&
+      |         ((n == string && SDOT_OR_DOTDOT(n)) ||
+      | -        ((flags & FNM_PATHNAME) && n[-1] == L('/') && PDOT_OR_DOTDOT(n))))
+      | +        ((flags & FNM_PATHNAME) && n > string && n[-1] == L('/') && PDOT_OR_DOTDOT(n))))
+      |       return FNM_NOMATCH;
+      |
+      |     break;
+      | @@ -129,7 +122,7 @@
+      |        we are matching a pathname. */
+      |     if ((flags & FNM_DOTDOT) &&
+      |         ((n == string && SDOT_OR_DOTDOT(n)) ||
+      | -        ((flags & FNM_PATHNAME) && n[-1] == L('/') && PDOT_OR_DOTDOT(n))))
+      | +        ((flags & FNM_PATHNAME) && n > string && n[-1] == L('/') && PDOT_OR_DOTDOT(n))))
+      |       return FNM_NOMATCH;
+      |
+      |     if (p == pe)
+      | @@ -316,7 +309,7 @@
+      |          we are matching a pathname. */
+      |       if ((flags & FNM_DOTDOT) &&
+      |     ((n == string && SDOT_OR_DOTDOT(n)) ||
+      | -   ((flags & FNM_PATHNAME) && n[-1] == L('/') && PDOT_OR_DOTDOT(n))))
+      | +   ((flags & FNM_PATHNAME) && n > string && n[-1] == L('/') && PDOT_OR_DOTDOT(n))))
+      |         return FNM_NOMATCH;
+      |
+      |       p = BRACKMATCH (p, sc, flags);
+
+    - 以下の変更に関しては Grisha からの提案の様である。そもそも EXTMATCH は
+      pathname に対しては呼び出されないので OK という結論になっている様だ。
+
+      | --- sm_loop-old.txt 2023-12-07 10:43:33.004762662 +0900
+      | +++ sm_loop-new.txt 2023-12-07 10:42:58.764713994 +0900
+      | @@ -154,9 +149,7 @@
+      |     if (m1 == 0 && (flags & FNM_PERIOD) && *s == '.')
+      |       return (FNM_NOMATCH);
+      |
+      | -   if (m1 == 0 && (flags & FNM_DOTDOT) &&
+      | -       (SDOT_OR_DOTDOT (s) ||
+      | -        ((flags & FNM_PATHNAME) && s[-1] == L('/') && PDOT_OR_DOTDOT(s))))
+      | +   if (m1 == 0 && (flags & FNM_DOTDOT) && (SDOT_OR_DOTDOT (s)))
+      |       return (FNM_NOMATCH);
+      |
+      |     /* if srest > s, we are not at start of string */
+
+      commit 4c2b574c0
+
+      | lib/glob/sm_loop.c
+      |   - EXTMATCH: don't bother with FNM_PATHNAME checks; this function isn't
+      |     called with a pathname.
+      |     Fixes underflow reported by Grisha Levit <grishalevit@gmail.com>
+
+  * rebase は行っておく。一応現在の状態については tag で残しておく事にする。
+    (extglob.20230317)
+
+  取り敢えず関連する diff は確認した。余り本質的な修正はなかったと見て良い。振
+  る舞いの変更もなく単にメモリーアクセス違反の修正に留まっていた。
 
 2022-11-24
 
@@ -435,4 +536,3 @@
 
   2022-09-07 改めて見てみるとどうやら extglob の時には再帰的に通常の glob match
   (GMATCH @ lib/glob/sm_loop.c) を呼び出して処理している様だ。
-
