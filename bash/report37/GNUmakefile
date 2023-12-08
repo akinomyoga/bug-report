@@ -10,6 +10,11 @@ all:
 all: fnmatch.so
 fnmatch.so: fnmatch_builtin.c
 	gcc -O2 -fPIC -shared -o $@ $<
+
 all: strmatch.so
 strmatch.so: strmatch_builtin.c
 	gcc -O2 -fPIC -shared -o $@ $<
+
+all: strmatch_ex.so
+strmatch_ex.so: strmatch_builtin.c
+	gcc -O2 -fPIC -shared -DASSIGN_BASH_STRMATCH -o $@ $<

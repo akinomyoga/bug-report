@@ -1,3 +1,9 @@
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+/* ========================================================================= */
 /*#include "../command.h"*/
 struct word_desc { char* word; int flags; };
 struct word_list { struct word_list* next; struct word_desc* word; };
@@ -18,12 +24,16 @@ struct builtin {
 extern struct word_list *loptend;
 void reset_internal_getopt(void);
 int internal_getopt(struct word_list *, char *);
-/*#include "common.h"*/
+/*#include "builtins/common.h"*/
 void builtin_help(void);
 void builtin_usage(void);
 
 /*#include <glob/strmatch.h>*/
 int strmatch(char *pattern, char *string, int flags);
+struct strmatch_ex { size_t match_begin, match_end; struct strmatch_ex *listp; };
+void strmatch_ex_finalize (struct strmatch_ex *);
+int mbsmatch_ex (struct strmatch_ex *, char *, char *, char *, char *, int);
+
 #define FNM_PATHNAME    (1 << 0)
 #define FNM_NOESCAPE    (1 << 1)
 #define FNM_PERIOD      (1 << 2)
@@ -39,6 +49,44 @@ int strmatch(char *pattern, char *string, int flags);
 #define FNM_MODE_SUFFIX_GREEDY  (4 << 16)
 #define FNM_MODE_MIDDLE         (5 << 16)
 #define FNM_MODE_MIDDLE_ALL     (6 << 16)
+
+#ifdef ASSIGN_BASH_STRMATCH
+
+/* include <externs.h> */
+char *substring (const char *string, int start, int end);
+/* include <array.h> */
+typedef intmax_t arrayind_t;
+typedef struct array_element {
+  arrayind_t      ind;
+  char    *value;
+} ARRAY_ELEMENT;
+typedef struct array {
+  arrayind_t max_index;
+  arrayind_t num_elements;
+  struct array_element *head;
+  struct array_element *lastref;
+} ARRAY;
+int array_insert (ARRAY *, arrayind_t, char *);
+void array_flush (ARRAY *a);
+/* include <variables.h> */
+typedef struct variable *sh_var_value_func_t (struct variable *);
+typedef struct variable *sh_var_assign_func_t (struct variable *, char *, arrayind_t, char *);
+typedef struct variable {
+  char *name;
+  char *value;
+  char *exportstr;
+  sh_var_value_func_t *dynamic_value;
+  sh_var_assign_func_t *assign_func;
+  int attributes;
+  int context;
+} SHELL_VAR;
+#define array_cell(var) (ARRAY *)((var)->value)
+/* #include <builtins/common.h> */
+SHELL_VAR *builtin_find_indexed_array (char *, int);
+
+#endif
+
+/* ========================================================================= */
 
 static int strmatch_builtin(struct word_list* list) {
   char *str, *pat;
@@ -128,7 +176,43 @@ static int strmatch_builtin(struct word_list* list) {
       return EX_USAGE;
     }
 
+#ifdef ASSIGN_BASH_STRMATCH
+  /* regardless of whether the matching is successful, we need to clear the
+     array anyway. */
+  SHELL_VAR *var;
+  ARRAY *a_strmatch = NULL, *a_strstart = NULL;
+  if (var = builtin_find_indexed_array ("BASH_STRMATCH", 1)) {
+    a_strmatch = array_cell (var);
+    array_flush (a_strmatch);
+  }
+  if (var = builtin_find_indexed_array ("BASH_STRSTART", 1)) {
+    a_strstart = array_cell (var);
+    array_flush (a_strstart);
+  }
+
+  struct strmatch_ex matches;
+  int ret = mbsmatch_ex (&matches, pat, NULL, str, NULL, flags | mode);
+  if (ret == 0 && (a_strmatch || a_strstart)) {
+    arrayind_t index =0;
+    for (struct strmatch_ex *m = &matches; m; m = m->listp, index++) {
+      if (a_strmatch) {
+        char *sub = substring(str, m->match_begin, m->match_end);
+        array_insert (a_strmatch, index, sub);
+        free (sub);
+      }
+      if (a_strstart) {
+        char sub[32];
+        sprintf(sub, "%zu", m->match_begin);
+        array_insert (a_strstart, index, sub);
+      }
+    }
+  }
+  strmatch_ex_finalize (&matches);
+  return ret;
+
+#else
   return strmatch (pat, str, flags | mode);
+#endif
 }
 static const char* strmatch_doc[] = { "This is a builtin to test the behavior of strmatch", 0 };
 struct builtin strmatch_struct = { "strmatch", strmatch_builtin, BUILTIN_ENABLED, strmatch_doc, "strmatch [-SsPpMm] [-/.edil] pattern string", 0, };
