@@ -2,6 +2,9 @@
 
 LC_COLLATE=C
 
+#------------------------------------------------------------------------------
+# loadable builtins
+
 # [[ ./fnmatch -nt fnmatch.c ]] ||
 #   gcc -O2 -o ./fnmatch fnmatch.c
 
@@ -18,11 +21,57 @@ else
   _glob_engine=old
 fi
 
-source ~/.mwg/src/ble.sh/out/ble.sh --lib
+#------------------------------------------------------------------------------
+# test framework
 
-ble-import lib/core-test
+if [[ -r ~/.mwg/src/ble.sh/out/ble.sh ]]; then
+  source ~/.mwg/src/ble.sh/out/ble.sh --lib
+  ble-import lib/core-test
+else
+  function ble/test/start-section {
+    printf '%s\n' "===== $1 =====" >&2
+  }
+  function ble/test/end-section {
+    : do nothing
+  }
+  function ble/test {
+    while [[ $1 == --depth=* || $1 == --display-code=* ]]; do shift; done
 
-ble/test/start-section 'strmatch (fmatch)' 170
+    local code=${1#code[:=]}
+    shift
+
+    local exit_expect=0 ret_expect=__unspecified__
+    local -a conditions
+    local cond
+    for cond; do
+      case $cond in
+      (ret[:=]*)
+        ret_expect=${cond#*[:=]} ;;
+      (exit[:=]*)
+        exit_expect=${cond#*[:=]} ;;
+      esac
+    done
+
+    builtin eval -- "$code"
+    local exit=$?
+
+    local msg=
+    [[ $exit == "$exit_expect" ]] ||
+      msg+="  exit-status is $exit (expect: $exit_expect)"$'\n'
+    [[ $ret_expect == __unspecified__ || $ret == "$ret_expect" ]] ||
+      msg+="  result is '$ret' (expect: '$ret_expect')"$'\n'
+    if [[ $msg ]]; then
+      printf '%s\n' "TEST ${_test_title:-$code}"
+      printf '%s' "$msg"
+      return 1
+    fi
+
+    return 0
+  }
+fi
+
+#------------------------------------------------------------------------------
+# test helpers
 
 function ble/test:strmatch.1 {
   strmatch $option "$pat" "$str"
@@ -55,6 +104,8 @@ function ble/test:strmatch {
   local pat=$1 str=$2
   shift 2
 
+  local _test_title="strmatch${option:+ $option} '${pat//$q/$Q}' '${str//$q/$Q}'"
+
   local -a conditions
   local cond
   for cond; do
@@ -63,9 +114,14 @@ function ble/test:strmatch {
   done
 
   local q=\' Q="'\''"
-  ble/test --depth=1 --display-code="strmatch${option:+ $option} '${pat//$q/$Q}' '${str//$q/$Q}'" \
+  ble/test --depth=1 --display-code="$_test_title" \
            code:"ble/test:strmatch.1" "${conditions[@]}"
 }
+
+#------------------------------------------------------------------------------
+# tests
+
+ble/test/start-section 'strmatch (fmatch)' 170
 
 (
   # fixed strings
