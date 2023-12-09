@@ -180,39 +180,48 @@ static int strmatch_builtin(struct word_list* list) {
   /* regardless of whether the matching is successful, we need to clear the
      array anyway. */
   SHELL_VAR *var;
-  ARRAY *a_strmatch = NULL, *a_strstart = NULL;
+  ARRAY *match_array = NULL, *start_array = NULL;
   if (var = builtin_find_indexed_array ("BASH_STRMATCH", 1)) {
-    a_strmatch = array_cell (var);
-    array_flush (a_strmatch);
+    match_array = array_cell (var);
+    array_flush (match_array);
   }
   if (var = builtin_find_indexed_array ("BASH_STRSTART", 1)) {
-    a_strstart = array_cell (var);
-    array_flush (a_strstart);
+    start_array = array_cell (var);
+    array_flush (start_array);
   }
 
   struct strmatch_ex matches;
   int ret = mbsmatch_ex (&matches, pat, NULL, str, NULL, flags | mode);
-  if (ret == 0 && (a_strmatch || a_strstart)) {
+  if (ret == 0 && (match_array || start_array)) {
     arrayind_t index =0;
     for (struct strmatch_ex *m = &matches; m; m = m->listp, index++) {
-      if (a_strmatch) {
+      if (match_array) {
         char *sub = substring(str, m->match_begin, m->match_end);
-        array_insert (a_strmatch, index, sub);
+        array_insert (match_array, index, sub);
         free (sub);
       }
-      if (a_strstart) {
+      if (start_array) {
         char sub[32];
         sprintf(sub, "%zu", m->match_begin);
-        array_insert (a_strstart, index, sub);
+        array_insert (start_array, index, sub);
       }
     }
   }
   strmatch_ex_finalize (&matches);
   return ret;
-
 #else
   return strmatch (pat, str, flags | mode);
 #endif
 }
-static const char* strmatch_doc[] = { "This is a builtin to test the behavior of strmatch", 0 };
-struct builtin strmatch_struct = { "strmatch", strmatch_builtin, BUILTIN_ENABLED, strmatch_doc, "strmatch [-SsPpMm] [-/.edil] pattern string", 0, };
+static const char* strmatch_doc[] = {
+  "This is a builtin to test the behavior of strmatch",
+  0,
+};
+struct builtin strmatch_struct = {
+  "strmatch",
+  strmatch_builtin,
+  BUILTIN_ENABLED,
+  strmatch_doc,
+  "strmatch [-SsPpMm] [-/.edil] pattern string",
+  0,
+};

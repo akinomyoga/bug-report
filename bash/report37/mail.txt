@@ -41,38 +41,78 @@ b. Now « a=01; echo ${a//?(0)/(&)} » does not match twice with the
    To recover the original behavior for a. and b., see #ifdef
    SMATCH_COMPAT52_PATSUB in lib/glob/sm_loop.c.
 
-c. Now !(<subpat>) only matches substrings matching `*' even when
-   <subpat> does not match it.  In particular, when FNM_PATHNAME,
-   FNM_PERIOD, or FNM_DOTDOT is specified, `*' only matches with a
-   certain form of paths without a path separator `/' or dotfiles.  In
-   the previous implementation, the checks for these pathchars were
-   only performed for the first character of the substring unmatching
-   <subpat>.  In the new implementation, all the characters in the
-   substring unmatching <subpat> are checked for the pathchars just
-   like `*'.
+c. When FNM_PATHNAME is specified, `*' cannot match path separators
+   `/' in the new implementation.  In the previous implementation, `*'
+   can match slashes even when FNM_PATHNAME is specified, while it is
+   not the case in the fnmatch implementation.  I suspect the previous
+   implementation does not actually try to support FNM_PATHNAME.  In
+   the new implementation, I try to properly support FNM_PATHNAME so
+   that the behavior is consistent with fnmatch.  The behaviors of
+   three implementations are summarized below:
 
-   For example, the behavior change can be seen in the following
-   examples, where T/F in the code comment /* */ means
-   matching/unmatching, respectively.  The first T/F before the comma
-   shows the result in the previous implementation and the second T/F
-   after the comma shows the result in the new implementation:
+      | Pattern | String | fnmatch | prev | new |
+      |:--------|:-------|:-------:|:----:|:---:|
+      | *       | abcd   |    T    |  T   |  T  |
+      | *       | .abc   |    F    |  F   |  F  |
+      | *       | a/.d   |    F    |  T   |  F  |
+      | *       | a/cd   |    F    |  T   |  F  |
+      | s/*     | s/abc  |    T    |  T   |  T  |
+      | s/*     | s/.ab  |    F    |  F   |  F  |
+      | s/*     | s/..   |    F    |  F   |  F  |
 
-   flags = FNM_EXTMATCH|FNM_PATHNAME|FNM_PERIOD|FNM_DOTDOT;
-   strmatch ("!(x)",   "abcd",  flags) != FNM_NOMATCH; /* T,T */
-   strmatch ("!(x)",   ".abc",  flags) != FNM_NOMATCH; /* F,F */
-   strmatch ("!(x)",   "a/.d",  flags) != FNM_NOMATCH; /* T,F */
-   strmatch ("!(x)",   "a/cd",  flags) != FNM_NOMATCH; /* T,F */
-   strmatch ("s/!(x)", "s/abc", flags) != FNM_NOMATCH; /* T,T */
-   strmatch ("s/!(x)", "s/.ab", flags) != FNM_NOMATCH; /* T,F */
-   strmatch ("s/!(x)", "s/.." , flags) != FNM_NOMATCH; /* T,F */
+      where `FNM_EXTMATCH | FNM_PATHNAME | FNM_PERIOD | FNM_DOTDOT'
+      are specified as flags.  T and F mean `matching' and
+      `unmatching', respectively.  fnmatch is tested in GNU/Linux,
+      i.e., the behavior of fnmatch in the glibc implementation is
+      shown.
 
-   Even though `!(x)' does not match `.abc', `s/!(x)' matches `s/.ab',
-   which seems unnatural to me.
+   Also, treatments of path special characters (specified by
+   FNM_PATHNAME, FNM_PERIOD, and FNM_DOTDOT) are properly applied to
+   !(<subpat>) in the new immplementation; !(<subpat>) only matches
+   substrings that can possibly match `*' and that <subpat> does not
+   match.  In the previous implementation, the checks for those path
+   characters are only performed for the first character of the
+   substring.  In the new implementation, those path-character checks
+   are applied to all the characters in the substring just like `*'.
 
-   See `#ifdef SMATCH_COMPAT52_NEGPATH' in lib/glob/sm_loop.c for the
-   related code, though the old behavior is not really implemented.  I
-   would implement it if the old behavior is strongly requested, but I
-   currently feel there is no reason to implement the old behavior.
+      | Pattern    | String | prev | new |
+      |:-----------|:-------|:----:|:---:|
+      | !(x)       | abcd   |  T   |  T  |
+      | !(x)       | .abc   |  F   |  F  |
+      | !(x)       | a/.d   |  T   |  F  |
+      | !(x)       | a/cd   |  T   |  F  |
+      | s/!(x)     | s/abc  |  T   |  T  |
+      | s/!(x)     | s/.ab  |  T   |  F  |
+      | s/!(x)     | s/..   |  T   |  F  |
+
+   We observe that `s/!(x)' matches `s/.ab' in the previous
+   implementation even though `!(x)' does not match `.abc'.  This is
+   not a natural behavior.  The new implementation tries to make it
+   consistent with `*' of fnmatch.
+
+   See `#ifdef SM_COMPAT44_NEGPATH' and `#ifdef SM_COMPAT52_NEGPATH'
+   in lib/glob/sm_loop.c for the related code, though the old behavior
+   is not faithfully implemented.  I would implement it if the old
+   behavior is strongly requested, but I currently feel there is no
+   reason to implement the old behavior.
+
+API changes
+
+* The following functions were not limited in the file scope (i.e.,
+  the keyword `static' is not specified) but removed because they are
+  not used with the new implementation.  However, if any loadable
+  buitlins directly use any of these functions, that loadable builtin
+  will fail to find the corresponding function.
+
+  #include "externs.h"
+
+  int match_pattern_char (char *, char *, int);
+  int umatchlen (char *, size_t);
+  int match_pattern_wchar (wchar_t *, wchar_t *, int);
+  int wmatchlen (wchar_t *, size_t);
+
+  int internal_strmatch (char *pattern, char *string, int flags);
+  int internal_wstrmatch (wchar_t *pattern, wchar_t *string, int flags);
 
 Possible adjustments, refactoring, and optimizations
 

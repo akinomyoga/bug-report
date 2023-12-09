@@ -30,6 +30,38 @@ static int fnmatch_builtin(struct word_list* list) {
 
   flags = FNM_EXTMATCH;
 
+  int opt;
+  reset_internal_getopt ();
+  while ((opt = internal_getopt (list, "/.eil")) != -1)
+    {
+      switch (opt)
+        {
+        case '/':
+          flags |= FNM_PATHNAME;
+          break;
+        case '.':
+          flags |= FNM_PERIOD;
+          break;
+        case 'e':
+          flags |= FNM_NOESCAPE;
+          break;
+        case 'i':
+          flags |= FNM_CASEFOLD;
+          break;
+        case 'l':
+          flags |= FNM_LEADING_DIR;
+          break;
+
+        case GETOPT_HELP:
+          builtin_help ();
+          return EX_USAGE;
+        default:
+          builtin_usage ();
+          return EX_USAGE;
+        }
+    }
+  list = loptend;
+
   if (list && list->word && list->word->word)
     {
       pat = list->word->word;

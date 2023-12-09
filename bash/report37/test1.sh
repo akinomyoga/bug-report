@@ -2,11 +2,14 @@
 
 LC_COLLATE=C
 
+shopt -s extglob
+
 #------------------------------------------------------------------------------
 # loadable builtins
 
-# [[ ./fnmatch -nt fnmatch.c ]] ||
-#   gcc -O2 -o ./fnmatch fnmatch.c
+[[ ./fnmatch -nt fnmatch.c ]] ||
+  gcc -O2 -shared -fPIC -o ./fnmatch fnmatch_builtin.c
+enable -f ./fnmatch.so fnmatch
 
 [[ ./strmatch.so -nt strmatch_builtin.c ]] ||
   gcc -O2 -shared -fPIC -o ./strmatch.so strmatch_builtin.c
@@ -91,7 +94,7 @@ function ble/test:strmatch.1 {
 
 function ble/test:strmatch {
   local option=
-  if [[ $1 == -? ]]; then
+  if [[ $1 == -?* ]]; then
     option=$1
     shift
   fi
@@ -545,6 +548,94 @@ ble/test/start-section 'pat_subst with nocasematch' 6
   ble/test code:"ret=${v/A/x}" ret=xlpha
   ble/test code:"ret=${v//A/x}" ret=xlphx
 )
+
+ble/test/start-section 'empty pattern' 5
+
+(
+  ble/test:strmatch -M '' 'hello' ret='(0: 1: 2: 3: 4: 5:)'
+  ble/test:strmatch -M '@()' 'hello' ret='(0: 1: 2: 3: 4: 5:)'
+
+  if [[ $_glob_engine == old ]]; then
+    ble/test code:'v=hello;ret=${v//""/,}' ret='hello'
+    ble/test code:'v=hello;ret=${v//@("")/,}' ret=',h,e,l,l,o'
+    ble/test code:'v=hello;ret=${v//@()/,}' ret=',h,e,l,l,o'
+  else
+    ble/test code:'v=hello;ret=${v//""/,}' ret=',h,e,l,l,o,'
+    ble/test code:'v=hello;ret=${v//@("")/,}' ret=',h,e,l,l,o,'
+    ble/test code:'v=hello;ret=${v//@()/,}' ret=',h,e,l,l,o,'
+  fi
+)
+
+ble/test/start-section '?(0)' 4
+
+(
+  ble/test:strmatch -M '?(0)' '01' ret='(0:0 2:)'
+  ble/test:strmatch -M '?(1)' '012' ret='(0: 1:1 3:)'
+
+  if [[ $_glob_engine == old ]]; then
+    ble/test code:'v=01;ret=${v//?(0)/,}' ret=',,1'
+    ble/test code:'v=012;ret=${v//?(1)/,}' ret=',0,,2'
+  else
+    ble/test code:'v=01;ret=${v//?(0)/,}' ret=',1,'
+    ble/test code:'v=012;ret=${v//?(1)/,}' ret=',0,2,'
+  fi
+)
+
+ble/test/start-section 'path/!(x)' 7
+
+(
+  ble/test "fnmatch -/. '*'   'abcd' " exit=0
+  ble/test "fnmatch -/. '*'   '.abc' " exit=1
+  ble/test "fnmatch -/. '*'   'a/.d' " exit=1
+  ble/test "fnmatch -/. '*'   'a/cd' " exit=1
+  ble/test "fnmatch -/. 's/*' 's/abc'" exit=0
+  ble/test "fnmatch -/. 's/*' 's/.ab'" exit=1
+  ble/test "fnmatch -/. 's/*' 's/..' " exit=1
+
+  # * and pathchars
+  if [[ $_glob_engine == old ]]; then
+    # The old implementation does not behave the same as fnmatch for the
+    # pattern `*' when FNM_PATHNAME is specified. `*' can match a slash even
+    # with FNM_PATHNAME.
+    ble/test:strmatch -/.d '*'   'abcd'  exit=0
+    ble/test:strmatch -/.d '*'   '.abc'  exit=1
+    ble/test:strmatch -/.d '*'   'a/.d'  exit=0
+    ble/test:strmatch -/.d '*'   'a/cd'  exit=0
+    ble/test:strmatch -/.d 's/*' 's/abc' exit=0
+    ble/test:strmatch -/.d 's/*' 's/.ab' exit=1
+    ble/test:strmatch -/.d 's/*' 's/..'  exit=1
+  else
+    # The new implementation `*' is consistent with fnmatch `*'.
+    ble/test:strmatch -/.d '*'   'abcd'  exit=0
+    ble/test:strmatch -/.d '*'   '.abc'  exit=1
+    ble/test:strmatch -/.d '*'   'a/.d'  exit=1
+    ble/test:strmatch -/.d '*'   'a/cd'  exit=1
+    ble/test:strmatch -/.d 's/*' 's/abc' exit=0
+    ble/test:strmatch -/.d 's/*' 's/.ab' exit=1
+    ble/test:strmatch -/.d 's/*' 's/..'  exit=1
+  fi
+
+  if [[ $_glob_engine == old ]]; then
+    # The old implementation behaves even a different way with !(x).
+    ble/test:strmatch -/.d '!(x)'   'abcd'  exit=0
+    ble/test:strmatch -/.d '!(x)'   '.abc'  exit=1
+    ble/test:strmatch -/.d '!(x)'   'a/.d'  exit=0
+    ble/test:strmatch -/.d '!(x)'   'a/cd'  exit=0
+    ble/test:strmatch -/.d 's/!(x)' 's/abc' exit=0
+    ble/test:strmatch -/.d 's/!(x)' 's/.ab' exit=0
+    ble/test:strmatch -/.d 's/!(x)' 's/..'  exit=0
+  else
+    # The new implementation `!(x)' is consistent with fnmatch `*'.
+    ble/test:strmatch -/.d '!(x)'   'abcd'  exit=0
+    ble/test:strmatch -/.d '!(x)'   '.abc'  exit=1
+    ble/test:strmatch -/.d '!(x)'   'a/.d'  exit=1
+    ble/test:strmatch -/.d '!(x)'   'a/cd'  exit=1
+    ble/test:strmatch -/.d 's/!(x)' 's/abc' exit=0
+    ble/test:strmatch -/.d 's/!(x)' 's/.ab' exit=1
+    ble/test:strmatch -/.d 's/!(x)' 's/..'  exit=1
+  fi
+)
+
 
 ble/test/start-section 'incomplete extglob' 9
 
