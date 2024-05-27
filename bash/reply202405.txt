@@ -1,0 +1,111 @@
+
+https://lists.gnu.org/archive/html/bug-bash/2024-05/msg00356.html
+
+2024年5月24日(金) 19:18 Martin D Kealey <martin@kurahaupo.gen.nz>:
+> On Tue, 21 May 2024 at 23:16, Koichi Murase <myoga.murase@gmail.com> wrote:
+>> 2024年5月21日(火) 14:56 Phi Debian <phi.debian@gmail.com>:
+>> > 'May be' bash could investigate the ksh93/zsh $FPATH autoload, but don't
+>> > know if that would be good enough for the initial purpose.
+>>
+>> There are already shell-function implementations at
+>> /examples/functions/autoload* in the Bash source. They reference FPATH
+>> to load functions, though one needs to call `autoload' for each
+>> function in advance (by e.g. `autoload "$fpath_element"/*' ).
+>
+> My solution to this was to call 'autoload --all', which would gather all the
+> filenames in FPATH (*1) and create autoload stubs for them.
+
+These were just a comment on the implementations /example/functions/autoload*,
+but yeah, I haven't noticed that `autoload.v4' actually supports the equivalent
+option `autoload -f'.  If you would define your own `autoload', of course, you
+can define the useful feature.
+
+I think there is still a minor (and maybe negligible?) issue when a new path is
+added to FPATH after performing `autoload --all'.  One would need to
+additionally call `autoload "$fpath_added_element"/*' (or one could run
+`autoload --all' again, but this would scan all the directories that were
+already processed).
+
+> Alternatively one could define a commandnotfound function to defer this until
+> actually needed.
+
+I thought about it before, but `command_not_found_handle' is executed in a
+subshell, so the loaded functions will not be reflected in the original shell
+process.
+
+> (*1 I actually used a different variable name, since I wasn't providing
+> exactly the same semantics as ksh, but that's relatively cosmetic)
+
+I intended to talk about the specific semantics of ksh93/zsh's FPATH, but if we
+extend the discussion to different variable names and different semantics, I
+actually have my own `autoload' [1] referring the variable
+`bleopt_import_path', where the function names are specified to `autoload' with
+an explicit module name defining them.  An example use is found in
+e.g. Ref. [2], although the module is specified by an absolute path in this
+case.
+
+[1] https://github.com/akinomyoga/ble.sh/blob/b72d78a97e6867bbf43de6a645dd6e387525443f/src/util.sh#L5071
+[2] https://github.com/akinomyoga/ble.sh/blob/b72d78a97e6867bbf43de6a645dd6e387525443f/lib/core-syntax-def.sh#L62-L79
+
+>> However, I personally do not think the FPATH mechanism is useful
+>> because a file can only contain one function per file. Significantly
+>> non-trivial functions are usually implemented by a set of helper
+>> functions or sub-functions.
+>
+> Defining extra (private) functions in a file loaded from FPATH does no harm,
+> as long as its name doesn't conflict.
+
+I was assuming the Zsh's implementation of $FPATH.  I thought the Zsh
+implementation of $FPATH doesn't allow it, but I now learned that ksh's
+implementation of $FPATH is different.  I'm not a user of Zsh, so maybe I miss
+something, but Zsh's default autoload assumes that each file contains the
+*body* of the function (instead of the function declaration).  So if one puts a
+set of functions in a file `func':
+
+  internal1() { ...; }; internal2() { ...; }; func() { ...; }
+
+and registers it through `autoload -U func', it would result in a big function
+containing function definitions:
+
+  func() { internal1() { ...; }; internal2() { ...; }; func() { ...; }; }
+
+This is not an expected one.  However, TIL one can put function definitions in
+ksh's style, and ksh's style can be used also in Zsh with `autoload -Uk func'.
+
+>> Also, in libraries, we usually have a set
+>> of functions that are closely related to one another and share the
+>> implementations. I don't think it is practical to split those
+>> functions into dozens or hundreds of files.
+>
+> I would hesitate to call what I've done "a manager", but my approach has been
+> to allow a file to "declare" all the public functions it defines, and then
+> simply have symlinks (or even hard links) to a single underlying file.
+
+OK, this should work as ksh's FPATH implementation allows including function
+definitions.
+
+In that sense, this is just my personal preference, but I prefer to prepare a
+`header' script file (such as [2]) that contains `autoload' declarations and is
+intended to be sourced on the initialization stage instead of creating as many
+symbolic links as the public functions.
+
+==============================================================================
+
+/* If this . script is supplied arguments, we save the dollar vars and
+   replace them with the script arguments for the duration of the script's
+   execution.  If the script does not change the dollar vars, we restore
+   what we saved.  If the dollar vars are changed in the script, and we are
+   not executing a shell function, we leave the new values alone and free
+   the saved values. */
+static void
+maybe_pop_dollar_vars ()
+{
+  if (variable_context == 0 && (dollar_vars_changed () & ARGS_SETBLTIN))
+    dispose_saved_dollar_vars ();
+  else
+    pop_dollar_vars ();
+  if (debugging_mode)
+    pop_args ();  /* restore BASH_ARGC and BASH_ARGV */
+  set_dollar_vars_unchanged ();
+  invalidate_cached_quoted_dollar_at ();  /* just invalidate to be safe */
+}

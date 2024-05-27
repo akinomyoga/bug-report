@@ -636,7 +636,6 @@ ble/test/start-section 'path/!(x)' 7
   fi
 )
 
-
 ble/test/start-section 'incomplete extglob' 9
 
 (
