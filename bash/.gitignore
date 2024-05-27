@@ -1,10 +1,10 @@
 # gitignore
 
+/chlog.dict.dat
+
 /H0005
 /H0007-complexity.txt
 /H0007-complexity.pdf
-/help-bash.202208-0007.example-tokenize.history
 
-/chlog.dict.dat
-
-/reply202405
+/reply/202208-help0007.example-tokenize.history
+/reply/202405
