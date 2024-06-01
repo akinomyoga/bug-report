@@ -1,0 +1,51 @@
+From 05d7e0a89499d5502d92b6929b92790d340eb44f Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Wed, 29 May 2024 22:17:06 +0900
+Subject: [PATCH] fix uneccesary copy of function bodies for BASH_SOURCE
+
+The function `bind_function_def' (variables.c) stores the function
+meta data in the hash map `shell_function_defs' in variables.c.  The
+saved information is used by BASH_SOURCE (execute_cmd.c) and the
+output of `declare -F func' with `shopt -s extdebug'
+(builtin/declare.def) through the interface `find_function_def'
+(variables.c).  The function body (i.e., funcdef->command) is not used
+here and does not need to be saved in the hash map, and in fact, it is
+not saved for the first call of `bind_function_def' for the function
+name.
+
+The problem is that the function body is saved for the second and
+later calls of `bind_function_def' for the same function name.  When a
+function is defined, `bind_function_def' is always called twice on its
+parsing phase (`make_function_def' in make_cmd.c) and its defining
+phase (`execute_intern_function' in execute_cmd.c).  As a result, the
+function body is always saved in the hash map `shell_function_defs'
+after the second call.  This doubles the memory uses for shell
+functions because the function bodies are already intended to be saved
+in a separate hash map `shell_functions' (variables.c).
+
+This patch fixes `bind_function_def' so that it skips the function
+body also for the second and later calls.  This reduces the memory
+uses of Bash for shell functions by mostly half.
+
+---
+ variables.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/variables.c b/variables.c
+index 84b30d93..0e785742 100644
+--- a/variables.c
++++ b/variables.c
+@@ -3507,7 +3507,11 @@ bind_function_def (const char *name, FUNCTION_DEF *value, int flags)
+   if (entry && (flags & 1))
+     {
+       dispose_function_def_contents (entry);
++
++      cmd = value->command;
++      value->command = 0;
+       entry = copy_function_def_contents (value, entry);
++      value->command = cmd;
+     }
+   else if (entry)
+     return;
+-- 
+2.45.0

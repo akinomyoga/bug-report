@@ -1,0 +1,214 @@
+
+2024-06-01
+
+* そもそも関数ごとに BASH_SOURCE をコピーして保持している事によって関数自体のサ
+  イズが大きくなっているのではないか、と思ったが、 BASH_SOURCE は別に各コマンド
+  の全ての要素に対して保存している訳ではなくて、関数ごとに保存しているだけの様
+  なので、そんなに影響はない。
+
+    50300 blesh=15068, with-vim=17628 (BASH_SOURCE 既定)
+    50300 blesh=14940, with-vim=17372 (BASH_SOURCE = null)
+
+  それぞれ 120k, 250k 程度しか増えていない。関数が 2400/2900 程度存在する事を思
+  うと、関数１つあたり 50 ～ 100 bytes なのでメモリの管理領域も含めるとそんな物
+  だろうという気がする。
+
+  データ量を減らそうと思ったらもっと根本的に減らす必要がある。
+
+* しかし次の謎として何故 bind_function_def が一つの関数につき二回ずつ
+  呼び出されているのかという謎が残る。呼び出し元を確認すると
+  make_function_def (make_cmd.c) という関数と execute_intern_function
+  (execute_cmd.c) という関数が bind_function_def を呼び出している。
+
+  前者と後者の両方が呼び出されているという事? もし前者が parse 時点で
+  の呼び出しなのだとしたら本来其処で bind_function_def は実行するべき
+  ではない筈である。一方で、前者で bind_function_def を呼び出さなかっ
+  た時に後者も呼び出されなくて関数が登録れないという事態にならないかと
+  いう心配もある。
+
+  * 取り敢えず現在呼び出している全ての場合についてちゃんと後者が全て呼
+    び出されているかを確認する。
+
+    うーん。面倒だが、make_cmd の中の bind_function_def を潰してからロードして
+    declare -F で一覧を作って、情報が表示されない関数を表示すれば良いのではない
+    か?
+
+  * どうもやはり定義していない関数についても bind_function_def が呼び出されてい
+    る様である。というか、if の選択されていない branch に入っている関数ですら
+    bind_function_def で関数の定義位置を上書きしている気がする。
+
+    →と思って自分で再現コードを書いてみたが別に勝手に関数定義だけで
+    bind_function_def が呼び出されるという事はないみたいだ。何故だろうか。
+
+    make_function_def の呼び出し元を確認してみると parse.y だけでしか呼び出して
+    いない。つまり、構文解析の時点で既に make_function_def を呼び出していそうな
+    物である。より詳しく調べてみると make_function_def は呼び出されている。
+
+    →どうも make_function_def からの呼び出しの時には flags=0 が設定されていて
+    既に関数定義が登録されている場合にはそれが置き換わらない様にしている様であ
+    る。だとすると、そもそも何故登録しているのかという事が疑問に思われてくる。
+
+    そもそもこの flags が登録されたのは一体どういう経緯なのだろうか。
+
+    879213c (2018-01-08) でこの変更が導入されている。Bruno Vasselle による
+    report と書かれている。対応する report は以下の様である。
+    https://lists.gnu.org/archive/html/bug-bash/2017-12/msg00056.html それに対
+    する返信で情報は定義時に記録されるという様に書いていて、それで修正したと書
+    いている。
+
+  * ok: 上記の Bruno の報告によるとやはりこの hash によって保存された内容は
+    BASH_SOURCE に影響を与える。改めて git grep で検索してみた所 execute_cmd の
+    中にある呼び出しが見つかった。
+
+    一旦は BASH_SOURCE に使われていると思って、その後で再び検索したら declare
+    -F でしか使っていない様に見えたが何が起こったのだろう? grc だと検索に引っか
+    からない? と思ったが引っかからなくなるのは寧ろ変な拡張子 .def の中に定義さ
+    れている declare -F の方である。或いは逆の事が起こったのかもしれない。最初
+    grc で検索して一箇所でしか使われていないということを確認して、その後で git
+    grep を使って一番最初に使われている場所しか見ていなかったという事。
+
+    取り敢えず報告の文章は修正した。
+
+  [まとめ] 元々何故か parse 時に関数の情報が保存されていた。その後に定義時に上
+  書きをする様に修正された (2011)。然し、それでも discarded branch の中に関数が
+  ある場合や関数の中で関数を定義している場合は、本来の関数の情報を上書きしてし
+  まうので、parse 時の登録はまだ関数が何も登録されていない時にのみ上書きする様
+  に書き換えられた (2018; report by Bruno Vasselle)。
+
+  本来 parse 時のデータ登録は必要ない事の様に思われるが、何か実際にそれが必要な
+  事があるか、或いは書き換えによって問題が起こる事を恐れて parse 時の登録を取り
+  敢えず残しておいたという事だろう。
+
+  理由について後で訪ねても良いが面倒なので良い事にする。取り敢えず目下の所は無
+  意味にメモリを食っているのが修正されれば良い。
+
+* 初め経緯を説明する文章を書いていたが長々としていて無駄な話の様に思われるし、
+  間違い自体はかなり明らかなので、修正が通らないという事もないだろう。なので、
+  そのまま間違いを説明して修正だけ提出する事にすれば良い。
+
+  Since I use a large Bash script, I wanted to investigate the large memory
+  footprint of Bash (particularly of recent versions).  I have been aware for
+  years that more recent versions of Bash consume more memories even when an
+  identical library/framework is sourced in Bash processes of different
+  versions, yet the footprint seemed to fluctuate from version to version.  I
+  also knew that the increase of the footprint is unrelated to the data stored
+  in shell variables.
+
+  I today realized that within Bash versions built from the commits in the
+  devel branch, the footprint is more consistent among the versions without the
+  fluctuations.  Then, I could bisect the commit where the Bash started to
+  consume more memories.
+
+  The attached image shows the memory consumed by two different sets of library
+  files.  The vertical axis is the increase of RSS by `soruce framework.sh'
+  obtained by something like
+
+    m1=$(ps -o rss $$ | tail -1)
+    source framework.sh
+    m2=$(ps -o rss $$ | tail -1)
+    echo $((m2-m1))
+
+  The horizontal axis is the commit count, i.e. the number of commits before
+  that commit (including the commit itself), which can obtained by `git
+  rev-list --count <commit>`.
+
+  I use the configure option `--with-bash-malloc=no', though I'm not sure if it
+  is related.
+
+2024-05-29 (b72d78a9)
+
+* 改めて。もう少し慎重に shell_function_defs の使われ方を確認する。
+
+  やはり一箇所でしか使われていない様に見える。ちゃんと見ると BASH_SOURCE に使っ
+  ているのではなくて、shopt -s extdebug の時に declare -F で出力されるファイル
+  名を表示するのに使っている様に見える。
+
+* 改めて計測し直す。
+
+  40253 blesh=19328, with-vim=22400
+  40348 blesh=31488, with-vim=36864
+  40423 blesh=31744, with-vim=37120
+  50018 blesh=31300, with-vim=36668
+  50116 blesh=40712, with-vim=47804
+  50200 blesh=40692, with-vim=47808
+  50300 blesh=26120, with-vim=30728 # dev, --with-bash-malloc=no
+
+  やはり 4.2 と 5.3 の間でサイズが変化している気がする。より詳細に調べる。
+
+  a314357 (bash-20091223) 40100 blesh=16036, with-vim=18724
+  1665e22 (bash-20100108) 40100 blesh=16132, with-vim=18820
+  220537f (bash-20100603) 40107 crash?
+  9fc7642 (bash-20110107) 40200 blesh=16120, with-vim=18808
+  987daba (bash-20110622) 40210 blesh=15852, with-vim=18540
+  b13b8a8 (bash-20110916) 40210 blesh=15816, with-vim=18504
+  4b82d1c (bash-20111118) 40210 blesh=15820, with-vim=18508
+  e67d002 (bash-20111123) 40220 blesh=15944, with-vim=18632
+  e3db237 (bash-20111202) 39694772 BROKEN blesh=-3456, with-vim=10360
+                          40220 blesh=16056, with-vim=18744 (with fix)
+  2dead0c (bash-20111209) 16561108 BROKEN blesh=-3456, with-vim=10360
+                          40220 blesh=15944, with-vim=18632 (with fix)
+  ba4ab05 (bash-20111216) 40220 blesh=26124, with-vim=30732
+                          40220 blesh=25760, with-vim=30240 (w/o make_cmd, parse, readline)
+                          40220 blesh=25844, with-vim=30196 (w/o make_cmd, parse, readline, builtins)
+                          40220 blesh=25820, with-vim=30300 (w/o make_cmd, parse, readline, builtins, completion/xmap)
+                          40220 blesh=25844, with-vim=30324 (w/o make_cmd, parse, readline, builtins, bashline)
+                          40220 blesh=15820, with-vim=18508 (w/o above + "bind_function_def in execute_cmd.c")
+  eb4206d (bash-20111222) 40220 blesh=25776, with-vim=30256
+  5a31873 (bash-20120113) 40220 blesh=25916, with-vim=30524
+  77b3aac (bash-20121214) 40239 blesh=26052, with-vim=30660
+  118fb67 (bash-20150703) 40400 blesh=26128, with-vim=30608
+
+  * 分かった事は、上記のリリース版を用いているとメモリ使用量がバージョンごとに
+    かなり変動しているが、自分の手元でビルドした bash ではサイズはバージョンが
+    変わっても結構安定しているという事。ビルド時の設定などでサイズが結構変わる
+    のかもしれない。或いは bash-malloc を使うと振る舞いが安定しないという事なの
+    かもしれない。
+
+  * 一旦 bash-20111202 で壊れてから bash-20111216 で動く様になっている。そして
+    その時には既にメモリサイズが大きくなっている。壊れたのは ba4ab05 における
+    expr.c に対する修正を pick したら治った。とすると、ba4ab05 の中にある修正で
+    サイズが増える様になったみたいである。
+
+    特定できた。execute_cmd.c の中の bind_function_def の呼び出しによって容量が
+    増えている。
+
+  * devel 版でも同用意 bind_function_def の呼び出しを省略したらメモリ使用量は昔
+    と同様になった。しかも別にクラッシュしたりとかはしていない。
+
+    50300 blesh=15236, with-vim=17668
+
+  ? ではそもそも bind_function_def は何に使われているのか。shell_function_defs
+    は variables.c の中で閉じている。実際に使っているのは find_function_def 関
+    数を通しての様で一箇所だけである。execute_cmd.c である。そこを見てみると単
+    に関数の source_file を取得するのに使っているのみである。うーん。何とファイ
+    ル名を記録するだけの為に今まで 12MB も使っていたという事なのである。
+
+  ? 何を記録しているのか。確認してみた所、コマンドをコピーしている? と思ったが
+    コマンドに関しては呼び出し元で 0 を一時的に設定しているので記録されていない
+    筈。うーん。bind_function_def でコピーしていると思われる容量を確認したが、
+    別に 3000 項目 360kB 程度しか使っていない。管理領域にそんなに容量を使ってい
+    るとは思えないし、何故 12MB もメモリ消費が増加するのか分からない。不思議だ。
+
+    うーん。再度 bind_function_def が呼ばれた時に既存の entry にコピーしている。
+    この時に一時的に command を 0 に設定するという処置をしていないので command
+    を完全にコピーする事になっている。これによってサイズが増加している。
+
+2022-02-14
+
+* 計測結果
+
+  30257 blesh=15900, with-vim=19236
+  40044 blesh=16224, with-vim=19308
+  40253 blesh=16240, with-vim=19304
+
+  40348 blesh=26208, with-vim=31396
+  40423 blesh=26448, with-vim=31760
+  50018 blesh=25440, with-vim=30740
+
+  50108 blesh=33112, with-vim=40012
+  50208 blesh=32836, with-vim=39736
+
+  bash-4.3 及び bash-5.1 でメモリ使用量が増加した様に見える。特に vim mode を
+  source しただけの場合でもバージョン間で使用量が増えているという事を思うと、変
+  数に記録しているデータが嵩張っているのではなく、純粋に関数を定義した時のメモ
+  リー使用量が増えているという事。

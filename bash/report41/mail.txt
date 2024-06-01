@@ -1,0 +1,47 @@
+
+To add some contexts not in the commit message, I knew that recent
+versions of Bash consume more memory when the same shell script
+framework is loaded in different versions of Bash.  It seemed to be
+related to the definitions of shell functions rather than the shell
+variables.  I thought the increase could be gradually caused, but
+after bisecting, I realized that the increase of the memory use was
+actually caused by a single commit ba4ab055 (see the attached image.
+The vertical axis is the increase of RSS measured by comparing the
+results of `ps -o rss "$$"' before and after `source <script>', and
+the horizontal axis is the sequential number of commit in the devel
+branch).
+
+In particular, the increase was caused by the following hunk (on
+2011-12-15 according to ChangeLog):
+
+> diff --git a/execute_cmd.c b/execute_cmd.c
+> index e102eee9..adfaa486 100644
+> --- a/execute_cmd.c
+> +++ b/execute_cmd.c
+> @@ -5251,7 +5251,11 @@ execute_intern_function (name, function)
+>        return (EXECUTION_FAILURE);
+>      }
+>
+> -  bind_function (name->word, function);
+> +#if defined (DEBUGGER)
+> +  bind_function_def (name->word, funcdef);
+> +#endif
+> +
+> +  bind_function (name->word, funcdef->command);
+>    return (EXECUTION_SUCCESS);
+>  }
+
+Related changes in the past:
+
+* The `bind_function_def' had saved the function definition from the
+  beginning when it was introduced in commit d3a24ed2 (2011-02-15).
+  At that time, it was called only in the parsing phase.
+* In the next commit 5e13499c (2011-12-03), it was modified not to
+  save the function body for the first call of `bind_function_def'.
+* Later, in commit ba4ab055 (2011-12-15), `bind_function_def' was
+  started to be called also in the defining phase
+  (`execute_intern_function' in execute_cmd.c).
+* In commit 879213c6 (2018-01-03), it was modified so that the
+  function information at the parsing time does not overwrite the
+  existing function information, after the report by Bruno Vasselle:
+  https://lists.gnu.org/archive/html/bug-bash/2017-12/msg00056.html

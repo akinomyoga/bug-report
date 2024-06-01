@@ -104,6 +104,7 @@
   - https://lists.gnu.org/archive/html/bug-bash/2023-02/msg00143.html
 - report40: job error caused by funsub + bind + loadable builtin
   - https://github.com/akinomyoga/ble.sh/issues/361
+- report41: `bind_function_def` unnecessary function body
 
 ## Replies
 

@@ -1,0 +1,7 @@
+# gitignore
+
+A
+rss.txt
+rss.*.txt
+case2.txt
+rss-vs-commit.pdf

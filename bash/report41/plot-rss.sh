@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+data='
+  a314357 315 (bash-20091223) 40100 16036 18724
+  1665e22 320 (bash-20100108) 40100 16132 18820
+  9fc7642 362 (bash-20110107) 40200 16120 18808
+  987daba 392 (bash-20110622) 40210 15852 18540
+  b13b8a8 403 (bash-20110916) 40210 15816 18504
+  4b82d1c 411 (bash-20111118) 40210 15820 18508
+  e67d002 412 (bash-20111123) 40220 15944 18632
+  e3db237 413 (bash-20111202) 40220 16056 18744 (with fix)
+  2dead0c 414 (bash-20111209) 40220 15944 18632 (with fix)
+  ba4ab05 415 (bash-20111216) 40220 26124 30732
+  eb4206d 416 (bash-20111222) 40220 25776 30256
+  5a31873 420 (bash-20120113) 40220 25916 30524
+  77b3aac 484 (bash-20121214) 40239 26052 30660
+  118fb67 657 (bash-20150703) 40400 26128 30608
+'
+
+function extract-commit-count {
+  (
+    cd ~/prog/ext/bash-dev/
+    for commit in $(awk '{print $1}' <<< "$data"); do
+      echo "$commit $(git rev-list --count "$commit")"
+    done
+  )
+}
+#extract-commit-count
+
