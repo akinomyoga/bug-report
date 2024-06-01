@@ -15,8 +15,8 @@ set label 4 at first 392,16.2 offset -0.3,0 rotate by 45 font ',7' front '987dab
 set label 5 at first 403,16.2 offset -0.3,0 rotate by 45 font ',7' front 'b13b8a8'
 set label 6 at first 411,16.2 offset  0.0,0 rotate by 45 font ',7' front '4b82d1c'
 set label 7 at first 412,16.2 offset  1.1,0 rotate by 45 font ',7' front 'e67d002'
-set label 8 at first 413,16.2 offset  2.2,0 rotate by 45 font ',7' front 'e3db237'
-set label 9 at first 414,16.2 offset  3.3,0 rotate by 45 font ',7' front '2dead0c'
+set label 8 at first 413,16.2 offset  2.2,0 rotate by 45 font ',7' front 'e3db237 (+ expr.c fix)'
+set label 9 at first 414,16.2 offset  3.3,0 rotate by 45 font ',7' front '2dead0c (+ expr.c fix)'
 
 set label 10 at first 415,26.2 offset -1.2,0 rotate by 45 font ',7' front 'ba4ab05'
 set label 11 at first 416,26.2 offset  0.0,0 rotate by 45 font ',7' front 'eb4206d'

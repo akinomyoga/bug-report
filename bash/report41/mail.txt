@@ -1,18 +1,15 @@
 
 To add some contexts not in the commit message, I knew that recent
-versions of Bash consume more memory when the same shell script
-framework is loaded in different versions of Bash.  It seemed to be
-related to the definitions of shell functions rather than the shell
-variables.  I thought the increase could be gradually caused, but
-after bisecting, I realized that the increase of the memory use was
-actually caused by a single commit ba4ab055 (see the attached image.
-The vertical axis is the increase of RSS measured by comparing the
-results of `ps -o rss "$$"' before and after `source <script>', and
-the horizontal axis is the sequential number of commit in the devel
-branch).
+versions of Bash consume more memory when the same shell script is
+loaded.  After bisecting, I realized that the increase in memory use
+was actually caused by a single commit ba4ab055 (see the attached
+image.  The vertical axis is the increase of RSS measured by comparing
+the results of `ps -o rss "$$"' before and after `source <script>',
+and the horizontal axis is the sequential number of commit in the
+devel branch).
 
-In particular, the increase was caused by the following hunk (on
-2011-12-15 according to ChangeLog):
+In particular, the increase apparantly started to happen with the
+following hunk (on 2011-12-15 according to ChangeLog):
 
 > diff --git a/execute_cmd.c b/execute_cmd.c
 > index e102eee9..adfaa486 100644
