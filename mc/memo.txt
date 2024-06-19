@@ -1,0 +1,13 @@
+
+2024-06-19
+
+* Bug ticket system で gmail を登録したが confirmation email が届かない。うーん。
+  再送信する方法が分からない。tmu のメールアドレスに変更して、その後にまた
+  gmail.com に変更してみる。うーん。やはり駄目。再送ボタンも実はあったので試し
+  たが届かない。次に、koichi.murase@yukawa.kyoto-u.ac.jpから届くかについても確
+  認する。こちらは届く様だ。
+
+* https://midnight-commander.org/ で git://github.com が指定されているがこれは
+  既に廃止されている物である。
+
+  https://github.blog/2021-09-01-improving-git-protocol-security-github/

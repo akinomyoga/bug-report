@@ -1,0 +1,90 @@
+
+2024-06-19
+
+実際に使われているシェルは /bin/bash なのに ~/bin/bash が BASH に代入されている。
+
+* 実際に使われるシェルが /bin/bash なのは SHELL=/bin/bash だからの筈である。
+  SHELL=~/bin/bash とすればちゃんと bash-5.3 が使われる様になる。なのでやはり
+  mc は SHELL を使って bash を起動しているだけ?
+
+BASH 変数を何処からか継承しているのかもしれないと思って DEBUG=1 BASH= mcとして
+開始してみても何処からか BASH=~/bin/bash を拾ってきている様だ。更に不思議な事に
+自分で BASH を空にしてから開始すると BASH に export 属性が付加される? と思った
+がこれは単に BASH= とした時点で export 属性がつくからであるので不思議ではない。
+これが意味する所は誰かが BASH を書き換えているという事である。mc のソースコード
+では BASH を書き換えている様な雰囲気はない。最新版の mc をソースからビルドして
+も振る舞いは同様である。
+
+* bash-5.2 の中から SHELL=~/bin/bash DEBUG=1 ./mc で起動してもねじれは起こらな
+  い。つまり、呼び出し元の BASH もしくは /proc/ppid/exe を読み取る事によって発
+  生している訳ではない。
+
+* だとすると一体何処から BASH の値が拾われているのだろうか。PATH を変更して起動
+  すると BASH の値も置き換わる様だ。更に PATH=/bin:/usr/bin SHELL=~/bin/bash と
+  して起動するとどうなるか? → OK. 捻れを再現する事ができた。問題は何故この様な
+  事が起こるのかという事。
+
+  bash のソースで何故この様になるのか確認したい。どうも bash 自体自分自身の
+  path を決定するのを heuristic に行っている様だ。bash はget_bash_name という関
+  数で BASH の値を決定している。get_bash_name はshell_name を参照する。
+  shell_name には "bash" という文字列が入っている。この時 PATH を用いて bash コ
+  マンドの位置を特定しようとする。
+
+  ではそもそも何故 shell_name に ~/bin/bash ではなく bash が入っているのだろう
+  か。どうやら set_shell_name という関数で argv0 として "bash" が渡されている。
+  そしてこれが何処から来るかというと main 関数の時点で "bash"である。
+
+実際に mc のソースコードを見ると shell/common.c:421 で明示的に単なる"bash" とい
+う文字列を渡して bash を execl している。この部分を変更できないか。何か理由があ
+るのだろうか。先ず変更履歴を確認する。
+
+2016-01-01 https://github.com/MidnightCommander/mc/commit/0e79be1b7ac3a4718981c12cb3c4bb6e0cde5180#diff-3d801ce28677971d05dab1d8b30b5b5f82911c0247e1ebff021d9d02baaafce2L368
+2013-01-13 https://github.com/MidnightCommander/mc/commit/ae6e647845833789237b78772583dd1babd66680
+2010-05-04 https://github.com/MidnightCommander/mc/commit/3a1e0966aea644037d1e3a8edf16a83f0ca9b64b
+2004-09-24 https://github.com/MidnightCommander/mc/commit/e0f5d6e37f0ad32c51276481d1f94517617f6b84
+2004-02-10 https://github.com/MidnightCommander/mc/commit/7eb0ef8bd2e2949f2388d385e720a127ba1eca0e
+1998-02-27 https://github.com/MidnightCommander/mc/blob/eb6b3842abd84db5e9a7695d59fb6db5c5321f4f/src/subshell.c#L445
+
+うーん。一番最初の commit からこうなっている。次に調べるのは forum で過去に類似
+の request や discussion があったかという事。
+
+https://midnight-commander.org/search?q=execl+shell&noquickjump=1&wiki=on&changeset=on&ticket=on&milestone=on
+
+  検索リンク。commits にも検索が当たる様だ。便利だ。"exec shell" だと沢山hit し
+  すぎて分からない。execute にも当たっている様だ。"execl" だともう少し当たる。
+
+https://midnight-commander.org/ticket/3689
+
+  ここでは execl (shell->path, shell->path, ...) が suggest されているが、これ
+  は未だシェルが特定できていない段階でシェルを決定する為の呼び出しの提案であっ
+  て、実際にシェルを開始する時にどうするかについての議論ではない。
+
+https://midnight-commander.org/ticket/3692
+
+  これは 3689 の rework だが execl についてはもはや言及されていない。
+
+https://midnight-commander.org/ticket/3684#comment:11
+
+  ここで bash は execl (shell, shell, "-rcfile") で起動していると書かれているが
+  本等だろうか。これは 2016 のコメントなので本体のコードはそうはなっていない。
+  或いはこれはこの人の作った patch の中の振る舞いを説明しているだけ?
+
+* bash, zsh 以外のシェルの場合にはそのまま path を指定している。この違いは何だ
+  ろうか。他のシェルの場合には初めからこの様になっていたのか、或いは別の理由に
+  よって修正されたのか。
+
+  最初の ver は "tcsh" を指定している。ae6e6478 では "fish" も指定している。
+  0e79be1b の時点で指定の仕方が変わっている。
+
+  https://github.com/MidnightCommander/mc/commit/f596c916a42a0868897b3314e557b0a82df37017#diff-a53be32b6eb94ecb6e07c99375b34e0f980fce37ee4be1f4cea26cfc775bda73R353
+
+  この commit で execl(shell, shell, NULL) に変更している。対応するticket は以
+  下の通り。
+
+  https://midnight-commander.org/ticket/2742
+  https://mail.gnome.org/archives/mc-devel/2012-March/msg00000.html
+
+* 参考: bash 側で reliable に現在の path を知ることは現実的ではない。特にbash
+  は色々な環境をターゲットとしているので。
+
+  https://stackoverflow.com/questions/1023306/finding-current-executables-path-without-proc-self-exe

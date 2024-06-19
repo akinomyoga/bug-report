@@ -1,0 +1,195 @@
+https://midnight-commander.org/ticket/4549
+
+I wouldn't try to argue this is a bug or a defect of Midnight
+Commander, but the current way of starting the shell instance by
+`execl` causes a problem with the initialization of the shell variable
+`BASH` in Bash.
+
+== 1. Summary ==
+
+**What is BASH (shell variable) and how Bash initializes it**---The
+shell variable `BASH` is a special variable of Bash and is initialized
+by Bash. It is expected to contain the absolute path to the binary
+file of the current process. Bash basically determines its value based
+on the value of `argv[0]` because that is the only portable way to
+resolve it to the correct value. POSIX doesn't define an interface to
+portable determine it (other than `argv[0]`, which depends on how
+`exec` was performed and thus is not so reliable). Depending on the
+operating system, one might use a specialized way to determine the
+path to the binary file (as discussed
+e.g. [https://stackoverflow.com/questions/1023306 here]), but Bash is
+expected to be built in a wider range of systems and will have to
+anyway fall back to `argv[0]` even if it tried to support specialized
+ways. When `argv[0]` is not an absolute path, Bash doesn't know what
+would be the exact path, but it tries to resolve it by searching the
+matching executable file in `PATH`.
+
+**What happens with Midnight Commander**---In the current `master`
+branch, `mc` determines the path to the shell by the environment
+variable `SHELL`.  When it starts the shell process, the fixed string
+`"bash"` is passed to `execl` as `argv[0]`.
+
+> Quoted from [https://github.com/MidnightCommander/mc/blob/57dddea47c08411384eaa6dd6a220fec0c933417/src/subshell/common.c#L421 src/subshell/common.c:421@master]:
+> {{{
+>         execl (mc_global.shell->path, "bash", "-rcfile", init_file, (char *) NULL);
+> }}}
+
+Then, Bash started by `mc` receives just `bash` as `argv[0]` and tries
+to determine the absolute path by searching the name in `PATH`.  This
+can pick up **a wrong path** when the executable path `bash` found in
+`PATH` is different from the one specified to `SHELL`.
+
+**What I suggest**---Could we pass the actual path as `argv[0]` in
+calling `execl` (as follows)?
+
+{{{
+        execl (mc_global.shell->path, mc_global.shell->path, "-rcfile", init_file, (char *) NULL);
+}}}
+
+Is there any reason that we need to pass the ambiguous `"bash"` to
+`argv[0]`? FYI, except for Bash and Zsh, we already specify the actual
+absolute path of the shell to `argv[0]`. If there is no real reason to
+specify `"bash"` and `"zsh"`, `"zsh"` should probably be updated to
+`mc_global.shell->path` as well.
+
+----
+
+== 2. Investigation in codebase ==
+
+The current way of passing `"bash"` to `argv[0]` has already been the
+case at the very initial commit in the Git repository:
+
+> Quoted from [https://github.com/MidnightCommander/mc/blob/eb6b3842abd84db5e9a7695d59fb6db5c5321f4f/src/subshell.c#L445 src/subshell.c:445@(initial commit)]:
+> {{{
+>       execl (shell, "bash", "-rcfile", init_file, NULL);
+> }}}
+
+So this has been stable for at least 26 years.
+
+
+I also noticed that in the current `master` branch, the shells other
+than `bash` and `zsh` are actually called in a way I suggest for Bash:
+
+> Quoted from [https://github.com/MidnightCommander/mc/blob/57dddea47c08411384eaa6dd6a220fec0c933417/src/subshell/common.c#L434 (master) src/subshell/common.c:434@master]
+> {{{
+>         execl (mc_global.shell->path, mc_global.shell->path, (char *) NULL);
+> }}}
+
+This was introduced by
+[https://github.com/MidnightCommander/mc/commit/f596c916a42a0868897b3314e557b0a82df37017
+commit f596c916]. The associated ticket is
+[https://midnight-commander.org/ticket/2742 Ticket 2742]. The code
+previously specified the fixed strings `"tcsh"` and `"fish"`, but it
+started to specify `mc_global.shell->path` to `argv[0]`. I tried to
+find the discussion about the change of `argv[0]` in the ticket, but
+this change was not mentioned at all in the discussion.
+
+----
+
+== 3. Version information and steps to reproduce (Optional) ==
+
+These are the version information and steps to reproduce. If the above
+description is sufficient for you, you can safely skip this section.
+
+
+**What version of Midnight Commander is used?**
+
+{{{
+$ LC_MESSAGES=C src/mc -V
+GNU Midnight Commander 4.8.31-131-g57dddea47
+Built with GLib 2.78.6
+Built with S-Lang 2.3.3 with terminfo database
+With builtin editor
+With subshell support as default
+With support for background operations
+With mouse support on xterm
+With support for X11 events
+With internationalization support
+With multiple codepages support
+Virtual File Systems:
+ cpiofs, tarfs, sfs, extfs, ftpfs, shell
+Data types:
+ char: 8; int: 32; long: 64; void *: 64; size_t: 64; off_t: 64;
+$ LC_MESSAGES=C src/mc --configure-options
+ '--prefix=/home/murase/opt/mc/dev' 'PKG_CONFIG_PATH=/home/murase/local/lib/pkgconfig:/home/murase/local/lib64/pkgconfig'
+}}}
+
+**What steps will reproduce the problem?**
+
+1. To explicitly demonstrate the problem, one needs to prepare
+  different versions of Bash. For example, let us here assume we
+  build `bash-5.3-alpha` from the source and install it at
+  `--prefix="$HOME/.opt/bash/5.3-alpha"`.  Then, include the path in
+  `PATH`:
+
+  {{{
+  PATH=~/.opt/bash/5.3-alpha/bin:$PATH
+  }}}
+
+  Note that the login shell and the environment variable `SHELL` are
+  still assumed to be the system one (such as `/bin/bash`). Only when
+  `bash` is executed from a command line, the local version in
+  `~/.opt/bash` is used.
+
+2. Then one can start `mc` and drop in the full-screen shell mode by
+  pressing Ctrl-o.
+
+  {{{
+  $ echo "$BASH"
+  }}}
+
+  These are optional commands to check the context:
+
+  {{{
+  $ echo "$BASH_VERSION"
+  $ cat "/proc/$$/exe" <!-- If the system supports procfs -->
+  }}}
+
+**What is the expected output?**
+
+For `echo "$BASH"`, the path to the current Bash image is expected to
+be printed.  For `echo "$BASH_VERSION"`, the path to the current Bash
+version is expected to be printed.  For `cat "/proc/$$/exe"`, if the
+system supports it, the correct path to the current Bash image is
+expected to be printed.
+
+**What do you see instead?**
+
+For `echo "$BASH"`, the path to Bash first found in PATH is printed,
+which is different from the output of `cat "/proc/$$/exe"`. The other
+commands produce the expected outputs.
+
+----
+
+== 4. Background (Optional) ==
+
+Here, in case one might wonder about the use case of `BASH` where it
+needs to be the correct absolute path, I explain the background in
+which I originally faced the problem. If you wouldn't require the use
+case to justify the change, you can skip this section as well.
+
+Bash offers a mechanism called "loadable builtins", which loads a
+dynamic library (`.so`) to add a "builtin" command dynamically by
+using `enable -f xxx.so xxx`. Since the object is dynamically linked,
+the ABI that the dynamic library assumes needs to match the ABI of the
+current Bash (including the layout of the related structures and the
+function signatures), or otherwise, the Bash process crashes.
+
+Bash also provides standard loadable builtins in `/usr/lib/bash/*` (or
+`$prefix/lib/bash/*`) when it is installed by `./configure` and `make
+install`. One can attempt to find the standard loadable builtins based
+on the shell variable `BASH` by using
+e.g. "${BASH%/*}/../lib/bash/*". However, if `BASH` points to a Bash
+version different from the current process image,
+`${BASH%/*}/../lib/bash/*` will pick up loadable builtins for a
+different Bash version. Then, the Bash process crashes on attempting
+
+{{{
+enable -f <path to shared object found via Bash> <builtin name>
+}}}
+
+I had an interactive setting that tries to use the `fdflags` builtin
+if available. This works outside Midnight Commander, but the Bash
+process doesn't start in Midnight Commander. It turned out that Bash
+actually crashed inside Midnight Commander. The crash happened on the
+first use of the `fdflags` builtin.

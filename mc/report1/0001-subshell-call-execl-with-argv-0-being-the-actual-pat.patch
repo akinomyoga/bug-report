@@ -1,0 +1,38 @@
+From 3855168704a24c1ef7c2cbcf167f668144616045 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Wed, 19 Jun 2024 14:00:16 +0900
+Subject: [PATCH] subshell: call execl with argv[0] being the actual path to
+ Bash
+
+We currently call Bash with argv[0] being just the fixed string
+"bash", but this confuses Bash when it initializes the shell variable
+BASH, which are expected to be the absolute file path to the current
+Bash image.  This patch fixes argv[0] to be the actual path that mc
+uses to start Bash.
+---
+ src/subshell/common.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/subshell/common.c b/src/subshell/common.c
+index 99c530373..dbc32afc2 100644
+--- a/src/subshell/common.c
++++ b/src/subshell/common.c
+@@ -418,13 +418,13 @@ init_subshell_child (const char *pty_name)
+     switch (mc_global.shell->type)
+     {
+     case SHELL_BASH:
+-        execl (mc_global.shell->path, "bash", "-rcfile", init_file, (char *) NULL);
++        execl (mc_global.shell->path, mc_global.shell->path, "-rcfile", init_file, (char *) NULL);
+         break;
+ 
+     case SHELL_ZSH:
+         /* Use -g to exclude cmds beginning with space from history
+          * and -Z to use the line editor on non-interactive term */
+-        execl (mc_global.shell->path, "zsh", "-Z", "-g", (char *) NULL);
++        execl (mc_global.shell->path, mc_global.shell->path, "-Z", "-g", (char *) NULL);
+         break;
+ 
+     case SHELL_ASH_BUSYBOX:
+-- 
+2.45.0
+
