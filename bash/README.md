@@ -105,6 +105,10 @@
 - report40: job error caused by funsub + bind + loadable builtin
   - https://github.com/akinomyoga/ble.sh/issues/361
 - report41: `bind_function_def` unnecessary function body
+  - https://lists.gnu.org/archive/html/bug-bash/2024-06/msg00000.html
+- report42: `force_fignore` vs `compgen -d` and command-name cmopletions
+  - https://github.com/scop/bash-completion/issues/1229
+  - https://lists.gnu.org/archive/html/bug-bash/2024-07/msg00054.html
 
 ## Replies
 
