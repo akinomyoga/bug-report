@@ -1,0 +1,110 @@
+
+
+取り敢えず WINCH の内部で checkwinsize が更新されない問題に関してはパッ
+チを提出した。
+
+
+* 一方で、WINCH が呼び出されなくなった問題に関しては依然として残っている。
+
+  > commit 2208813a97583b0da1a843f161be0a575a766e8d
+  > Author: Chet Ramey <chet.ramey@case.edu>
+  > Date:   Thu Sep 2 10:52:20 2021 -0400
+
+  これは一応動いている。
+
+  > commit 71a11dbeb478fb637ea451f2f37c73d7539cc1f5 (tag: ng2)
+  > Author: Chet Ramey <chet.ramey@case.edu>
+  > Date:   Mon Dec 6 09:17:41 2021 -0500
+
+  これは駄目
+
+  > commit c813e24652989e829c2af483d526fabbc1cc2223
+  > Author: Chet Ramey <chet.ramey@case.edu>
+  > Date:   Mon Oct 25 11:56:15 2021 -0400
+
+  これは OK
+
+  > commit e59452c752d434828f36f4ca2c754d338ff7d693 (tag: ng3)
+  > Author: Chet Ramey <chet.ramey@case.edu>
+  > Date:   Tue Nov 16 09:57:07 2021 -0500
+
+  これは駄目
+
+  > commit 4657c0405034d4126c6d16f4aeb97a3f92f77a26 (tag: ok3)
+  > Author: Chet Ramey <chet.ramey@case.edu>
+  > Date:   Mon Nov 1 10:42:50 2021 -0400
+
+  これは OK
+
+  > commit b06200f7a1e1d7e1ffe39bb035dc761a9a204f1a (tag: ok4)
+  > Author: Chet Ramey <chet.ramey@case.edu>
+  > Date:   Thu Nov 4 15:45:55 2021 -0400
+
+  OK
+
+  > commit d384b92874197e0b885b32b50777b9cba0910c09 (tag: ng4)
+  > Author: Chet Ramey <chet.ramey@case.edu>
+  > Date:   Mon Nov 8 09:53:24 2021 -0500
+  > 
+  >     update version to 5.2-devel, update copyright dates
+
+  これが犯人の様だ。然し、この commit は大した変更ではない筈だ。。うーん。
+  実際に改めて ok4 と比較してみるとちゃんと振る舞いの違いが歴然と存在し
+  ている。不思議だ。うーん。何か違いがあるとしたら version 番号の変更?
+  これにより ble.sh 側の振る舞いが変わって駄目になっている?
+
+  どうやら ble/util/msleep の実装によって振る舞いが変わる様だ。うーん。
+  ble/util/msleep している間に WINCH を受け取った時の振る舞いの違いだ
+  ろうか? histdb の bgprocess timeout が悪いのだろうか。。と思って
+  histdb を off にしてみたら快適に動く様になった。つまり、msleep して
+  いる間に WINCH を受け取ると消えてなくなる。
+
+
+* 自前でビルドすると WINCH が微妙に呼び出されたり呼び出されなかったりする問題
+
+  > commit 11bf534f3628cc0a592866ee4f689beca473f548
+  > Author: Chet Ramey <chet.ramey@case.edu>
+  > Date:   Wed Mar 10 10:35:28 2021 -0500
+
+  これの時点で微妙に WINCH が呼び出される様ではあるが振る舞いとしては微
+  妙である。呼び出されなかったりする。
+
+  > commit 9b44e16c6f716cf26c81a51c3b2e8a2cc4a31043
+  > Author: Chet Ramey <chet.ramey@case.edu>
+  > Date:   Thu Dec 3 14:24:06 2020 -0500
+
+  これは bash-5.1 にほぼ同じである筈なのに呼び出されたり呼び出されなかっ
+  たりである。何故?
+
+  > commit 6ebfddbf2e32828761111c5b1e77cecffa1769fd
+  > Author: Chet Ramey <chet.ramey@case.edu>
+  > Date:   Wed Jun 3 18:50:02 2020 -0400
+
+  これは bash-5.1-alpha に近いはずだがこれも振る舞い的には駄目。
+
+  うーん。release 版でもやはり同様に WINCH が走ったり走らなかったりする。
+  一方で detach 状態にある時には特に問題なく呼び出されている★
+
+
+* read -t の中で WINCH が処理されるので、更に内側で read -t を実行した
+  時に timeout 情報が消えてしまう。
+
+  $ trap '{ echo a; read -t 1; echo z; } >/dev/tty' WINCH
+  $ echo A; read -t 5; echo Z
+
+  shtimer_select の中で winch を sigmask する様にしたら動く様になった
+  が、これが他の箇所での動作に影響を与えないのかというのには注意するべ
+  き。
+
+  ? 例えば interactive session の timeout に対して WINCH はその場で発
+    火するべきなのか、それとも後で発火するべきなのか。今まではどの様に
+    振る舞っていたのか → 試してみたがここでの sigmask とは関係ないよ
+    うである。何れにしても動いているし、bash-5.1 以前でもその場で発火
+    している。
+
+  ? read -e の間の振る舞いはどうなるのだろうか。
+
+    →何と 5.1 だと read -t 5 -e の途中で WINCH が発生すると timeout
+    情報が消滅してしまう様だ。一方で 5.2 では期待通りにその場で WINCH
+    が発火されている。途中で WINCH の中で read -t 0.1 を実行してもちゃ
+    んと timeout が消滅せずに処理されている気がする。

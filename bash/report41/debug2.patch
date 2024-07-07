@@ -1,0 +1,58 @@
+From 300ea7f5ce5edfd7a5e07170c829308819bf8578 Mon Sep 17 00:00:00 2001
+From: Koichi Murase <myoga.murase@gmail.com>
+Date: Sat, 1 Jun 2024 11:27:05 +0900
+Subject: [PATCH 4/4] r0041-test
+
+---
+ variables.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/variables.c b/variables.c
+index 84b30d93..a4390ac9 100644
+--- a/variables.c
++++ b/variables.c
+@@ -3496,6 +3496,14 @@ bind_function (const char *name, COMMAND *value)
+    information in addition to the command, into the FUNCTION_DEF hash table.
+    If (FLAGS & 1), overwrite any existing definition. If FLAGS == 0, leave
+    any existing definition alone. */
++static size_t debug_total_size_estimate = 0;
++static size_t debug_overwrite_count = 0;
++static size_t get_def_content_size (FUNCTION_DEF* def) {
++  return sizeof(WORD_DESC)
++    + (def->name ? strlen(def->name->word) + 1 : 0)
++    + (def->source_file ? strlen(def->source_file) + 1 : 0);
++}
++
+ void
+ bind_function_def (const char *name, FUNCTION_DEF *value, int flags)
+ {
+@@ -3506,8 +3514,17 @@ bind_function_def (const char *name, FUNCTION_DEF *value, int flags)
+   entry = find_function_def (name);
+   if (entry && (flags & 1))
+     {
++debug_total_size_estimate -= get_def_content_size(entry);
++
+       dispose_function_def_contents (entry);
++
++      cmd = value->command;
++      value->command = 0;
+       entry = copy_function_def_contents (value, entry);
++      value->command = cmd;
++
++debug_total_size_estimate += get_def_content_size(entry);
++fprintf(stderr, "hash: rewrite#%zu size=%zu (command=%p)\n", debug_overwrite_count++, debug_total_size_estimate, entry->command);
+     }
+   else if (entry)
+     return;
+@@ -3520,6 +3537,8 @@ bind_function_def (const char *name, FUNCTION_DEF *value, int flags)
+ 
+       elt = hash_insert (savestring (name), shell_function_defs, HASH_NOSRCH);
+       elt->data = (PTR_T *)entry;
++debug_total_size_estimate += sizeof(FUNCTION_DEF) + get_def_content_size(entry);
++fprintf(stderr, "hash count=%d size=%zu (command=%p)\n", hash_size(shell_function_defs), debug_total_size_estimate, entry->command);
+     }
+ }
+ #endif /* DEBUGGER */
+-- 
+2.45.0
+

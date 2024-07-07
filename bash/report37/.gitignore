@@ -8,8 +8,13 @@
 /out
 /fnmatch
 /fnmatch.exe
-/strmatch.so
 /fnmatch.so
+/strmatch.so
+/strmatch_ex.so
 /ab
 
 /dfaglob.pdf
+
+# valgrind output
+# e.g.$ valgrind --log-file=mem.txt --leak-check=full ./bash0-fix3 --norc
+/mem.txt
