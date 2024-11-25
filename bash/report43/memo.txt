@@ -1,0 +1,142 @@
+# -*- fill-column: 79 -*-
+
+* bisect4.sh] declare -A d=([0]=1 [0]+=2 ...) が正しく動作しない問題
+
+  194cfc28f8c573736dec4e51fbfa1681a072c7f3 が原因の commit。
+  "commit bash-20190719 snapshot"
+
+  | [原因特定]
+  |
+  | どうやら以下の行に於いて結果が変わっている様だ。
+  |
+  | newval = make_array_variable_value (entry, ind, key, value, flags);
+  |
+  | array の時は flags = 3 になっているが、assoc の時は flags = 7 になっている。
+  | array の時に弄って flags = 7 に書き換えると assoc の時と同様に問題の振る舞
+  | いになる。つまり、 make_array_variable_value が flag 4 によって振る舞いを変
+  | えるのが原因。ではこの flag 4 は一体何なのか。
+  |
+  | #define ASS_MKASSOC	0x0004
+  |
+  | うーん。associative array がなければ作成する的な物だろうか。
+  | make_array_variable_value の実装が怪しい。
+  |
+  | どうも array で flags = 4 にして同様の振る舞いになったのは単に型の不整合に
+  | よって古い値を取得するのに失敗しているからであって原因は異なる様だ。そもそ
+  | も assoc の該当するセルが未だ存在していないのが原因の様だ。配列の場合には該
+  | 当するセルが存在して古い値が含まれているのでちゃんと古い値を取得することが
+  | できていた。
+  |
+  | では何故 assoc で突然動かなくなったのだろうか。それまでは動いていたというこ
+  | とはそれまではちゃんと値が代入されていたという事の筈である。
+  |
+  | うーん。assoc の場合に akey の内容が破壊されている気がする。うーん。でもこ
+  | れは単に assoc_insert の仕様として中で free するからに他ならない気がする。
+  | make_array_variable_value を呼び出す時点では未だ破壊されていない様なのでこ
+  | れは関係ないだろう。
+  |
+  | うーん。どうも１つ目の [0]=1 の処理の後で var の中を見に行っても中身にアク
+  | セスできないみたいだ。代入した直後の値を assoc_reference で見に行っても中身
+  | は空である。何故?
+  |
+  | と思ったら分かった。どうやら declare -A a=() の構築では変数 var とは別に
+  | HASH_TABLE* nhash を持っていて、 += の処理は既存の var を参照しながら nhash
+  | を構築している。全ての構築が終わった後に nhash を var に適用している。うー
+  | ん。
+  |
+  | という事は…。何と declare -A a=([0]+=1) とすると古い a の値を参照する様に
+  | なっている。うーん。これは意図した振る舞いなのだろうか。array と異なる振る
+  | 舞いにする理由がないのでこれはバグなのだろうと思われる。
+  |
+  | $ ./bash -c 'declare -a a=([0]=1); declare -a a=([0]+=2); declare -p a'
+  | declare -a a=([0]="2")
+  | $ ./bash -c 'declare -A a=([0]=1); declare -A a=([0]+=2); declare -p a'
+  | declare -A a=([0]="12" )
+  |
+  | 改めて ChangeLog を見てみると…うーん。これは誰かから何か別の報告があってそ
+  | れを修正する為に導入された?
+  |
+  | > - assign_compound_array_list: change to assign associative array
+  | >   key-value pairs into a new hash table (NHASH), so we can still use
+  | >   the old value for expansion. We do this in place of clearing out
+  | >   the contents of the associative array before performing the expansion
+  | >   and assignments. After doing all the assignments into NHASH, we swap
+  | >   NHASH into the variable as its value and dispose of the old value.
+  | >   Fixes inconsistency reported by Darren 'Tadgy' Austin
+  | >   <darren@afterdark.org.uk>
+  |
+  | うーん。
+  |
+  | $ bash-5.0 -c 'declare -a a=([0]=X [1]=Y); declare -a a=([0]="${a[1]}" [1]="${a[0]}"); declare -p a'
+  | declare -a a=([0]="Y" [1]="X")
+  | $ bash-5.0 -c 'declare -A a=([0]=X [1]=Y); declare -A a=([0]="${a[1]}" [1]="${a[0]}"); declare -p a'
+  | declare -A a=([1]="" [0]="" )
+  | $ bash-5.1 -c 'declare -a a=([0]=X [1]=Y); declare -a a=([0]="${a[1]}" [1]="${a[0]}"); declare -p a'
+  | declare -a a=([0]="Y" [1]="X")
+  | $ bash-5.1 -c 'declare -A a=([0]=X [1]=Y); declare -A a=([0]="${a[1]}" [1]="${a[0]}"); declare -p a'
+  | declare -A a=([1]="X" [0]="Y" )
+  |
+  | なるほど確かに報告された振る舞いに関しては array と同様の結果になるように修
+  | 正されている。しかし、それでは何故 array に関しては特別な配慮をしなくても問
+  | 題が発生していなかったのだろうか。array と assoc で別の展開の仕方をしている
+  | のだろうか。うーん。
+
+  まとめ: (...) の中身の単語を展開している時に配列が同時に書き換わると変な事に
+  なる問題が darren@afterdark.org.uk により報告された [1]。その対策として、
+  (...) の中身を評価する時は新しい値を別の辞書 nhash に書き込んで、それが終わっ
+  たらnhash を実際の変数空間に配置する様になった。これにより以下の振る舞いが修
+  正された。
+
+  $ declare -A a=([0]=X [1]=Y); declare -A a=([0]="${a[1]}" [1]="${a[0]}"); [[ ${a[0]},${a[1]} ==Y,X ]]
+
+  しかし、この様な実装だと nhash に書き込まれた値を参照することができなくなるの
+  で [0]=1 [0]+=2 の様な指定が動かなくなったのである。具体的に以下の様な問題が
+  ある。
+
+  $ declare -A a=([0]=1 [0]+=2); [[ ${a[0]} == 12 ]]                      # fail
+  $ declare -A a=([0]=old); declare -A a=([0]+=new); [[ ${a[0]} == new ]] # fail
+
+  [1] https://lists.gnu.org/archive/html/bug-bash/2019-07/msg00112.html
+
+  | x 然し、上で行われた修正も assign_func が設定されている場合には不完全である。
+  |   何故なら assign_func は結局 entry に対して実施されているからである。
+  |
+  |   todo: 実際に assign_func がある場合について失敗する例を作成する。その為に
+  |   は assign_func を使っている変数を特定する必要がある。assign_func は
+  |   init_dynamic_assoc_var 経由で設定されている。その様な変数の例として
+  |   BASH_ALIASES が存在する。
+  |
+  |   $ bash -c 'BASH_ALIASES=([a]=X [b]=Y); declare -A BASH_ALIASES=([a]="${BASH_ALIASES[b]}" [b]="${BASH_ALIASES[a]}"); declare -p BASH_ALIASES'
+  |   bash-5.0: declare -A BASH_ALIASES=([b]="Y" [a]="Y" )
+  |   bash-5.1: declare -A BASH_ALIASES=([b]="X" [a]="Y" )
+  |
+  |   うーん。ちゃんと治っている。何故問題が発生しないのだろうか。と思ったが、
+  |   194cfc28 直後だと変な振る舞いになっている。つまり、更に追加の修正があった
+  |   という事。
+  |
+  |   c6c7ae8 "commit bash-20200427 snapshot" によって修正されている。結構時間
+  |   が経ってから修正されたようだ。中を見ると結構大きな修正の様な気がする。うー
+  |   ん。説明を読む限りは assign_compound_array_list は既に展開されているとい
+  |   う事だろうか。
+  |
+  |   だとすると最早 nhash を使った特別の対策は不要になったのでは? → 実際に
+  |   nhash をなくしても元々報告されていた問題は発生しないという事を確認した。
+  |
+  | ? reject: つまり、entry も一緒にダミーで新しく作ってそれに対して構築する様
+  |   にするべきなのではないか? → 結局最新の bash では展開が先に行われる様になっ
+  |   た為、基本的に 194cfc28 の nhash を revert するだけで良い。それ以上の複雑
+  |   な処理を実装する必要はない。
+
+  上記の修正は BASH_ALIASES (assign_func を経由して値が設定される) に対しては動
+  いていない。実際に以下は件の修正の後も失敗する。
+
+  $ BASH_ALIASES=([a]=X [b]=Y)
+  $ declare -A BASH_ALIASES=([a]="${BASH_ALIASES[b]}" [b]="${BASH_ALIASES[a]}")
+  $ [[ ${BASH_ALIASES[a]},${BASH_ALIASES[b]} == Y,X ]]
+
+  しかし、更に別の commit で問題が発生しなくなっている。この commit は連想配列
+  に対して (k v k v ...) の形の代入を許す物であり、同時に展開を事前に行う様に修
+  正がされている。
+
+  この修正が入ったという事は元々の問題に対する nhash の対策は不要になったという
+  事。基本的に 194cfc28 の nhash を revert するだけで良い。
