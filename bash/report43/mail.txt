@@ -1,0 +1,114 @@
+From: murase
+To: chet.ramey@case.edu
+Subject: [PATCH] 5.1..devel: fix "declare -A d=([k]=v1 [k]+=v2)" picking an old value
+
+Configuration Information [Automatically generated, do not change]:
+Machine: x86_64
+OS: linux-gnu
+Compiler: gcc
+Compilation CFLAGS: -march=native -O3
+uname output: Linux chatoyancy 6.5.12-100.fc37.x86_64 #1 SMP PREEMPT_DYNAMIC Mon Nov 20 22:28:44 UTC 2023 x86_64 GNU/Linux
+Machine Type: x86_64-pc-linux-gnu
+
+Bash Version: 5.3
+Patch Level: 0
+Release Status: beta
+
+Description:
+
+  After commit 194cfc28, the construct `declare -A d=([k]+=v)' started
+  to append the new value to the old value before the assignment
+  starts instead of the current value.  This patch partially reverts a
+  change in commit 194cfc28, which became unnecessary after commit
+  c6c7ae81.
+
+  ----
+
+  Here is the detail: The change in commit 194cfc28 was introduced to
+  fix a problem reported in [1].
+
+  [1] https://lists.gnu.org/archive/html/bug-bash/2019-07/msg00112.html
+
+  Before commit 194cfc28, the following test failed because d[0] and
+  d[1] had been already cleared when `[0]="${d[1]}"' and
+  [1]="${d[0]}"' were evaluated:
+
+  bash-5.0$ declare -A d=([0]=X [1]=Y)
+  bash-5.0$ declare -A d=([0]="${d[1]}" [1]="${d[0]}")
+  bash-5.0$ [[ ${d[0]},${d[1]} == Y,X ]] || echo fail
+  fail
+  bash-5.0$ declare -p d
+  declare -A d=([1]="" [0]="" )
+
+  This problem was specific to associative arrays and did not happen
+  with indexed arrays.  To solve this problem, commit 194cfc28
+  introduced a temporary hash table `nhash' in the function
+  `assign_compound_array_list' (arrayfunc.c).  The new implementation
+  first applies the changes to `nhash' while referencing the old state
+  of `d'.  After processing all the changes, the old associative array
+  is relaced with the new associative array `nhash'.  This is the
+  related item in ChangeLog:
+
+  > - assign_compound_array_list: change to assign associative array
+  >   key-value pairs into a new hash table (NHASH), so we can still
+  >   use the old value for expansion. We do this in place of clearing
+  >   out the contents of the associative array before performing the
+  >   expansion and assignments. After doing all the assignments into
+  >   NHASH, we swap NHASH into the variable as its value and dispose
+  >   of the old value.  Fixes inconsistency reported by Darren
+  >   'Tadgy' Austin <darren@afterdark.org.uk>
+
+  However, this change broke other behavior.
+
+  bash-5.1$ declare -A d=([0]=old)
+  bash-5.1$ declare -A d=([0]=new1 [0]+=new2)
+  bash-5.1$ [[ ${d[0]} == new1new2 ]] || echo fail
+  fail
+  bash-5.1$ declare -p d
+  declare -A d=([0]="oldnew2" )
+
+  This worked as expected in all the previous versions 4.2--5.0 since
+  the associative array is introduced in Bash 4.2, but now it fails in
+  Bash 5.1, 5.2, and the devel branch.
+
+Repeat-By:
+
+  See the following example:
+
+  $ bash-dev --norc
+  bash-dev$ declare -A d=([0]=old)
+  bash-dev$ declare -A d=([0]=new1 [0]+=new2)
+  bash-dev$ [[ ${d[0]} == new1new2 ]] || echo fail
+  fail
+  bash-dev$ declare -p d
+  declare -A d=([0]="oldnew2" )
+
+  In the above example, we expect the new value of `d[0]' to be
+  "new1new2".  However, it becomes an unexpected value "oldnew2" and
+  the string "fail" is printed.
+
+Fix:
+
+  After the nhash trick was introduced in commit 194cfc28, another
+  commit c6c7ae81 introduced the construct `declare -A d=(k1 v1 k2 v2
+  ...)'.  In the process of implementing it, the evaluation order of
+  the shell expansions in the the array compound list `(...)' was
+  changed so that the expansions are completed before the assignment
+  is started to be processed.  Because of this change in the
+  evaluation order, the nhash trick introduced in commit 194cfc28 is
+  no longer needed because the array compound list no longer
+  references the old values in the assignment process.  For example,
+  in the first example,
+
+    declare -A d=([0]="${d[1]}" [1]="${d[0]}")
+
+  is first converted to
+
+    declare -A d=([0]='Y' [1]='X')
+
+  and then the assignment is performed, so the previous associative
+  array does not need to be kept in the assignment stage.  We can
+  safely remove the nhash trick now.
+
+TODO: the suggested fix does not work for the assignment without the
+assignment builtin.
