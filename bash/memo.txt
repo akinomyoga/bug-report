@@ -223,6 +223,71 @@
   Bugs
 ------------------------------------------------------------------------------
 
+2024-12-27
+
+* assoc ${a[@]}:offset:count} is inconsistent
+
+  * offset is shifted by one
+  * Even if one sets count = 0, it generates one element
+
+* How the failglob fails seems inconsistent. There might be other failures that
+  fails in a similar way.
+
+  $ bash -c 'shopt -s failglob; echo a*b*c*d; echo hello'
+  bash: line 1: no match: a*b*c*d
+
+  $ cat failglob.sh
+  echo a*b*c*d; echo same line
+  echo failglob.sh 1
+  function f { echo a*b*c*d; echo yes; }; echo hello; f; echo world
+  echo failglob.sh 2
+  $ bash -c 'shopt -s failglob; source ./failglob.sh; echo hello'
+  ./failglob.sh: line 1: no match: a*b*c*d
+  failglob.sh 1
+  hello
+  ./failglob.sh: line 3: no match: a*b*c*d
+  failglob.sh 2
+  hello
+
+* ${!A[@]-}
+
+  $ (echo ${!undef-xxx})
+  bash: undef: invalid indirect expansion
+  $ (echo ${!undef[@]-xxx})
+  bash: undef[@]: invalid indirect expansion
+  $ (a=(); echo ${!a[@]-xxx})
+  xxx
+  $ (a=(); echo ${!a[0]-xxx})
+  xxx
+  $ (a=(); echo ${!a-xxx})
+  xxx
+
+  The first two cases were actually fixed in Bash 5.0
+
+  $ bash-4.4
+  $ (echo ${!undef-xxx})
+  xxx
+  $ (echo ${!undef[@]-xxx})
+  xxx
+  $ exit
+
+  So the array cases should be leftovers.
+
+* array indirection and empty test
+
+  $ a=('')
+  $ ref='a[@]'; echo "a[@]: ${a[@]:-(empty)}; !ref: ${!ref:-(empty)};"
+  $ ref='a[*]'; echo "a[*]: ${a[*]:-(empty)}; !ref: ${!ref:-(empty)};"
+  $ a=("" "") IFS=
+  $ ref='a[@]'; echo "a[@]: ${a[@]:-(empty)}; !ref: ${!ref:-(empty)};"
+  $ ref='a[*]'; echo "a[*]: ${a[*]:-(empty)}; !ref: ${!ref:-(empty)};"
+  a[@]: '(empty)'; !ref: '';
+  a[*]: '(empty)'; !ref: '';
+  a[@]: ' '; !ref: ' ';
+  a[*]: '(empty)'; !ref: '';
+
+  これらは同じ結果を返すべきではないのか。
+
 2021-09-10
 
 * ./configure --with-bash-malloc=no にしたら改善するのだろうか
