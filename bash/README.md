@@ -110,6 +110,7 @@
   - https://github.com/scop/bash-completion/issues/1229
   - https://lists.gnu.org/archive/html/bug-bash/2024-07/msg00054.html
 - report43: `declare -A assoc+=([0]=1 [1]+=2)`
+- report44: `set -- "" "" "" ""; IFS=x; echo $*`
 
 ## Replies
 
