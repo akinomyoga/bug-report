@@ -3,9 +3,287 @@
   ToDo
 ------------------------------------------------------------------------------
 
+2025-03-03
+
+* assign_op を使う様に変更
+  https://github.com/oils-for-unix/oils/pull/2279#discussion_r1974627046
+
+  現在の codebase では has_plus 及び plus_eq が散乱している。これらを全て
+  assign_op を使う様に変更するという事が示唆されているが、実際にやってみようと
+  すると asdl がエラーを発する。これは asdl のバグだろうか。もしくは、正しい指
+  定の仕方が別にあるという事だろうか。
+
+  https://oilshell.zulipchat.com/#narrow/channel/121539-oil-dev/topic/Bash.20initializer.20list.20.2F.20ASDL.20name.20length/near/502808233
+
+  テストするという様に言われたがその後返事がない。
+
+* docs: BashArray / indexed array の表記を整理する
+  https://github.com/oils-for-unix/oils/pull/2284#discussion_r1976543625
+
+* うーん。InitializerList を実装したので以下の振る舞いは実は好ましくない。今ま
+  では右辺のリテラルだけで型が確定していたので (-x 等のフラグを除き) flags を指
+  定する必要はなかっただが、今や () は何も指定がないと配列を生成するので -A は
+  ちゃんと出力するのが望ましい。
+
+  そうすると連想配列の時にだけ declare -A を表示するのも変なので全部に対して
+  declare をつけた方が良いのではないかという事になる。
+
+  $ declare -A hello=([a]=b)
+  $ declare -A
+  hello=(['a']=b)
+
+  やはり bash に合わせて全部出力するのが良い様な気がする。
+
+  * これは spec/array-compat の最後のテストケースにも関係してくる。というか、
+    spec/array-compat の最後のテストケースで要求されているのだから、わざわざ
+    InitializerList を待たなくても対応してよかったのでは? そもそもこの
+    spec/array-compat は誰が提出したのだろうか。
+
+    989bcbc47e で追加されている。 2023-07-10 の事だからこちらの預かり知らぬとこ
+    ろでの変更ということになる。しかし…対応する Zulip 等の議論を追跡するのが困
+    難である。
+
+    特定した。ここで言及されている。
+
+    https://oilshell.zulipchat.com/#narrow/channel/384942-language-design/topic/value.2EBashArray/near/374022332
+
+    然し、特にこのふるまいに関しては、誰かからの報告があったという訳でもない?
+
+    libencode.sh が言及されている様だが対応する議論は以下しか見つからない。日付
+    も近いのでこれの事だろう。しかし、これと配列がどう関係しているのかは謎であ
+    る。或いは word splitting で一時的に発生する配列に関しても BashArray を使っ
+    ていたからそれの関連という事? でもその取扱は外から見える動作における
+    BashArray のデザインとは全く関係ない気がする。よく分からない。
+
+    https://github.com/oils-for-unix/oils/issues/1664
+
+2025-02-23
+
+* チルダ展開が : で阻害される
+
+  $ osh -c 'echo ~:x'
+
+* tmpenv+=... は後で個別に処理する。何処かに document する。
+
+* bin/osh -c 'echo "${PIPESTATUS[*]}"; declare -p PIPESTATUS' で何も表示されない。
+
+  これはそもそも特別変数の取り扱い方を変更するべきではないか? 取り敢えず特別の
+  変数も Cell の中に入れたら良いのでは? つまり、value として新しく SpecialVar
+  もしくは BuiltinVar なるものを作成して、色々の処理はその中で実装するという事。
+  BashAssoc や BashArray と同じ様に実装すれば機械的に対応できる気がする。
+
+  或いは、余り大きく構造は変えないで declare -p の時だけ処理を特別に追加する?
+
+  うーん。そもそも現在の実装では特別変数は常に生成した値を返す様になっている癖
+  に変更可能というのも変である。うーん。readonly という事にしてしまって良いので
+  はないか。
+
+  * OldValue で cell を参照する様になったがやはり PIPESTATUS 等に対して修正をし
+    ようとすると別の変な値が取得される様になるし問題なのではないか。と思ったが、
+    単に参照する時はちゃんと値を取れるという事を考えると、これは既に考察した物
+    と同じだから改めて別項目として考える必要はない?
+
+  * osh-0.27.0 -c 'PIPESTATUS=([hello]=world); declare -p PIPESTATUS' で mem の
+    中に BashAssoc を代入できている気がする。然し、実際にアクセスしようとすると
+    できない、という状態。
+
+    然し、これは今回の修正で自然に禁止される様になる。然し、別の経路で修正でき
+    てしまう可能性があるのでは。例えば単に文字列を追加しようとした時など…。
+
+* BUG tmpenv= declare -p tmpenv としても -x フラグが見当たらない。
+
+* 配列添字の中の算術式の処理が変だ
+
+  $ bash -c 'a["b c"]=1; declare -p a'
+  bash: line 1: b c: arithmetic syntax error in expression (error token is "c")
+  $ osh -c 'a["b c"]=1; declare -p a'
+  declare -a a=(1)
+
+* osh: declare -n a is silently ignored と思ったが a の中身が配列参照の時のみ
+  問題が生じる様である。配列参照の時にエラーを返す様にするべきである。
+
+2025-02-21
+
+* ./osh/sh_expr_eval.py:1053: BigInt で解釈するべき
+
+2024-12-25
+
+* failglob 時の振る舞いが bash と異なると思ったが bash の振る舞いの方が変な気が
+  する。bash はどうやら top-level line at parser が失敗する様だ。例えば関数内で
+  実行していると関数の実行が全てキャンセルされて、top-level line の ; で区切ら
+  れた以降のコマンドもキャンセルされるが、次の行のコマンド以降は実行され続ける。
+
+* test/spec.sh var-ref -vr 4 に関連して。
+
+  a=(x y); echo ${!a[@]-def} は bash では単なるコマンドエラーだが、osh は fatal
+  エラーになってシェルが終了する
+
+  2025-02-26 今確認してみたら振る舞いが逆? bash は top parser level までキャン
+  セルされるが、osh はそのまま実行を続ける様になっている。
+
+2024-11-23
+
+* BUG
+
+  $ bin/osh -c 'a=(2); [[ -v a[@] ]]'
+
+2024-06-21
+
+* printf %u で 0x80000000 以上の数を取り扱う事ができない。そもそも 64 bit 整数
+  に対応していないとしても、%u は 32bit unsigned で解釈するべきで失敗するべきで
+  はない。
+
+  2025-03-03 これは修正されていない。
+
+* printf '%#x' に対応していない
+
+* printf '%ld' に対応していない
+
+2022-01-07
+
+  * eval -g か或いはそれを模倣するのに十分な機能 (特にシグナル)
+
+    シグナルハンドラーの取り扱いを Bash に厳密に一致させるか、或いは eval -g
+    #704 に於いて C-c などによるコマンド実行の停止は eval -g を終了させるところ
+    までで終わりにする機能。eval -g は現時点では subinterpreter の中で実行しな
+    くて同じ名前空間の中で実行するというので良い。
+
+  * headless ?
+
+    FD passing の話 ... これは posix_openpt の事だろうか。そういう複雑な事をせ
+    ずに走っている osh の stdin/stdout etc を繋ぎ変える事は可能だろうか。或いは、
+    osh は stdin/stdout を繋ぎっぱなしにするけれども、実行するコマンドは別の所
+    から読み取る様にするなど。これが一番現実的な方法の気がする。
+
+    然しこの時の問題はジョブ管理が子供の osh によって実施できるのかという事。或
+    いは、osh の下に bash/ble.sh を子プロセスとして保持して其処に入力を全て渡す
+    という方向性も考えられる。
+
 2020-04-22
 
-* _ble_keymap_vi_cmap_is_cancel_key[63|_ble_decode_Ctrl]=1 がエラーになっている。
+* rps1 が何故か表示されてしまう。抑制しているはずなのに。
+
+* ${!var@a} が動いていない。
+
+2020-03-21
+
+* declare:
+
+  * bash が対応していない物
+    declare -pg
+    declare -pgnrxaA var
+
+
+------------------------------------------------------------------------------
+  Done
+------------------------------------------------------------------------------
+
+2025-03-03
+
+改めて過去の todo 等を整理する
+
+* reported: osh: declare -p a is silently ignored when a does not exist
+
+  これは ble.sh#53 として報告した。向こうが対応してくれるだろうし、面倒なので取
+  り敢えずは様子見する事にする。
+
+  というかこれについては更に昔にもメモが残っていた。
+
+  * 2024-06-28 declare -p nonexistent は期待通り失敗するがエラーメッセージは表
+    示されない。
+
+* fixed: 既存のデータを書き換えているが readonly は大丈夫なのか? 書き換える前に
+  readonly かどうかをチェックするべきでは? 或いは GetValue の時点で readonly を
+  確認する方法はあるか? うーん。OldValue を取ってきた時にチェックを行っている?
+
+  うーん。実際にやってみたら readonly なのに中身が書き換わっている!
+
+  $ osh-0.27.0 -c 'a=(1 2 3); readonly a; eval "a+=(1 2 3)"; declare -p a'
+    a+=(1 2 3)
+    ^~~
+  [ eval arg at line 1 of [ -c flag ] ]:1
+  
+    a=(1 2 3); readonly a; eval "a+=(1 2 3)"; declare -p a
+                           ^~~~
+  [ -c flag ]:1: fatal: Can't assign to readonly value 'a'
+  declare -ra a=(1 2 3 1 2 3)
+
+* done: dict=(key value) も個別に対応する。document も修正する。
+
+* fixed: 2024-12-25 以下の振る舞いが異なる
+
+  ```
+  $ bash -c 'x=(1 2 3); declare -A a=([0]="x[0]"); echo ${!a@a}'
+  a
+  $ bin/osh -c 'x=(1 2 3); declare -A a=([0]="x[0]"); echo ${!a@a}'
+
+  $
+  ```
+
+* SparseArray 関連はもう終わったので整理してよいだろう
+
+  * 2024-06-21 sparse array に何とか対応してもらう事はできないだろうか。
+
+  * 2024-07-01 sparse array
+    https://oilshell.zulipchat.com/#narrow/stream/384942-language-design/topic/value.2EBashArray.20-.20which.20representation.3F.20.20sparse.3F
+    https://oilshell.zulipchat.com/#narrow/stream/384942-language-design/topic/What.20are.20all.20the.20operations.20on.20value.2EBashArray.3F
+    https://oilshell.zulipchat.com/#narrow/stream/384942-language-design/topic/std.3A.3Amap.20.2F.20unordered_map.20with.20GC
+    https://oilshell.zulipchat.com/#narrow/stream/384942-language-design/topic/Performance.20results.20for.20sparse.20Dict.5BBigInt.2C.20str.5D
+    https://oilshell.zulipchat.com/#narrow/stream/384942-language-design/topic/SparseArray.20append.20performance
+
+* ble.sh osh branch maintenance
+
+  * 2024-06-28 osh-8
+
+    b1ab0814 - (24 minutes ago) osh: WA use assoc as sparse array - Koichi Murase
+    22f2ef6e - (6 days ago) osh: WA pendatic oils - Koichi Murase
+    d3ab6b9f - (6 days ago) osh: WA NYI - Koichi Murase
+    fe014dd6 - (4 years, 3 months ago) osh (drop): WA mapfile - Koichi Murase
+    9451cc91 - (4 years ago) osh: WA bind -v - Koichi Murase
+    c30e7673 - (4 years, 2 months ago) osh: WA declare -i - Koichi Murase
+    c9323367 - (4 years, 2 months ago) osh: WA dense array - Koichi Murase
+    a1de03c6 - (4 years, 2 months ago) osh: WA 100>&- - Koichi Murase
+    3ae317c8 - (4 years, 3 months ago) osh: WA let - Koichi Murase
+
+    OIL_VERSION -> OILS_VERSION 対応策
+
+  * 2022-01-07 osh maintained?
+
+    not maintained. 最新の ble.sh は track していない。然しこの2年間の間に
+    ble.sh も大きく変更があった。中には現在の oil では対応しきれない機能を使っ
+    ている箇所もある。例えば #647 declare -p など (suppress-stderr で使っている)。
+    これに関しては代わりに関数定義をコピー・移動する機能があれば実は良い。他に
+    も色々あるかもしれない。
+
+  2025-03-03 これは最近 rebase したので OK。未だ色々動かなくなったのが直ってい
+  ないが取り敢えず色々報告はしているので直に修正されるだろう。
+
+* 2024-06-21 算術式コマンドの終了ステータスと integer overflow
+
+  if ((0x100000000)); then echo this should be executed; fi が正しく実行されな
+  い。これは oil-native の問題だろうか。
+
+  改めてビルドしてみようと思ったが依然として Ubuntu を前提としている様である。
+  なのでなかなか手が出にくい。でも Ubuntu でビルドして動作を確認するだけなら行
+  ける? 或いは release からダウンロードすれば良い?
+
+  printf と arith の 32bit vs 64bit の問題については osh w/ Python では発生しな
+  い。つまり、これは翻訳の問題である。そういえば Python での数の取り扱いと bash
+  での数の取り扱いについて書いている記事があった気がする。つまり、これは既知の
+  問題という事?
+
+  https://www.oilshell.org/blog/2024/03/release-0.21.0.html#64-bit-integers
+
+  ここに書かれている。内部的に 32bit を使っているという事が書かれている。つまり、
+  元の Python には 32bit / 64bit の区別がない為に、翻訳後に 32bit にするか
+  64bitにするか決定できないので、取り敢えず全部 32bit にしているという事。やは
+  りPython で書いてそれを C++ に直すというのには限界があるのではないか。
+
+  2025-03-03 これは今試したらちゃんと修正されている。
+
+* 2020-04-22 arr[63|_ble_decode_Ctrl] によるエラー
+
+  _ble_keymap_vi_cmap_is_cancel_key[63|_ble_decode_Ctrl]=1 がエラーになっている。
   途中に | があると其処で終わってしまう様だ。
 
   a[1|1]=A
@@ -19,16 +297,506 @@
 
   取り敢えずこれは無視する事にする。vi をロードしない限りは問題ない。
 
-* rps1 が何故か表示されてしまう。抑制しているはずなのに。
+  2025-03-03 これは既に報告した
 
-* ${!var@a} が動いていない。
+* 2020-03-21 Redirections
+
+  * check <>
+  * check # type annotation
+
+  * fixed: BUG これは同じ fd に dup しようとした時に壊れている問題だった。
+
+    $ echo 3>a.txt
+    $ echo 3>&- 3>a.txt
+    $ echo 3>a.txt
+
+    1番目は成功するが 2/3 番目は失敗する。なぜ?
+
+    $ echo 3>&-
+    $ echo 3>a.txt
+    $ echo 3>a.txt 3>&-
+    $ echo 3>a.txt
+
+    以上では何も問題は発生しない。という事は、
+    close/open によって何か変な事が起こっているという事。
+
+  * fixed: BUG echo hello 3>&- 3>a.txt で何も出力されない
+    今度のバグ。何も出力されない。
+
+    $ echo hello 3>a.txt
+
+    と思ったら、これは上の修正に含まれる誤りだった。
+    然し、そうだったとしても、変な状態になってしまうのは困る。
+
+  * fixed: BUG heredoc で _PushClose していて、
+    更に Pop で復元をしているが、
+    saved との間で順番が保持されていないから
+    これは変なことになってしまうのではないか。
+
+    何れにしても今は _PushClose に依存した実装にする。
+
+    後で確かめる必要がある。
+    確かめてみたが pipe() で生成された read_fd に
+    対して実行しているので実は関係ない?
+    問題が起こるとすれば read_fd の上に新しく fd を作ったり、
+    或いは fd の上に新しく fd を作ったりした場合?
+
+    うーん。どうしたら問題が再現できるか。
+
+    3=A の状態で 4>&3- として、<<< string とする。
+    move(3, 4) が起こってから open(3) が起こると期待される。
+    この時正しい復元は close(3), move(4, 3) とする事。
+    然し、現在の実装では close が後で起こるので変な事になる。
+
+    因みに従来の実装では fd がリダイレクトの途中で閉じる事はなかったので、
+    <<< string によって其処に新しく fd が実装されるという事はなかった。
+    これはつまり &- &3- を新しく実装した事による問題である。
+
+  * fixed: BUG 今の実装だと echo 5>hello.txt した後に
+    fd 5 が残留してしまう気がする。後でチェックする。
+    これは既存の問題である。未だ修正していない。
+
+  * BUG: exec の後に fd が大量に残っている…。
+    MakePermanent で saved に残っている fd を削除するべきなのでは。
+    但し、MoveFd した物に関しては削除しては困るので注意が必要。
+
+    これは微妙。テストが作りづらい。
+    現在の fd の数を数える方法 (POSIX)?
+    procfs が使えるシステムであれば良いが。
+    或いは大量に fd を開く?
+
+    | osh$ echo /proc/self/fd/* | wc -w
+    | 8
+    | osh$ for i in {1..100}; do exec 5>&1; done
+    | osh$ echo /proc/self/fd/* | wc -w
+    | 108
+    |
+    | bash$ echo /proc/self/fd/* | wc -w
+    | 9
+    | bash$ for i in {1..100}; do exec 5>&1; done
+    | bash$ echo /proc/self/fd/* | wc -w
+    | 10
+    |
+    | osh$ ulimit -n 100
+    | osh$ ulimit -n
+    | 1024
+
+  * BUG: echo >&3 とすると終了する
+    と思ったがこれは元からだった。気にしない事にする。
+
+  * exec {fd}>hello
+    heredoc も含めて様々な場合。
+    取り敢えず対応した気がする。
+
+    {fd}>&- に関しては何か警告を出す。
+    と思ったら bash は fd の中身を読んでそれを閉じるらしい。
+
+    2025-03-03 これは今の version で以下を試したらちゃんと開いて閉じているので、
+    問題ないだろう。
+
+    $ osh -c 'exec {fd}>/dev/null; ls -l /proc/$$/fd; exec {fd}>&-; ls -l /proc/$$/fd'
+
+* 2020-03-21 declare 制限: 存在しない配列要素の表現について
+  arr=(); arr[2]=1 とすると [None, None, '5'] という状態になる。
+  然しこれを正しく表現する declare -p arr=(...) の表現が存在しない。
+
+  2025-03-03 これは InitializerList に対応したのでもう気にしなくて良くなった。
+
+2025-02-27
+
+* fixed: チルダ展開が起こっていない
+
+  $ osh-0.27.0 -c 'a=([0]=~);declare -p a'
+
+* BashInitializerList
+
+  * ok: ([100]=... [100]+=...) としても BashInitializerList が一要素になってし
+    まう?  と思ったがそういう事ではなくて += が全部 = になってしまっているのが
+    問題だった様だ。
+
+  * done: PlusEquals の呼び出し元も複数あって全部ちゃんと更新する必要がある。
+
+  * done: EvalRhsWord で生成した BashInitializerList は何処へ行くのか追跡する。
+
+    ./osh/cmd_eval.py:646:            val = self.word_ev.EvalRhsWord(e_pair.val)
+
+      ★tempenv はここで設定されている。うーん。直接代入されているが…
+        PlusEquals を処理する必要がないから直接代入する事になっている? 何れにし
+        ても Initializer は処理する必要がある。
+
+      x 何と tmpenv+=1 cmd という文法に対応していない様だ。うーん。
+
+        osh/cmd_parse.py:330 で排除する様になっている。これは何故だろうか。
+
+    ./osh/cmd_eval.py:1040:            rhs = self.word_ev.EvalRhsWord(pair.rhs)
+      ★変数代入はここを通過する様だ。
+
+    ./osh/word_eval.py:1042:            replace_val = self.EvalRhsWord(op.replace)
+      ここは単に文字列を抜き出しているだけなので BashInitializerList が来ること
+      はない。
+
+    ./osh/word_eval.py:2351:                        right = self.EvalRhsWord(rhs)
+      AssignArg に格納され、その AssignArg は assign_args という配列に格納され
+      る。そしてそれは cmd_value.Assign に格納されて、 _EvalAssignBuiltin とい
+      う関数から返却される。そしてこれは _DetectAssignBuiltinStr という関数から
+      返却される。
+
+      ./osh/word_eval.py:2399:                return self._DetectAssignBuiltinStr(val0.s, words, meta_offset)
+        _DetectAssignBuiltin から返却される。
+
+      ./osh/word_eval.py:2416:                    cmd_val = self._DetectAssignBuiltinStr(
+
+        SimpleEvalWordSequence2 から返却される。そしてそれは更に
+        EvalWordSequence2 から返却される。
+
+      ./osh/word_eval.py:2509:                    cmd_val = self._DetectAssignBuiltinStr(
+      ./osh/word_eval.py:2536:                    cmd_val = self._DetectAssignBuiltin(
+        EvalWordSequence2 から返却される。
+
+        ./osh/word_eval.py:2580:        cmd_val = self.EvalWordSequence2(words, False)
+
+          EvalWordSequence から返却される。と思ったが、どうやら List[str] を抜
+          き出して返すだけなのでこれ以降は追跡しなくて良い。
+
+          > ./osh/cmd_eval.py:543:                    files = self.word_ev.EvalWordSequence([arg_word])
+          > ./osh/cmd_eval.py:1264:                iter_list = self.word_ev.EvalWordSequence(words)
+          > ./osh/word_eval.py:2172:                strs = self.EvalWordSequence(words)
+          > ./ysh/expr_eval.py:1222:                strs = self.word_ev.EvalWordSequence(words)
 
 
+        ./osh/cmd_eval.py:914:        cmd_val = self.word_ev.EvalWordSequence2(words,
 
-
-------------------------------------------------------------------------------
-  Done
-------------------------------------------------------------------------------
+          todo: _DoSimple で _RunSimpleCommand に渡される。
+          shell_ex.RunSimpleCommand と _RunAssignBuiltin を呼び出している。
+          BashIntiializerList はどちらになるだろうか。
+
+          * cmd_value.Assign に格納されているという事を考えると
+            cmd_value.Assign から呼び出されている _RunAssignBuiltin だけ追跡す
+            れば良いだろうか。_RunAssignBuiltin の中では assign_builtins から対
+            応する builtin のオブジェクトを取得して更に其処にある Run コマンド
+            を呼び出している。assign_builtins は shell.py で初期化されている
+            assign_b であろう。そして其処にある builtin は newvar, readonly,
+            export で対応されている。既に全部対応済みである。
+
+            ★代入 builtin はここで処理される。
+
+  * done: InitializerList の docs が必要
+
+  * done: dict=1 で builtin を上書きできてしまうのは変。更に、dict+=1 とすると
+    エラーが発生する。これはどの様に考えるべきか。
+
+    というか、s+=(init) も s=() も失敗するべきなのだろうか? うーん。取り敢えず
+    の PR では s+=(...) は禁止する方向にするのが妥当の気がする。
+
+    うーん。ysh の component によって bash で動くスクリプトが動かなくなってしま
+    うのは避けるのが無難の気がするので、BuiltinFunc は Undef の如くに無視するの
+    で良い気がする。
+
+    ? その他の value の型は? うーん他にもたくさんある様だ…。Func 等というもの
+      もある。つまり、 func は変数と同じ名前空間に存在するという事?
+
+      現在の state を dump する機能があった筈。どうしたら良い? うーん。crash
+      dump を強制的に発生させてみたが、BuiltinFunc 等の特別の変数までは dump し
+      てくれない様だ。うーん。自分で dump するコードを一時的に書いて試してみる
+      しかないのか?
+
+      と思って mem.GetValue の実装を見てみたが、実はやっぱり名前空間は分かれて
+      いる? そもそも crash dump は全ての変数を型に関係なく列挙している。
+      BuiltinFunc は実は別の場所に格納されていて、他に変数が見つからなかった時
+      にのみそれが返却される仕組みになっている様だ。
+
+      どうやら bin/osh -c '= __builtins__' で全部列挙できる様だ。BuiltinFunc だ
+      けでなく様々な型が含まれている。うーん。他のものは全て Obj の様である。
+      BuiltinProc もあるが、それは module-invoke という不可能な変数名に紐づいて
+      いるので無視する事にする。
+
+    * 因みに "echo $dict" とするとエラーになる。環境変数として dict が予め存在
+      している場合には osh では環境変数が優先されるのでOK。ysh は BuiltinFunc
+      の方が優先される。そもそも初期化していない変数を触っている時点で、環境の
+      dict に影響されてしまうかもしれないという意味でそのスクリプトは余り良くな
+      いという事になるので、まあ、この振る舞いは妥当なのかもしれない。
+
+      しかし setting=${dict-default} みたいにして参照していて、呼び出し側は
+      dict を設定しているかもしれないし設定していないかもしれない、みたいな状況
+      ではどうするのだろうか?
+
+      $ dict1=hello bin/osh -c 'echo ${dict-default}'
+        echo ${dict-default}
+             ^~
+      [ -c flag ]:1: fatal: Can't substitute into word, got BuiltinFunc
+
+      うーん。しかしこれは余り ble.sh とは関係ないし問題が起こるというのも
+      hypothetical でしかないし、言語設計の決断とも関係しているからこのままにす
+      る事にする。
+
+  * fixed: declare -A a=([hello]=world) で初期化を実行しようとすると配列になっ
+    てしまう。
+
+    * flag_A が指定されていて変数が set されていない、もしくは str が格納されて
+      いる場合は先に BashAssoc に変換してそれを a に格納してしまう? 然し、それ
+      だと InitializerList の index を解決する前に値が変化してしまう事になりよ
+      くない (特に incompatible な型の場合に前の型を削除する仕組みになっている
+      と駄目)。
+
+      或いは old_val を外部から与える様にする。然しそれだと ListInitialize の中
+      でやっているのと同様の処理を外側でチェックする事になり処理が二重になって
+      しまう様な気もする。と思ったが、それで良いのかもしれない。
+
+      flag_A が指定されている時は、Undef, Str, BashArray, InternalStringArray
+      に対しては新しいインスタンスを生成する? 同様に flag_a が指定されている時
+      も新しいインスタンスを生成する
+
+      * これは Reconcile の中で実行する事は意味があるか? と思ったが、必要ないの
+        に old_val を取得する事になったりして無駄ではないか? この old_val が必
+        要になるのは結局 InitializerList の時だけである。
+
+      * うーん。そもそも old_val が flag_a や flag_A と incompatible な時にはど
+        の様に処理するべき?
+
+        もしかして先の ReconcileTypes への修正で何か破壊したか? と思ったが現在
+        の osh の設計では上書きする事になっているので実は old_val は気にしなく
+        て良かった。old_val を参照してどうにかするのか今回からの新しい振る舞い
+        となる。
+
+    * tmpenv など別の ListInitialize の呼び出し元との兼ね合いもあるのでは? と思っ
+      たが tmpenv の場合には flag_a や flag_A は設定されないので気にしなくて良
+      い。とにかく flag_a や flag_A が指定されない場合の振る舞いについては変化
+      させない様にする事にする。
+
+  * fixed: 本当に _ListInitializeEvaluateKeys で完全に算術式評価を行ってから代
+    入開始で良いのでだろうか? もしかしたら既に代入した別の要素を参照しながら何
+    かする可能性? これは bash の振る舞いを観察する? Bash も version によって色々
+    だった筈。というかそれが以前の議論に出てきたものでは。
+
+    $ bash-5.2 -c 'a=(1 2 3); a+=([a[1]]=10 [a[2]]=10); declare -p a'
+    declare -a a=([0]="1" [1]="2" [2]="10" [10]="10")
+
+    うーん。bash の振る舞いを見ると代入する内に実際に値が適用されて行っている様
+    だ。代入している時点で既に内容が書き換わっていると思うべき。うーん。やはり
+    index は書き換えながら処理するべき?
+
+    新しく変数を用意している場合にはどうなるか?
+
+    $ bash -c 'a=(1 2 3 [a[1]]=10 [a[2]]=10); declare -p a'
+    declare -a a=([0]="1" [1]="2" [2]="10" [10]="10")
+    $ bash -c 'a=(1 2 3); a=(1 2 3 [a[1]]=10 [a[2]]=10); declare -p a'
+    declare -a a=([0]="1" [1]="2" [2]="10" [10]="10")
+    $ bin/osh -c 'a=(1 2 3); a=(1 2 3 [a[1]]=10 [a[2]]=10); declare -p a'
+    declare -a a=(1 2 10 10)
+    $ bin/osh -c 'a=(1 2 3 [a[1]]=10 [a[2]]=10); declare -p a'
+    declare -a a=(10 2 3)
+
+    うーん。これを見るとそもそも変数を設置してから後付で値を調整している様に見
+    える。うーん。この振る舞いを再現するのはちょっと難しい。これは報告して後で
+    処理する様にするのが良い気がする。
+
+    一方で、index は書き換えながら処理する様に変更するべきの気がする。完全では
+    ないがそちらの方が bash に近いを振る舞いをするから。その為に何をどのように
+    変更したら良いだろうか。現在の実装だと indices を渡している。一方で、これを
+    正しく処理する為には arith_ev を渡したい。然し、arith_ev は sh_expr_eval に
+    あって、sh_expr_eval は bash_impl に依存しているので、bash_impl から
+    arith_ev を使おうとすると循環参照になって駄目。という事は諸々の関数は
+    cmd_eval の中に置かなければならなくなる。と言いつつ、
+    BashArray_ListInitialize は cmd_eval でしか使っていないから問題ない? と思っ
+    たが、実装詳細に依存しているという意味ではやはり bash_impl の中に置いておき
+    たい。うーん。そうすると BashArray_ListInitialize の実装は BashArray_* を用
+    いた実装になってしまうが、仕方がないのかも知れない。
+
+    うーん。どうせ完全には対応できていないという事であれば現在の振る舞いのほう
+    が説明する時に説明しやすいし well-defined の様に思われるのでこのままで良い?
+    うーん。
+
+    * またこれについても doc に記述するべきである。
+
+  * done: test case: [0]="$@" に対して何が起こるのか?
+  * done: test case: a=([100]=1 2 3 4)
+  * done: test case: a=([100]=1 2 3 4 [5]=1 2 3 4)
+  * done: test case: a=([100]=1 [100]+=2)
+  * done: test case: a=([hello]+=world [world]+=hello) # for both BashArray/BashAssoc
+  * done: test case: zulip 上の。
+
+  * ok: ShArrayLiteral の初期化が三箇所で行われている。一箇所は潰した。他の箇所
+    についてもチェックする必要がある。もう一個は既に編集した箇所に隣接していて、
+    これは単に削除すれば良い話だった。
+
+    もう一個については ysh/expr_eval.py の中で生成されている。近辺に
+    BashAssocLiteral がある訳でもないので、文法的に実際に ShArrayLiteral を使う
+    べき文脈という事なのだろう。これはこのままにしておくべき?
+
+    * しかしこの時に問題になるのは、ここの ShArrayLiteral がどの範囲で使われる
+      のかという事である。既存の ShArrayLiteral を処理するコードは残しておく必
+      要があるのだろうか? それともこれは YSH のコードの中だけで使われると想定し
+      て、それ以外の場所における ShArrayLiteral の処理は削除して良いのか?
+
+      一つの手は ShArrayLiteral に関する処理を一つずつ消して行ってテストが失敗
+      したら戻すという事にする。でも、本当にそれで良いのか。理解せずに勝手に削
+      除してしまうのはやはり危ない気がする。
+
+      改めて確認したが、実は ShArrayLiteral に関する処理は既に殆ど消えていた。
+      というかそもそもそんなに無かった。未だ残っている所があるがこれらについて
+      は改めて質問するか、自分で調べて不要と判断すれば削除して良い。
+
+    * 完全ではないかもしれないがまあ OK という事にする。
+
+  * done: 報告する時には a=([k]=v) の振る舞いが変更されるという事を明示する。
+
+    $ bash -c 'a=(1 2 3); set | grep ^a=' > cache-data.txt
+    $ bash -c 'source cache-data.txt; a+=(4 5 6); declare -p a'
+    $ osh -c 'source cache-data.txt; a+=(4 5 6); declare -p a'
+
+    論旨: 「"declare -A a" を宣言しないで済む」という osh の利点は本当に利点な
+    のだろうか。これは Bash より permissive でゆるゆるな実装を許すということに
+    なるのではないか? もしそうなら宣言無しの a=([k]=v) は常に警告を発する様にす
+    るべきだろう。しかし、そうだとしたらわざわざ OSH で a=([k]=v) (宣言無し) を
+    利用する動機もないし、OSH でわざわざ a=([k]=v) を BashAssoc の初期化構文と
+    して用意する理由もなくなる。
+
+    一方で互換性の観点から言っても A 宣言無しの a=([k]=v) は配列の初期化であっ
+    て欲しい。実際に ble.sh は Unicode の辞書 (sparse) を保存するのにこの形式を
+    用いている。
+
+2025-01-27
+
+* うーん。色々こんがらがっている。一つずつちゃんと直していく必要がある。
+
+  現在修正しようとしているのは配列についても quoted されているかどうかをちゃん
+  と考慮して修正するという事。
+
+  元々 25,26,33,35-38,40-42 が失敗していた。テストを追加したので、現在のテスト
+  番号に直すと 26,27,34,36-39,41-43 (x10) に対応する。一つ目の commit を入れる
+  と 4,6,26,27,34,38,39,41,43 (x9) が失敗する様になった。
+
+  つまり、36,37,42 が直って 4,6 が新しく失敗する様になっている。4,6 で何が起こっ
+  ているのかと言うと…
+
+  * 元々の osh の実装だととにかく IFS の最初の文字でくっつけて、その後に分割す
+    るという方式を取っている。$* $@ の場合には IFS でくっつけてもその後で分割さ
+    れるという事を想定している。一方で、"$*" の場合には IFS でくっつけてその後
+    分割されないので問題ない。"$@" の場合は配列として保持したままにする。配列は
+    この場合だけなので、配列が残っている場合は常に quoted と想定して良い。とい
+    う具合である。
+
+    しかしこれだと IFS= の時に一旦くっついたものを再度分割するのが不可能になる。
+    つまり、$* や $@ が正しく動かない。本来の bash や他のシェルと同様の振る舞い
+    にする為には $* や $@ をその場でくっつけるのは適切でない。寧ろくっつけるの
+    は "$*" だけで他は配列としての表現を保持するべきである。
+
+    * 「"$*" だけをくっつける」というのを実装したのが既にある commit である。
+
+    一方で配列としての表現をそのままにした場合、配列の各要素に対して単語分割を
+    行うという操作を別の場所で実装する必要がある。先ず配列自体にそれが quoted
+    かそうでないかを保持させる事にする。その次に、配列を使っている箇所で単語分
+    割を行う様に修正する必要がある。単語分割を行っている箇所は、GetJoinChar を
+    呼び出している所を参照すれば良いのではないか? 或いは splitter の別の関数を
+    呼び出している箇所?
+
+    _MakeWordFrames で更に別の frames という変数に中身を移し替えている。この時
+    点でちゃんと quoted の情報は伝播している様に見える。うーん。do_split が正し
+    く設定されていないから、分割されない様に謎の quote が追加で挿入されていると
+    いう状況の様に見える。
+
+  26,27,34,38,39,41,43 が今失敗している。
+
+2025-01-27 より前
+
+> PR(c)
+>
+> ```console
+> $ bash -c 'a=(1 2 3); echo ${a[0]@a}'
+> a
+> $ bash -c 'a=(1 2 3); echo ${a@a}'
+> a
+> $ bin/osh -c 'a=(1 2 3); echo ${a[0]@a}'
+>
+> $ bin/osh -c 'a=(1 2 3); echo ${a@a}'
+> a
+> ```
+>
+> ----
+> PR(b)
+>
+> This corresponds to "PR(b)" explained in #2201.
+>
+> * In Bash, for the same reason as described in #2208, `${a[@]@a}` generates `a a ... a` and `A A ... A` for indexed and
+>   associative arrays, respectively.
+>
+> * In osh, for the same reason as described in #2208, `${a[@]@a}` generates single words `a` and `A` for indexed and
+>   associative arrays, respectively, because osh returns the type of the entire array.
+>
+> This PR makes the osh behavior consistent with Bash.
+
+2024-11-23 SparseArray project
+
+* done: assign_osh.py: _PrintVariables これは何?
+
+* done: declare -p sp が空の文字列を返す
+
+2024-11-23 より前
+
+* declare 対応
+
+  osh$ a=123
+  osh$ declare -p a
+  declare -- a='123'
+
+  osh$ declare -n b=hello
+  osh$ hello=123
+  osh$ declare -p b hello
+  declare -n b='hello'
+  declare -- hello='123'
+
+  osh$ declare -r a
+  osh$ declare -p a
+  declare -r a='123'
+
+  osh$ export hello=123
+  osh$ declare -p hello
+  declare -x hello='123'
+
+  osh$ declare -a arr
+  osh$ declare -p arr
+  declare -a arr
+  osh$ declare -p +a arr
+    declare -p +a arr
+               ^
+  [ interactive ]:13: 'declare' doesn't accept option +a
+  osh$ declare -p -a arr
+  declare -a arr
+  osh$ declare -p -a arr hello
+  declare -a arr
+  declare -- hello='123'
+
+  * bash: declare -pg
+    実は bash では -p は -g は見ていない様だ。
+    % bash 'local -g' は何も出力しないが、
+    % % 今回の 'local -g' は -g を無視して出力を行う。
+    % →問答無用で何も出力せずに終わる事にした。
+
+    * でも実はトップレベルにいる時にはOKなのではないか?
+  * bash: declare +a で配列以外を出力する? (未確認)
+  * bash: declare +A で連想配列以外を出力する? (未確認)
+    →実は bash には属性でフィルタリングする機能は全くなかった。
+    -+nrxaA の何れでもフィルタリングは起こらない。
+
+  * test: nameref var に対して値が出力されるのか、
+    或いは ref が出力されるのかについては注意が必要。
+  * test: local -g で出力する物 (関数スコープ or グローバルスコープ)
+
+  * bash `declare -p` は変数を出力する。
+    `declare` は変数と関数を出力する。
+
+  * 無引数で呼び出した時は -p を引数に指定した時と同じ振る舞い?
+    declare -p
+    local -p
+    typeset -p
+    readonly -p
+    export -p
+    →bash: readonly -p, export -p は動かない
+      local -p は振る舞いが微妙に異なる。
+
+  * local は現在の関数スコープの関数のみ
+    (グローバルで呼び出した時はエラー)
+  * readonly/export はそれぞれその属性を持つ変数のみ
 
 2020-04-23
 
