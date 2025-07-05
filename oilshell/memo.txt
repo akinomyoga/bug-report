@@ -3,6 +3,104 @@
   ToDo
 ------------------------------------------------------------------------------
 
+2025-07-04
+
+* 古い split のコードは全部削除したい。しかし、 read で allow_escape=True とし
+  て使われている。read の時の単語分割の規則はどうなっているのだったか?
+
+  うーん。read の時には指定された引数よりも多い数の単語が指定されると全部最後の
+  変数に含まれるのだった。そもそも単語分割の規則がぜんぜん違う様な気がする。取
+  り敢えず今のような別実装という事で良いのではないか? わざわざ実装し直す必要は
+  あるだろうか?
+
+  どうも read の処理の場合には \ + ? の組み合わせは取り敢えずそのままにして分割
+  をして、その後で解釈をしている様だ。従って、 IfsSplitterState の実装的には単
+  に単純な allow_escape に対応すれば良い。allow_escape は on/off できるようになっ
+  ている必要がある。
+
+  一方で、read の為に max_results にも対応する必要がある。max_results の時は中
+  間の空白は保持するけれども、末尾の空白は無視する様になっている様だ。という事
+  は max_results に達したら愚直に全部 Black として扱えば良いという訳でもない。
+
+  少し試してみる限り read も基本的な振る舞いは同じの気がする。但し、Backslash
+  については特別の処理が必要である? というか実は read の \ は単に次の文字をエス
+  ケープするだけで \n だとかの処理は行わないと思って良い? うーん。どうやらその
+  様だ。
+
+  そもそも read も振る舞いが変だ…。ここでの疑問は実装を統合するかしないかとい
+  うこと。取り敢えず統合する方向で考えることにする。
+
+
+  * shSplit の振る舞い
+
+    先ずは SplitForWordEval を何とかしたいがそもそも SplitForWordEval は実装と
+    して正しいのだろうか。SplitForWordEval は先ず ysh 関数 shSplit 及び compgen
+    で使われている。
+
+    compgen の振る舞いは寧ろ eval 的なものであって osh の実装は全く違う。どうせ
+    compgen については改めて実装する事になる気がするから最終的には
+    SplitForWordEval は関係ないと思って良い。なので純粋に shSplit の振る舞いを
+    実装するつもりで良いのではないか?
+
+    一方で、shSplit は現状の振る舞いを保持する必要があるのかもよく分からない。
+    うーん。例えば ""$A"" に対して shSplit は何を返すべきなのだろうか?
+
+    確認を取る事にしよう…と思ったが、純粋に read と同じ振る舞いで良い気がする。
+
+    > - word splitting: I implemented a new splitter for the `IFS='\'`problem
+    >   in the word splitting in my local branch, and the code is much simpler
+    >   than before, and everything seems to work well.
+    >
+    > However, there are 3 more places where the old splitter is used. I'm
+    > currently considering how to unify or separate the codes for those four
+    > cases. To determine it, I want to know what would be the preferred
+    > behaviors for the other 3 cases:
+    >
+    > - read: I think it is just fine to replicate Bash's behavior.
+    >
+    > - compgen -W: The current behavior is completely different from Bash's
+    >   behavior. For example, osh produces two double-quotes `'""'` for
+    >   `compgen -W '""'`, while Bash produces an empty string `''`. I think
+    >   this should also be re-implemented to match Bash.
+    >
+    > - shSplit(s): The problem is this. There is no corresponding feature in
+    >   Bash, so I'm not sure how `shSplit` should behave. Word splitting in
+    >   Bash involves many factors, including where and how the substring of
+    >   the input is generated. However, `shSplit` receives a scalar
+    >   string. Currently, `shSplit(s)` tries to process backslash escapes in
+    >   the input string, but affected by the `IFS='\'`problem.
+
+    read -a arr と同様の振る舞いにするということは IFS は環境にある物を使い、ま
+    た、単語数は unlimited で、更に backslash sequence は処理するという事。取り
+    敢えず実装は統合することにする。
+
+* IFS を無限にキャッシュするのはメモリリークになるのではないか。そもそもキャッ
+  シュすると言っても単に ifs_other, ifs_whitespace が異なるだけなのではないか。
+  或いは variable Cell に一緒に記録するなどが本当は良い気がする。
+
+  また空文字列の場合には何もせずにスキップするという短絡評価が合っても良い気が
+  する。
+
+* そもそも osh では IFS に関係なく extglob が動いていない。何故? それを先に修
+  正するべきでは?
+
+  $ bash -c 'shopt -s extglob; v="@(*A*.txt)"; echo $v'
+  INSTALL-old.txt INSTALL.txt README-native.txt
+  $ bin/osh -c 'shopt -s extglob; v="@(*A*.txt)"; echo $v'
+  @(*A*.txt)
+
+  うーん。extglob は一番外側にある時にだけ有効になるという事。また extglob の
+  中にある場合には有効になる。つまり @($v) だと動く。$v@() は動かない。
+
+  $ bash -O extglob -c 'v="@(*A*.txt)"; echo $v@()'
+  $ bin/osh -O extglob -c 'v="@(*A*.txt)"; echo $v@()'
+  @(*A*.txt)@()
+
+* declare _ does not print anything
+
+  * 実は osh set は _ を出力しない。と思ったがそもそも declare ですら _ は出力
+    できないのだった。これは問題である。
+
 2025-03-03
 
 * assign_op を使う様に変更
@@ -178,6 +276,501 @@
   Done
 ------------------------------------------------------------------------------
 
+2025-07-05
+
+* 現在の実装だと read -n 4 で末尾に \ がある時に 4 の倍数だけ読み取ってしまうの
+  ではないか?
+
+  これは修正を提出した。
+
+* IFS issue
+
+  これは先に split して処理するべきである。
+
+  うーん。隣の要素との接続の仕方などを考えると思ったよりも複雑になる気がする。
+  単にそれぞれの部分で単語分割してくっつければ良いという訳では無い。
+
+  ...$A...
+
+  となっていた時に prefix に来る物として何があるだろうか。
+
+  * 何も無い時 ($A が先頭の時): $A の先頭の空白は除去する。$A の先頭にある x は
+    空単語を導入する。それ以外だったら次に ifs が来るまで読み取って、単語をその
+    都度導入する。ちょうど単語が終わっていた場合と有限の文字列を読み取っている
+    途中で終わった場合は区別する必要がある。
+
+  * '...' や xxx など word split 対象ではない時: 上の処理において "先頭の空白を
+    除去する" 操作だけスキップして同様の処理をするのが良い気がする。
+
+  * $v の展開で v が元から空だった場合: これはそもそも $v がなかったことにして状
+    態はそのままにして次に進むというので良い気がする。
+
+  * $v の展開で空白で終わっている場合: まだ / *(x|$)/ が続く可能性がある。
+
+  * $v の展開で x で終わっている場合: 単語が既に挿入されたと想定する。/ *(x|$)/
+    が続く可能性がある。そしたら新しい単語を挿入する。
+
+  * $v の展開で非ifsで切れている場合: 続きを処理する。
+
+  x+空白 | 空白+空白 | 空白+x は一繋がりの空白として認識される様だ。と思ったが
+  やっぱりそうでもない。例えば v="ax x x " は空文字列を2つ生成する。つまり、
+  x..x までは一繋がりの空白になるがそれ以上にはならないという事? と思って改めて
+  試してみたら "ax xb" が一繋がりの空白になるというのは勘違いだった。x が出た時
+  点で其処で空白が終了する様だ。要するに空白は " *x" の形式をしていると考えて良
+  い? " *(x|$)" で単語を生成すると考えれば良いのだろうか?
+
+  うーん。実は可也単純化できるのではないか? 要するに
+
+    /^(?: *)(?<word>c* *(?:x| |$))*$/
+
+  という具合になっている筈 quoted segment は c に対応する。
+
+  取り敢えず実装した。ad hoc のヘンテコなコードが全部なくなってすっきりした。
+
+* glob fix
+
+  * というか bash で問題になっていた v='a\*b.txt'; echo $v などの処理を osh は
+    正しく実行できているのだろうか。それについてもちゃんと処理できる様に設計し
+    なければならない → 全然駄目
+
+  * 先に glob の escape の interface について確定する事にする。glob の入力を
+    word splitting の仕様と混ぜたくはない。従って、純粋に glob だけで閉じた
+    quote の仕様にするのが良いという気がする。
+
+    ? そもそも何故 quote する時に何れにしても quote しているのか?
+
+      $ touch test.ifs.\*.txt
+      $ bash -c 'v="*\*.txt"; echo $v'
+      test.ifs.*.txt
+      $ bin/osh -c 'v="*\*.txt"; echo $v'
+      test.ifs.\.txt
+
+    うーん。そもそも glob の時点で振る舞いが異なる。IFS 以前の問題である。
+
+    取り敢えずこれは修正する事にする。これにより既存の何かが壊れる可能性がある?
+    その為にテストをチェックする。先ず修正前に失敗しているのは word-split
+    26,27,34,41,43,45,51 である。glob 28,29,31 も失敗している。glob-bash は OK.
+
+    今回の修正を適用すると以下だけ変化する。
+
+    * glob で新しく 24 が失敗する様になる。
+
+    これは何が起こっているのだろう。noglob の時に \z になって欲しいのだが…実は
+    osh がクラッシュする様になっている。何故? GlobUnescape で死んでいる。
+
+    うーん。noglob の時についてはそもそも glob escape が一切必要ないのではない
+    か。問題は glob が有効の時に quoted な \ と $v の中の \ をどう区別するのか
+    という話。LooksLikeGlob の場合にはそのまま glob として処理すれば問題ない。
+    一方で、そうでない場合には quoted な \ を escape したものについては revert
+    して、一方で $v の中の \ はそのままという具合にしなければならない。それをど
+    う実現するか。
+
+    要するに 
+                        | quoted '\' | \ inside $v      |
+      ------------------|------------|------------------|
+      LooksLikeGlob     | literal \  | escape next char |
+      not LooksLikeGlob | literal \  | literal \        |
+
+    という具合の処理になる。うーん。どうやってこれの判断をするべきだろうか。
+
+    そもそも $v$u と跨って \ が次のものを修飾する時に何が起こっているのか?
+
+      $ bash -c 'v="\\" u="*.txt"; echo *$v$u'
+      test.ifs.*.txt
+      $ bash -c 'v="\\" u="*.txt"; echo *$v*.txt'
+      test.ifs.*.txt
+
+    うーん。これは結構難しい動作である。少なくとも現時点で osh は上とは異なる結
+    果を出している。
+
+    素朴に考えて処理的には word splitting を実行した時点で *\*.txt という形になっ
+    ていて、単にそれを glob は処理していると見るべきである。もし glob っぽけれ
+    ば glob だと思って処理するし、そうでなければそのままの文字列を使う。然し、
+    bash は別の escape の仕方をしている? うーん。
+
+    例えば現在の様に LooksLikeGlob の時点で glob に渡す文字列になっているという
+    事を要求すると、quoted '\' は '\\' になっていて、$v の中の \ は単一の '\'
+    になっている必要がある。一方で、LooksLikeGlob でない場合や noglob の時には
+
+    ? そもそも現在の実装だと set -f でも glob 展開が起こってしまうのではないか?
+      何故問題になっていないのか? 例えば set -f の時、a*b は a*b のままである。
+      その次に LooksLikeGlob の判定は yes になる。うーん。どうやら
+      LooksLikeGlob の処理の後で Expand の時点で noglob を参照して Unescape が
+      発生する様である?
+
+    * bash 的には match するファイル名が存在しなかった時には \ inside $v はどの
+      様に処理するのだろうか? 消す? それとも保持する? 保持することになっている
+      気がする。
+
+      という事を考えると現在の実装のように globber の時点で一致するファイル名が
+      存在しない時に展開前の値を返すという仕様には無理がある様に思われる。何故
+      なら glob engine に入力する文字列からは、元の文字列を復元することは不可能
+      だからである。何処かで decay が起こっている。
+
+  * done: \' や \a などが $v に含まれる時もテストに入れるべき。
+
+* IFS & glob 実装方針
+
+  これは単に実装の途中で放置されているだけでは? Escape で backslash escape を実
+  装しているのに、単に python の split を呼んでいる? と思ったら勘違いだった。
+  IfsSplitter.Split で何やら複雑な事をしている。
+
+  * そもそも何故 IFS で split をするのにこんなに複雑なことをする必要があったの
+    か? IFS のルールはそんなに複雑だっただろうか? 何故 escape をする必要がある?
+    と思ったが、理由はあれだ。
+
+    a=('a,b',$v,'c,d')
+
+    という形になっていた時に 'a,b' の部分が勝手に split されない様にするのが目
+    的である。と思ったが本当に osh はその様に実装しているのだろうか?
+
+    うーん。そもそも以下が全く動いていない。
+
+      bin/osh -c 'IFS="\\"; v="a\b\c"; a=("$v"$v); declare -p v a'
+
+      この場合には quoted 部分も unquoted 部分も無駄に escape されている。
+
+    以下は正しく動作している。
+
+      bin/osh -c 'IFS=,; v="a,b,c"; a=("$v"$v); declare -p v a'
+
+      この場合には quoted 部分だけ escape されていて、unquoted 部分は無駄には
+      escape されていない。
+
+    もう一つは set -f にしても glob が有効になっているという事である。何故? 不
+    思議だ。と思って改めて見てみたら glob が無効の場合には単純な backslash
+    escape を実施している。
+
+  ? 先ずそもそも何故 quoted も unquoted も同じ様に \\\\ に変化しているのかとい
+    う事。うーん。これは glob が有効になっていても無効になっていても escape さ
+    れているのと同じ理由である。つまり、裸の \ と quote に要する \ の区別ができ
+    ないから裸の \ も \\ に quote しているという話である。これではうまく行かな
+    いのは道理である。
+
+    より良い representation を考える必要がある。先ず glob にしろ
+
+  * そもそも何故 piece.quote と piece.do_split が独立に管理されているのだろうか。
+    常に piece.do_split == !piece.quote ではないという事だろうか。だとするとど
+    ういう状況でこれが生じるのだろうか? 例えば quote されているのに do_split に
+    なる可能性はないと考えて良さそうだ。次に、裸なのに do_split ではないという
+    のはどういう状況だろうか。勿論 IFS= だったり、もしくは単語分割が発生しない
+    文脈というのも存在する。しかし、それは実行文脈の属性であって単語を構成する
+    piece が持つべき属性ではないような気がする。
+
+    実際に Piece( で構築している場所を探すと以下のようになっている。構築後に直
+    接 '\.(quoted|dp_split) =' で代入している箇所は見当たらない。
+
+    * False, False にしているケース。裸(glob対象)だけど分割対象ではないという状
+      況?
+
+      ./osh/word_eval.py:1784:        part_vals.append(Piece(op_str, False, False))
+      ./osh/word_eval.py:1788:                part_vals.append(Piece('|', False, False))  # separator
+      ./osh/word_eval.py:1791:        part_vals.append(Piece(')', False, False))  # closing )
+
+      うーん。これは _EvalExtGlob という関数の中である。どうもこれがある時は
+      extglob の対象ではあるけれども内部で分割は起こらないという事を要求してい
+      る様だ。しかし、実際に bin/osh の振る舞いを見てみると結局分割されている様
+      な気がする? と思ったがそもそも unquoted な展開に於いて extglob が認識され
+      ていない。何故?
+
+      改めて実装を見て気付いた。これは単に @(|) などの delimiter を quote して
+      いるだけである。@(|) は glob 処理の対象であり (つまり勝手に quote しない)
+      かつ、split の対象ではない。というか、そもそも裸で出てくる * も glob の対
+      象でありかつ split の対象ではない。つまり、
+
+      |           | glob  | split |
+      |-----------|-------|-------|
+      | $v        | true  | true  |
+      | a*b.txt   | true  | false |
+      | 'a*b.txt' | false | false |
+
+      という状況になっている。なので、単純に do_split == !quoted とは判定できな
+      い。do_split は !quote かつ何らかの展開で出てきた文字列という事を意識しな
+      いといけないのである。
+
+      とりあえず現在の二重に quote している実装で考える事にする。
+
+      ./osh/word_eval.py:1859:                v = Piece(part.s, False, False)
+
+      これはブレース展開の数字部分である。quote されていないという事になってい
+      る。という事はグロブ展開の対象になる? しかし、明らかに glob operator では
+      ないという事を考えると、実は別にどちらでも良いというケース。というかそも
+      そもブレース展開の方が先に起こるはずだから、Piece に False を設定するとか
+      しないとかは変なのでは?
+
+      ./osh/word_eval.py:1928:                part_vals.append(Piece('(', False, False))  # not quoted
+      ./osh/word_eval.py:1931:                part_vals.append(Piece(')', False, False))
+
+      これは恐らく [[ =~ ]] の右辺に出てくる () の事だろうか? これはそもそもパ
+      ス名展開の対象でも単語分割の対象でもないから関係ないはず。
+
+      ./ysh/expr_eval.py:415:                return Piece(s, False, False)
+
+      これは後でチェックする。
+
+    * 処理によって変わるケース
+
+      ./osh/word_eval.py:1852:                v = Piece(lexer.LazyStr(part), quoted, is_subst)
+
+      これは a*b 等の処理に関係する部分である。ただしバグがあるのでそれに対する
+      修正は先に提出する。
+
+    結局上の表の様に glob の対象ではあるけれども split の対象ではないという場合
+    が存在するので、それを区別する必要はある。三種類を区別して保持するかもしく
+    は最初に split を実行してから二重にエスケープするかの三種類の実装が考えられ
+    る。
+
+    a 現在の実装の様に二重にエスケープして処理する。
+
+    b 二種類のエスケープを区別して処理する。
+
+    b そもそも glob を escape してから split を適用する必要性はあったのだろうか。
+      先に split を実行してから glob を適用するのでは駄目なのか?
+
+    しかしこれは現在の IFS='\' の時の問題とは独立な実装の詳細の気がする。
+    IFS='\' で駄目になるのは unquoted \ と quoted \ の区別が付かないという事に
+    ある。
+
+    と思ったが glob backslash escape をした状態で split を実行する為には glob
+    backslash escape を解決した文字を想定しながら split を実行する必要がある。
+    という事を考えるとやはり先に split を実行してから glob を実行するべきではな
+    いのか? 但し、split を実行した後も quote/unquote の状態を保持する必要がある。
+
+    c1 split の後も glob 対象であるかどうかの情報が残る様に何とか処理する。
+
+    c2 文字列表現を諦めて Piece の集合として split の結果を返す様にする?
+
+  * 取り敢えず現在の方針を保持する方向で考える。というか word splitting におい
+    てわざわざ backslash escape する理由は何だったか? quoted part を split しな
+    い様にするということ。
+
+    改めて考える。quoted \ と unquoted \ と escaping \ を区別する必要がある。
+
+    a 例えば、quoted \ を \\ にする。unquoted \ を \1 にする。そして escaping \
+      は \c 等にする。然し、これだと IFS=1 の時に batting する。任意の文字列が
+      IFS に入っている可能性を考えると、\? は全て quoted として取り扱うしかなく
+      なる。
+
+    b そうすると別の文字も escape に使う事にするか。
+
+      例えば quoted は全て \? で表す。そして unquoted \ は \/ にする。/ は //
+      にする。という具合にする。
+
+    c 或いは三文字で初めて escape sequence になるという事にするか。
+
+      もしくは
+
+    d もしくは '...' で囲む事にする。これが一番無難で分かりやすい実装の気がする。
+
+      或いはもっと複雑に \a ... \\ ... \z で囲むという事も考えても良いが余り直
+      感的でないので、メンテナンス性に欠ける。それよりは素直に '...' を使うほう
+      が自然の気がする。
+
+      さてこの時の問題は glob 対象かどうかというのをどの様に判定するのかという
+      事である。quote されていた物は再び quote するというので問題ない。$v の形
+      の物は裸のままで良い。a*b 的なものも処理後は unquote の状態で良い。問題は
+      splitting に渡す時に a*b の部分をどう表現するのかという事である。もしくは
+      $v と a*b をどのように区別するか。
+
+      という事を考えるとやはり splitting に渡す段階で三種類が分かる様に渡さなけ
+      ればならないのではないか。例えば \q .. \\ .. \u .. \\ .. \x .. \\ .. で三
+      種類のモードの区別がつく様にする。
+
+
+      glob の escape も glob の escape にする必要があるのだろうか? glob の方の
+      処理にまで影響を与えたくないと思うと glob で渡す段階で \\ などの様に表現
+      を変える必要があるのではないだろうか。しかし、それは現実的だろうか…。 \q
+      や \u の中身は初めからそのまま glob に渡す前提で考えて良い。何故なら単語
+      分割はこの時点では発生しないので。
+
+      \x の中身については単に単語分割すれば良いという話でもない気がする。先ず、
+      word splitting の処理をするためには先に glob のために escape していると面
+      倒な事になる。一方で、word splitting の処理をしながら必要な部分を glob
+      escape するという形式だと word splitting 自体に glob の仕様が入り込んでよ
+      くない。或いは word splitting を実行した後に改めて glob 関連の escape を
+      実行する? という事を思ったが、よく考えたら $v の結果は常に glob の対象な
+      のでそもそも glob の為に escape する必要性もないのではないか?
+
+      うーん。しかし現状で glob の対象でない場合は backslash escape を実行する
+      事になっていて、glob の対象の時にも何かの処理をすることになっている。先に
+      そちらを片付けた方が良いのかもしれない。
+
+  * glob として有効かどうかの判断はどの時点で行われるのか。
+
+    bash -c 'IFS="\\"; v="a\*.txt"; a=($v); declare -p a'
+
+    これは *.txt がパス名展開される。つまり、glob escape は別にこの時点で発生す
+    る訳ではない。
+
+  a 或いはそもそも do_split の処理は $v の時点で実行するべきなのではないか? で
+    も ""$A"" に対して自然な結果を与える為にはやはり現在の実装の方針の方が都合
+    が良い気がする。
+
+  素直に実装するとするとどうなるか? do_split の時点で split を実行してそれで配
+  列に追記していくのが自然である。そして書き込みの時点で LooksLikeGlob を判定す
+  る。
+
+  ? 問題は LooksLikeGlob やら do_split を細かく呼び出した時にパフォーマンスの問
+    題が出ないのかということ。そもそも現在の実装で一発で処理しようとしているの
+    は何なのか?
+
+  ? piece ごとに LooksLikeGlob を判定することを考えていたがよく考えてみるとそれ
+    は駄目である。上でみた様に piece を跨いで escaping が発生するみたいなので。
+
+  取り敢えずこの方針で考えることにして、glob の段階では split のことは考えない
+  方向で考える。すると glob 的には '...' 的に quote されている部分と $v 由来の
+  \ という二種類の物が存在することになる。うーん。例えば $v 由来の \ を裸で放置
+  したらどうなるか? これについては v='\\' の時の $v がそのまま '\\' として混入
+  して、glob 展開が起こる場合には良いが、glob 展開が起こらない (LooksLikeGlob
+  に当て嵌らない) 場合に \ を生成するべきか (quoted \ の場合) 或いは \\ (v='\\'
+  の場合) を生成するべきか分からない。
+
+  glob への入力の段階で両者を区別できるような表現をするか、或いは glob を呼び出
+  す側で glob に適した形に整形してから渡すか。後者の方が良いと思われる。
+
+  改めてどのような区別が必要か整理する。
+
+  * '...' や \\ の中の backslash に関しては、glob に渡す時は \\ になるし、展開
+    が行われなかった時の結果は \ になる。
+
+  * a\*b 等の明示的な backslash に関しては、glob に渡す時は \* などの形で生で渡
+    され、展開が行われなかった時の結果は消える。ということ。或いは '*' と等価と
+    考えれば良い。これは前者と同様に取り扱うべき。というかそもそも quote として
+    処理されているので、実行上も前項と区別されない形で処理が走る。なので明示的
+    に区別しなくても良い。
+
+  * $v の中の backslash に関しては、glob に渡す時にはそのままの形で渡す。展開が
+    行われない場合には、やはりそのままの形で返す。
+
+    $v に含まれるもので他に何か特別な処置が必要なものはあるだろうか。つまり、直
+    接 a\*b だった時と $v だった時で振る舞いが変わるような文字は \ 以外にあるの
+    かという事。*?[ 及び extglob @() etc については、glob 展開する時にはそのま
+    ま渡せば良いし、或いは展開が行われない場合もそのまま渡せば良い。
+
+  何れにしても glob に渡すにしろ展開しないことにしろそれぞれ処理は必要である。
+  どちらか一方を記録して他方に変換するということはできない。だとすれば表現とし
+  てはどちらでも良い気がする。$v の中の backslash だけ扱いを特別にすれば良い?
+
+  a 一つの方法は $v の中の \ に特別な表現を与えるということ。
+
+  b 別の方法は $v の中はそのまま保持することにして、quoted の方に特別な表現を与
+    えること。
+
+    しかし $v の方に任意の文字列が含まれると考えると quoted の方でどんなに頑張っ
+    てもどうにもならない。つまり、$v の中身を何の加工もなくそのまま含めるという
+    のは不可能である。quote の方法に依存して最低限の加工が必要である。結局、
+    quote の表現として \ を選ぶのであれば $v の中の \ は特別な処理が必要という
+    ことで、それは a になる。或いは quote の表現として ' を選ぶのであれば $v の
+    中の ' は \' 等に変更する必要がある。と思ったが、実はそれで良い? 否、それだ
+    と \' が現れた時に quote された ' なのか $v の中の ' なのか区別できない?
+    glob 展開する時は前者は ' になるべきだし、後者は ' になるべきである。
+
+    一方で下手に $v の中の ' を \' にすると今度は $v の中の \' とどう区別をつけ
+    うのかという話になる。そうすると結局 $v の中の \ も一緒に quote する事にな
+    り却って状況が複雑になっている気がする。
+
+  * そもそも glob 展開や LooksLikeGlob や word splitting を個別に実行してパフォー
+    マンスに影響はないのか? と思ったが、そもそも glob 展開は個別に呼び出してい
+    る。なので、影響があるとすれば word splitting だけである。うーん。見た感じ
+    別に何か余分に初期化しているわけでもないし、気になるとすれば spans = [] の
+    初期化が unquoted fragment の数だけ発生するという事。
+
+    →一発で word splitting するのではなく unquoted 部分について個別に split を
+    実行するということで OK。
+
+2025-07-04
+
+* IFS splitting bug
+
+  ./osh/word_eval.py:1573:                        part_vals.append(Piece(sep.join(names), quoted, True))
+
+  これは何だろう? VOp3_Star が何を意味しているかによるが、quoted でも
+  do_split というのは何だかかなり怪しいのでは? VOp3_Star は一箇所でしか使わ
+  れていない。
+
+  うーん。これはバグである。
+
+    $ bin/osh -c 'axb=1; IFS=x; echo "${!a*}"x'
+    a bx
+
+  単に True, False を指定するべきである。
+
+  ./osh/word_eval.py:1604:                part_vals.append(Piece(str(n), quoted, False))
+
+  うーん。これもバグだなぁ
+
+    $ bash -c 'v=hello; IFS=5; echo ${#v}'
+
+    $ bin/osh -c 'v=hello; IFS=5; echo ${#v}'
+    5
+
+  ./osh/word_eval.py:1852:                v = Piece(lexer.LazyStr(part), quoted, is_subst)
+
+  これは ${foo:-echo} の時に echo は分割の対象だという事になっている。然し…、
+  それは裸の時のみなのでは…。これだと quoted でも分割されてしまうのでは。
+
+    $ bash -c 'IFS=x v=; echo "${v:-AxBxC}"x'
+    AxBxCx
+    $ bin/osh -c 'IFS=x v=; echo "${v:-AxBxC}"x'
+    A B Cx
+
+  やはりこれもバグである。然し、これはどの様に修正するべきだろうか? quoted
+  というのはそもそも何だろうか? というか、普通に ABC と書いている時にはどう
+  なるのか? うーん。裸で ABC と書くとそもそもこのブランチに入らない。
+
+  つまり、
+                  | (quoted, is_subst)  | do_split
+    --------------|---------------------|----------
+    ${v:-ABC}     | (False, True)       | True
+    "${v:-ABC}"   | (True, True)        | False (現在の実装はバグ)
+    ${v:-"ABC"}   | (True, False)       | False
+    "${v:-"ABC"}" | (True, False)       | False
+    "ABC"         | (True, False)       | False
+    ABC,          | (False, False)      | False
+    A*C,          | (False, False)      | False
+
+  つまり、3パターンに分岐しているのはこの場所である。なので、do_split は
+  not quoted でなくても良い。
+
+* PrintVariables refactoring
+
+  * done: attrs はフルの _Attributes を受け取っているが attrs.attrs しか受け取っ
+    ていない。従って、単純に attrs.attrs を渡す様にするのが自然である。
+
+    →その様に書き換えた。
+
+  * done: エラーメッセージを出力するために cmd_val を使っている。なので単純に
+    cmd_val.pairs に置き換えられる訳ではないのではないか。エラーメッセージを出
+    力するところで使っている cmd_val.loc だとか cmd_val.args は代替できるだろう
+    か? 例えば cmd_val.loc は引数から指定しても良い気がする。一方で、args につ
+    いては builtin の id から逆に決定することができるのではないかという気がする。
+
+    しかし、実際のところ現在の仕様の範囲内では呼び出し元として builtin を想定す
+    る仕様になっている (そもそも最後の引数に builtin の id を要求している)。と
+    いう事を考えると別に cmd_val を直接渡しても良い気がする。
+
+  ? ok: set で出力する変数の範囲 (scope) は正しいか? 変わっていないか? 変わって
+    いるとしたらそれは bash に合ったものになっているだろうか。
+
+    →動作確認してみたら出力している変数の集合は全く変わっていなかったので、こ
+    れについて説明する必要はない。また、bash の出力結果との比較についても単に対
+    応していない変数がちらほらあるだけで別に余分な特殊変数まで出力されていると
+    かそういう事はないようだ。
+
+  * 実は osh set は配列を表示していなかったのではないか? 分かった。これが元々こ
+    の set branch を作った理由である。
+
+    テストを追加する必要がある。
+
+  * 最後の commit は具体的には何だろうか? 何か変な事が起こるケースが存在する?
+    これは関係する変更だろうか? それとも独立な変更?
+
+    うーん。要するに…。これは Andy との zulip の会話で確認を取った。何も出力し
+    ないようにするという話。
+
+  上記は提出してマージされた。
+
+
 2025-03-03
 
 改めて過去の todo 等を整理する
@@ -202,7 +795,7 @@
     a+=(1 2 3)
     ^~~
   [ eval arg at line 1 of [ -c flag ] ]:1
-  
+
     a=(1 2 3); readonly a; eval "a+=(1 2 3)"; declare -p a
                            ^~~~
   [ -c flag ]:1: fatal: Can't assign to readonly value 'a'
@@ -819,7 +1412,7 @@
   | $ osh -c 'f1() { echo ${BASH_SOURCE::1}; }; f1'
   | -c flag
   | $ osh -c 'f1() { echo ${BASH_SOURCE:1}; }; f1'
-  | 
+  |
 
   それから local -A BASH_SOURCE=(["foo"]=bar) としてから
   $BASH_SOURCE とした場合にも何か変な事が起こるのではないか?
